@@ -82,8 +82,8 @@ Judgment isn't bolted on. It provides the loop's experience and reward.
 - **Failures become diagnosable.** Was it a bad plan (slow thinking), bad execution (fast thinking), or missing information (perception)?
 
 ## Open questions
-- **The primitive set.** Primitives that are too low-level (raw movement) are hard to learn from. Too high-level (`collectBlocks`) builds knowledge in. Where's the line?
+- ~~**The primitive set.**~~ Answered in [[layers]]: one right answer → code behaviors; judgment → Jev picks behaviors per channel; plans → System 2.
 - **Outcome signals for open-ended objectives.** What does "a good house" mean? How far can judges go?
-- **What form distillation takes.** Fine-tuned weights, retrieved examples in the prompt, or saved skill code? Probably all three, at different speeds.
+- ~~**What form distillation takes.**~~ Answered in [[learning]]: context (guidance and examples) and code (behaviors). No weight training.
 - **Perception.** Is data alone enough, or do images help for some judgments, like how a build looks?
 - **How much of the hierarchy is fixed.** Could the structure itself be learned?
