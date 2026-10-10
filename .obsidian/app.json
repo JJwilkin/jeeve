@@ -1,0 +1,9 @@
+{
+  "showUnsupportedFiles": true,
+  "userIgnoreFilters": [
+    "node_modules/",
+    "dist/",
+    "build/",
+    "logs/"
+  ]
+}
