@@ -16,8 +16,9 @@ General methods that scale with compute end up beating methods that encode human
 Build in the *meta-methods that discover* knowledge, not the knowledge itself. Hand-built knowledge helps early, then plateaus, and can block scaling.
 
 ## Implications for Jeeve
-- **Reflexes** (scripted Mineflayer code) are hand-built knowledge. That's fine as scaffolding for P0–P3. Treat them as a baseline to beat, not a foundation to keep growing.
-- **System 1** follows the bitter lesson when it's learned. The plan to fine-tune a local model on slowed-down (`/tick rate`) reasoning-model traces is the learning path. Keep the `decide()` interface so learned backends can replace hand-tuned ones.
-- **System 2** goal-tree expansion is a kind of search over plans. More compute (deeper expansion, retrying alternatives on failure) should help. Avoid hard-coding scenario-specific plans.
-- **Skills** (Voyager-style) are learned. Prefer an agent-written skill library over a hand-curated one.
-- **Smell test**: if a fix adds a Minecraft-specific heuristic, ask whether more search or more data would fix it instead.
+This is the organizing question of [[overview]]: for each part of the agent, do we build in the knowledge, or the method for discovering it?
+- **Hand-written reflexes and heuristics** are hand-built knowledge. They're fine as scaffolding, but treat them as a baseline to beat, not a foundation to keep growing.
+- **Fast reactions (System 1)** follow the bitter lesson when they're learned from experience, not hand-tuned.
+- **Breaking goals down** is a kind of search over plans. More compute should help. Avoid hard-coding plans for specific objectives.
+- **Skills** should be written and kept by the agent, not curated by hand.
+- **Smell test:** if a fix adds a Minecraft-specific heuristic, ask whether more search or more data would fix it instead.
