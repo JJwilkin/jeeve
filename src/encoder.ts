@@ -3,6 +3,7 @@
 import type { Bot } from 'mineflayer'
 import type { Entity } from 'prismarine-entity'
 import { Vec3 } from 'vec3'
+import { notableBlocks } from './world.ts'
 
 export type Handles = { byId: Map<number, string>, byHandle: Map<string, number>, next: number }
 export const newHandles = (): Handles => ({ byId: new Map(), byHandle: new Map(), next: 0 })
@@ -54,36 +55,19 @@ export const inventoryCounts = (bot: Bot) => {
 }
 
 const countBucket = (n: number) => n === 1 ? 'one' : n <= 5 ? 'a few' : 'many'
-const NOTHING = new Set(['air', 'cave_air', 'void_air'])
+// Exact where it's small, a bucket where it isn't: Jev is weak with numbers (brain/research/jev-measurements.md).
+const blockCount = (n: number) => n === 1 ? 'one' : n <= 9 ? `${countBucket(n)} (${n})` : 'many'
+const vertical = (dy: number) => dy > 1 ? `, ~${dy} up` : dy < -1 ? `, ~${-dy} down` : ''
 
-// Notable blocks: types that are rare in the cube around the bot (≤ rare_max), so terrain drops out
-// without a hand-written list. Each with a count bucket and where the nearest one is.
-function notableBlocks (bot: Bot, radius: number, rareMax: number, cap: number) {
-  const me = bot.entity.position.floored()
-  const seen = new Map<string, { n: number, nearest: Vec3, d: number }>()
-  const p = new Vec3(0, 0, 0)
-  for (let dx = -radius; dx <= radius; dx++) {
-    for (let dy = -radius; dy <= radius; dy++) {
-      for (let dz = -radius; dz <= radius; dz++) {
-        const b = bot.blockAt(p.set(me.x + dx, me.y + dy, me.z + dz))
-        if (!b || NOTHING.has(b.name)) continue
-        const d = Math.abs(dx) + Math.abs(dy) + Math.abs(dz)
-        const s = seen.get(b.name)
-        if (!s) seen.set(b.name, { n: 1, nearest: b.position.clone(), d })
-        else { s.n++; if (d < s.d) { s.d = d; s.nearest = b.position.clone() } }
-      }
-    }
-  }
+// Notable blocks (src/world.ts) for Jev: exact small counts, and where the nearest one is, height included.
+function describeBlocks (bot: Bot, radius: number, rareMax: number, cap: number) {
   const pos = bot.entity.position
-  return [...seen.entries()]
-    .filter(([, s]) => s.n <= rareMax)
-    .sort((a, b) => a[1].d - b[1].d)
-    .slice(0, cap)
-    .map(([name, s]) => ({
-      name,
-      count: countBucket(s.n),
-      nearest: `${distanceBucket(s.nearest.offset(0.5, 0, 0.5).distanceTo(pos))}, ${direction(s.nearest.x + 0.5 - pos.x, s.nearest.z + 0.5 - pos.z, bot.entity.yaw)}`
-    }))
+  const feetY = Math.floor(pos.y)
+  return notableBlocks(bot, radius, rareMax).slice(0, cap).map(({ name, count, positions: [[x, y, z]] }) => ({
+    name,
+    count: blockCount(count),
+    nearest: `${distanceBucket(new Vec3(x + 0.5, y, z + 0.5).distanceTo(pos))}, ${direction(x + 0.5 - pos.x, z + 0.5 - pos.z, bot.entity.yaw)}${vertical(y - feetY)}`
+  }))
 }
 
 export function makeEgocentric (params: { entity_cap: number, radius: number, block_radius: number, block_cap: number, rare_max: number }) {
@@ -109,7 +93,7 @@ export function makeEgocentric (params: { entity_cap: number, radius: number, bl
         ...(held ? { held } : {})
       }
     })
-    const blocks = notableBlocks(bot, params.block_radius, params.rare_max, params.block_cap)
+    const blocks = describeBlocks(bot, params.block_radius, params.rare_max, params.block_cap)
     const speaker = ctx.directive && Object.values(bot.entities).find(e => e.username === ctx.directive!.from)
     return {
       state: {
@@ -135,7 +119,8 @@ export function makeEgocentric (params: { entity_cap: number, radius: number, bl
 
 // Compact raw snapshot logged with every decision, so a new encoder can be replayed on old states.
 // It is also the input to modules System 2 writes (src/modules.ts), so keep it plain JSON.
-// ponytail: no block cube yet; add a 16³ cube (logged only on change) once an encoder needs terrain.
+// Blocks: each notable type's nearest 8 positions (src/world.ts). A common type (more than 64 in the 17³ cube)
+// is absent, so a missing name doesn't mean none; ask world.scan for that.
 export function rawSnapshot (bot: Bot, radius = 32) {
   const me = bot.entity
   const r = (v: { x: number, y: number, z: number }) => [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(2)]
@@ -146,6 +131,7 @@ export function rawSnapshot (bot: Bot, radius = 32) {
       held: bot.heldItem?.name ?? null, below: bot.blockAt?.(me.position.offset(0, -1, 0))?.name ?? null
     },
     inventory: bot.inventory ? inventoryCounts(bot) : {},
+    blocks: Object.fromEntries(notableBlocks(bot).slice(0, 12).map(n => [n.name, n.positions.slice(0, 8)])),
     world: { time_of_day: bot.time?.timeOfDay ?? null, is_day: bot.time?.isDay ?? null, raining: bot.isRaining ?? null },
     entities: Object.values(bot.entities)
       .filter(e => e !== me && e.position.distanceTo(me.position) <= radius)

@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Vec3 } from 'vec3'
 import { coalescing, makeDecider } from './decide.ts'
-import { direction, distanceBucket, newHandles } from './encoder.ts'
+import { direction, distanceBucket, makeEgocentric, newHandles, rawSnapshot } from './encoder.ts'
+import { blockAt, notableBlocks, scan } from './world.ts'
 import { compile, glob, Goals } from './goals.ts'
 import { controlVector, unsafeAt } from './guards.ts'
 import { compileModule, ModuleRegistry } from './modules.ts'
@@ -226,6 +227,51 @@ async function decideWith (answers: Record<string, any>) {
   const loaded = second.load()
   assert.deepEqual([loaded.loaded, loaded.skipped.length, second.get('is_night')?.origin, second.get('is_night')?.run(snap({ world: { is_day: false } }))],
     [['is_night@1'], 1, origin, true]) // disabled modules stay off across runs
+}
+
+// World queries: scan groups matches into clusters with exact counts and heights; the summary and the raw
+// snapshot carry notable blocks with exact small counts, heights and positions.
+{
+  // A 5-log trunk at (3, 0..4, 0) with leaves from +3 to +5, and a lone log at (-6, 0, 0). Bot feet at (0, 0, 0).
+  const world = new Map<string, string>()
+  for (let y = 0; y < 5; y++) world.set(`3,${y},0`, 'oak_log')
+  for (let y = 3; y < 6; y++) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) world.set(`${3 + dx},${y},${dz}`, 'oak_leaves')
+  world.set('-6,0,0', 'oak_log')
+  for (let x = -8; x <= 8; x++) for (let z = -8; z <= 8; z++) world.set(`${x},-1,${z}`, 'grass_block')
+  const names = ['air', 'oak_log', 'oak_leaves', 'birch_log', 'grass_block']
+  const bot: any = {
+    username: 'W', entity: { position: new Vec3(0.5, 0, 0.5), yaw: 0 },
+    registry: { blocksArray: names.map((name, id) => ({ name, id })) },
+    blockAt: (p: Vec3) => ({ name: world.get(`${p.x},${p.y},${p.z}`) ?? 'air', position: p.clone() }),
+    findBlocks: ({ matching, maxDistance }: { matching: number[], maxDistance: number }) => [...world.entries()]
+      .filter(([, n]) => matching.includes(names.indexOf(n)))
+      .map(([k]) => new Vec3(...k.split(',').map(Number) as [number, number, number]))
+      .filter(p => p.distanceTo(new Vec3(0, 0, 0)) <= maxDistance),
+    canSeeBlock: (b: { position: Vec3 }) => b.position.x > 0
+  }
+  const logs = scan(bot, { match: '*_log', radius: 16 })
+  assert.deepEqual(logs.clusters.map(c => [c.count, c.nearest, c.y_rel, c.min, c.max]), [
+    [5, [3, 0, 0], [0, 4], [3, 0, 0], [3, 4, 0]],
+    [1, [-6, 0, 0], [0, 0], [-6, 0, 0], [-6, 0, 0]]
+  ])
+  assert.equal(logs.total, 6)
+  assert.deepEqual(scan(bot, { match: '*_log', radius: 16, los: true }).clusters.map(c => c.count), [5]) // line of sight hides one
+  const leaves = scan(bot, { match: 'oak_leaves' })
+  assert.deepEqual([leaves.total, leaves.clusters.length, leaves.clusters[0].y_rel], [12, 1, [3, 5]])
+  assert.equal(scan(bot, { match: 'diamond_ore' }).total, 0)
+  assert.equal(blockAt(bot, [3, 2, 0]), 'oak_log')
+
+  const notable = notableBlocks(bot, 8, 64)
+  assert.deepEqual(notable.map(n => [n.name, n.count]), [['oak_log', 6], ['oak_leaves', 12]]) // grass (289) is terrain
+  const raw = rawSnapshot({ ...bot, inventory: undefined, entities: {}, health: 20, food: 20 } as any)
+  assert.deepEqual(raw.blocks.oak_log.slice(0, 2), [[3, 0, 0], [3, 1, 0]])
+  const encoded = makeEgocentric({ entity_cap: 8, radius: 16, block_radius: 8, block_cap: 6, rare_max: 64 })(
+    { ...bot, entities: {}, health: 20, food: 20, heldItem: null, inventory: { items: () => [] } } as any,
+    { handles: newHandles(), directive: null, channels: {}, events: [] })
+  assert.deepEqual(encoded.state.blocks, [
+    { name: 'oak_log', count: 'many (6)', nearest: 'close, right' },
+    { name: 'oak_leaves', count: 'many', nearest: 'close, right, ~3 up' }
+  ])
 }
 
 console.log('selfcheck ok')
