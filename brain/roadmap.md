@@ -5,7 +5,7 @@ status: active
 ---
 # Roadmap
 
-How we're breaking the problem down. Each stage ends with notes in the brain, and later stages build on earlier ones.
+How we're breaking the problem down. Stages 1–3 and the first milestone are done; stage 4 and the "Next" list under stage 5 are the open work. Each stage ends with notes in the brain.
 
 ## 1. Research: state of the art and benchmarks ✓
 Done. Notes are in `brain/research/` (see the index). The main conclusions:

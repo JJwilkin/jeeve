@@ -18,7 +18,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - Add every note to the index below.
 
 ## Index
-- [[roadmap]]: the four stages before code: research, architecture (primitives, System 1, System 2, their interface), tracing, goals and reward
+- [[roadmap]]: research ✓, architecture ✓, tracing ✓, goals and reward (open), first milestone (reached 2026-10-11), and what's next
 
 ### Tasks
 - [[system-1-infrastructure]] (done → [[system-1]]): decide what the runtime provides around System 1 vs. what System 2 decides (state encoding, questions, when to call)
