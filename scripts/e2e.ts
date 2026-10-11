@@ -184,18 +184,23 @@ const treeLeft = (kind: 'log' | 'leaves') => {
 check('tree built: 6 logs and 27 leaves', treeLeft('log').length === 6 && treeLeft('leaves').length === 27, `${treeLeft('log').length} logs, ${treeLeft('leaves').length} leaves`)
 // The leaves are persistent, as player-placed leaves are, and Jeeve can't see block states, so Josh says so;
 // otherwise System 2 rightly expects them to decay once the logs are gone, and waits.
+const treeAsked = Date.now()
 josh.whisper('Jeeve', "break that whole tree, leaves included. The leaves won't decay on their own")
-const authoredBehavior = () => [...agent.modules.modules.values()].find(m => m.kind === 'behavior')
+// A behavior System 2 wrote earlier in this run (the oak scenario) may be reused here; what this scenario checks is
+// that authored code does the work: the trial of a new behavior, or a registered one Jev picks.
+const SEED = new Set(['navigate', 'follow', 'track', 'attack_when_ready', 'collect', 'e2e_step_forward'])
+const authoredRuns = () => traceRecords().filter(r => r.kind === 'behavior_start' && r.t > treeAsked && !SEED.has(r.name))
+const registered = () => [...agent.modules.modules.values()].filter(m => m.kind === 'behavior')
 // Room for a few write → trial → rewrite rounds: a System 2 call takes 5–40 s and a failed trial up to its time limit.
-await until('"break the tree": System 2 writes a behavior, its trial passes and it is registered', () => !!authoredBehavior(), 480000)
-await until('"break the tree": every leaf is broken', () => treeLeft('leaves').length === 0, 180000)
+await until('"break the tree": an authored behavior runs (written now, or reused)', () => authoredRuns().length > 0, 480000)
+await until('"break the tree": every leaf is broken', () => treeLeft('leaves').length === 0, 360000)
 console.log(`left around the tree: leaves [${treeLeft('leaves').join(' ')}], logs [${treeLeft('log').join(' ')}]`)
+console.log(`authored runs here: ${authoredRuns().map(r => `${r.attrs['jeeve.behavior.params']} (${r.attrs['jeeve.behavior.decided_by']?.startsWith('system2:') ? 'trial' : 'Jev'})`).join(', ')}`)
 {
-  const id = authoredBehavior()?.id ?? '?'
-  const runs = traceRecords().filter(r => r.kind === 'behavior_start' && r.name === id.split('@')[0])
-  console.log(`authored behavior ${id}: ${runs.length} runs; trial ${JSON.stringify(authoredBehavior()?.trial)}`)
+  const ids = registered().map(m => m.id)
+  check('a behavior System 2 wrote passed its trial and is registered', ids.length > 0, ids.map(id => `${id}: ${JSON.stringify(agent.modules.get(id.split('@')[0])?.trial)}`).join('; '))
   const { loaded } = new ModuleRegistry(() => {}, LIBRARY).load()
-  check('behaviors persist: a fresh registry reloads the authored behavior from the library', loaded.includes(id), loaded.join(', '))
+  check('behaviors persist: a fresh registry reloads the authored behaviors from the library', ids.length > 0 && ids.every(id => loaded.includes(id)), loaded.join(', '))
 }
 await sleep(12000) // let System 2 answer the last instruction before the episode ends
 

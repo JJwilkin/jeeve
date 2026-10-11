@@ -112,6 +112,11 @@ Decided with Joshua while working on [[runtime-authored-behaviors]]. Code is in 
   - v3 waited until its feet cleared the block, passed, and broke the last leaves.
 
   That's 169 s from instruction to registration, with three System 2 rewrites.
+- **Combined with [[perception]] (rebased on its commits, E2E PASS):** System 2 wrote behaviors without being asked to, in the oak scenario that scenario owns.
+  - `dig_log_in_reach` passed its trial when the goal completed.
+  - `clear_blocks_nearby` broke the oak's leaves.
+  - In this scenario, `pillar_clear_blocks` broke all 27 leaves in 75 s during its trial, which was still running when the episode ended.
+  - The e2e now checks that authored code does the work in this scenario, whether written there or reused. Registration is checked across the run.
 - **Every run:** a fresh registry reloads the behavior from the library.
 - **Lessons:**
   - The action log *is* the evidence: each rewrite cited a specific call.
