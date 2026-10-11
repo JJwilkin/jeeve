@@ -5,8 +5,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const DIR = '.server'
-const JAR = 'paper-1.21.4-232.jar' // Mineflayer-tested version; needs Java 21
-const JAVA = process.env.JAVA ?? '/opt/homebrew/opt/openjdk@21/bin/java'
+const JAR = 'paper-26.1.2-74.jar' // newest Mineflayer-supported version (brain/research/mineflayer-plugin-compat.md); needs Java 25
+const JAVA = process.env.JAVA ?? '/opt/homebrew/opt/openjdk@25/bin/java'
 
 const PROPERTIES = `online-mode=false
 enforce-secure-profile=false

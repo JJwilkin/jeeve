@@ -35,14 +35,16 @@ export function controlVector (control: string, yaw: number): [number, number] |
   }
 }
 
-// Guards, part 1: the pathfinder Movements config everything that paths uses. Only collect may dig,
-// because mineflayer-collectblock refuses targets the Movements says can't be broken.
-export function guardedMovements (bot: Bot, canDig: boolean) {
+// Guards, part 1: the one pathfinder Movements config everything that paths uses, collect included.
+// Digging is on (collectblock refuses targets the Movements says can't be broken) but only logs and
+// leaves may break; leaves too, or low-leaf trees have no path (brain/research/mineflayer-plugin-compat.md).
+export function guardedMovements (bot: Bot) {
   const moves = new pf.Movements(bot)
   moves.maxDropDown = MAX_DROP
   moves.allowParkour = false
   moves.allow1by1towers = false
-  moves.canDig = canDig
+  moves.canDig = true
+  moves.blocksCantBreak = new Set(bot.registry.blocksArray.filter(b => !/_(log|leaves)$/.test(b.name)).map(b => b.id))
   return moves
 }
 

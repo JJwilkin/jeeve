@@ -1,10 +1,11 @@
 // End to end on the local server: a scripted player "Josh" gives the three first-milestone instructions and
 // checks the outcomes, a live guard veto, the local API, and that the episode landed in Judgment.
 // Uses the real Jev, Claude (System 2) and Judgment staging. Run: MINECRAFT_EULA=true npm run e2e (EULA once).
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import mineflayer from 'mineflayer'
 import { Judgeval } from 'judgeval'
 import { startAgent } from '../src/main.ts'
+import { ModuleRegistry } from '../src/modules.ts'
 import { judgmentOrg } from '../src/trace.ts'
 import { startServer } from './server.ts'
 
@@ -26,7 +27,9 @@ const check = (what: string, ok: boolean, detail = '') => { console.log(`${ok ? 
 const server = startServer(line => { if (/ERROR|joined the game|left the game|Done \(/.test(line) && !/No key layers/.test(line)) console.log('[server]', line) })
 await server.ready
 
-const agent = await startAgent({ allowed: ['Josh'], apiPort: API })
+const LIBRARY = 'traces/e2e-module-library.json' // a scratch library, so test runs don't rewrite modules/library.json
+if (existsSync(LIBRARY)) rmSync(LIBRARY)
+const agent = await startAgent({ allowed: ['Josh'], apiPort: API, moduleLibrary: LIBRARY })
 const josh = mineflayer.createBot({ username: 'Josh', auth: 'offline', host: 'localhost' })
 await Promise.all([new Promise<void>(r => agent.bot.once('spawn', () => r())), new Promise<void>(r => josh.once('spawn', () => r()))])
 const whispers: string[] = []
@@ -36,7 +39,8 @@ const jeeveFromJosh = () => Object.values(josh.entities).find(e => e.username ==
 const gap = () => { const j = jeeveFromJosh(); return j ? j.position.distanceTo(josh.entity.position) : Infinity }
 const leaf = () => agent.goals.leaf()
 
-server.command('gamerule doMobSpawning false') // scenario control: only mobs we summon
+await sleep(2000) // let chunks around the players load: since 1.21.9 there are no always-loaded spawn chunks
+server.command('gamerule spawn_mobs false') // scenario control: only mobs we summon (doMobSpawning before 1.21.11)
 server.command('kill @e[type=!player]') // the world persists between runs
 server.command('time set day')
 server.command('gamemode creative Josh') // so mobs go for Jeeve, not the instructor
@@ -81,6 +85,11 @@ check('"until dark": the authored check is false in daylight', !whispers.some(w 
 server.command('time set 14000')
 await until('"until dark": night falls and Josh hears "done"', () => whispers.some(w => w.startsWith('done: wait here until it gets dark')), 15000)
 server.command('time set day')
+{
+  const reloaded = new ModuleRegistry(() => {}, LIBRARY)
+  const { loaded } = reloaded.load()
+  check('modules persist: a fresh registry reloads the authored check from the library', loaded.includes(agent.goals.nodes.find(g => g.text.startsWith('wait here'))?.done_when?.desc.split(':')[0] ?? '?'), loaded.join(', '))
+}
 
 josh.whisper('Jeeve', 'follow me and defend me')
 await sleep(1500)

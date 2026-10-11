@@ -24,6 +24,7 @@ export type AgentOptions = {
   apiPort?: number | null // local instruction API on 127.0.0.1; null turns it off
   project?: string // Judgment project for traces
   system2?: boolean // default: on when ANTHROPIC_API_KEY is set
+  moduleLibrary?: string // where modules System 2 writes persist across runs
   ask?: Ask
 }
 
@@ -64,12 +65,14 @@ export async function startAgent (opts: AgentOptions) {
 
   // ---- modules System 2 writes: trialled on recent real states, disabled after repeated errors ----
   const recentStates: Snapshot[] = [] // raw snapshots from recent decide calls, for trials
+  const library = opts.moduleLibrary ?? process.env.JEEVE_MODULE_LIBRARY ?? 'modules/library.json'
   const modules = new ModuleRegistry((m, reason) => {
     recorder.record('module', { attrs: { 'jeeve.module.id': m.id, 'jeeve.module.kind': m.kind, 'jeeve.module.activation': 'disabled' }, output: { reason, stats: m.stats } })
     note(`module ${m.id} disabled: ${reason}`)
     const leaf = goals.leaf()
     if (leaf) escalate('module_disabled', { module: m.id, reason }, leaf)
-  })
+  }, library)
+  const libraryLoad = modules.load()
   const lookup = (name: string) => modules.get(name)
 
   const goals = new Goals({
@@ -274,7 +277,7 @@ export async function startAgent (opts: AgentOptions) {
     // Modules first, so the rest of the decision can reference them. Each refusal is evidence for the next try.
     const problems: string[] = []
     for (const src of d.new_modules ?? []) {
-      const { module, trial } = modules.register(src, [...recentStates, rawSnapshot(bot)])
+      const { module, trial } = modules.register(src, [...recentStates, rawSnapshot(bot)], { session, goal: `${goal.id}: ${goal.text}`, created_at: new Date().toISOString() })
       recorder.record('module', {
         attrs: { 'jeeve.module.id': module?.id ?? src.name, 'jeeve.module.kind': src.kind, 'jeeve.module.activation': module ? 'ok' : 'failed_trial', 'jeeve.program.cites': cite },
         input: src, output: trial
@@ -381,15 +384,21 @@ export async function startAgent (opts: AgentOptions) {
 
   // ---- game events ----
   bot.once('spawn', () => {
-    bot.pathfinder.setMovements(guardedMovements(bot, false))
-    bot.collectBlock.movements = guardedMovements(bot, true)
+    // 1.21.11+ servers reject moves from flush against a block unless the hitbox matches the game's float
+    // 0.6F / 2; unreleased fix from https://github.com/PrismarineJS/mineflayer/issues/3911
+    ;(bot.physics as unknown as { playerHalfWidth: number }).playerHalfWidth = Math.fround(0.6) / 2
+    bot.pathfinder.setMovements(guardedMovements(bot))
+    // Unset, collectblock installs its own Movements on each collect (with dontCreateFlow off) and leaves it there.
+    bot.collectBlock.movements = undefined
     installGuards(bot, (channel, reason) => {
       note(`guard vetoed ${reason}`)
       recorder.windowEvent('vetoed', { channel, reason })
       channels.veto(channel, reason)
     })
-    recorder.openWindow({ reason: 'episode_start', bot: bot.username })
+    recorder.openWindow({ reason: 'episode_start', bot: bot.username, modules: libraryLoad })
+    for (const id of libraryLoad.loaded) recorder.record('module', { attrs: { 'jeeve.module.id': id, 'jeeve.module.activation': 'loaded' } })
     activate(DEFAULT_PROGRAM, 'episode start')
+    console.log(`[jeeve] module library ${library}: ${libraryLoad.loaded.length} loaded${libraryLoad.skipped.length ? `, skipped ${libraryLoad.skipped.join('; ')}` : ''}`)
     console.log(`[jeeve] spawned as ${bot.username}; session ${session}; judgment ${recorder.exporting ? `project ${project}` : 'off (JSONL only)'}; system2 ${system2 ? 'on' : 'off'}`)
 
     let hostileNear = false

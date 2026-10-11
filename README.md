@@ -30,8 +30,8 @@ See the [roadmap](brain/roadmap.md).
 ## Run it
 **Requirements:**
 - Node ≥ 22.18;
-- Java 21 (`brew install openjdk@21`);
-- the Paper 1.21.4 jar in `.server/`;
+- Java 25 (`brew install openjdk@25`);
+- the Paper 26.1.2 jar (build 74, from [fill.papermc.io](https://fill.papermc.io/v3/projects/paper/versions/26.1.2/builds/74)) in `.server/`;
 - credentials in `../judgment/.env.jeeve`: `TYPESAFE_API_KEY`, `ANTHROPIC_API_KEY`, and `JUDGMENT_API_KEY` / `JUDGMENT_ORG_ID` / `JUDGMENT_API_URL` (staging, project `jeeve-dev`).
 
   Without Anthropic, System 2 is off; without Judgment, traces go only to `traces/*.jsonl`.

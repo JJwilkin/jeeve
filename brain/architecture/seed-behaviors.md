@@ -8,7 +8,7 @@ status: active
 The smallest behavior set for the first milestone ([[layers]]): a local server, with instructions given from outside. The three instructions are "come here", "collect 10 logs" and "follow me and defend me". Every behavior here is scaffolding under the [[bitter-lesson]]. The contract and guards are in [[behaviors-and-guards]]. What the traces record is in [[trace-schema]].
 
 ## Wrap, don't write
-The seed set wraps `mineflayer-pathfinder` (2.4.5) and `mineflayer-collectblock` (1.6.0, which uses `mineflayer-tool`). Both are old but are what Mindcraft runs on ([[mindcraft-and-voyager]]). **Server pin: Paper 26.1.2, plus one physics line** (`bot.physics.playerHalfWidth = Math.fround(0.6) / 2`). Without that line, 1.21.11+ servers reject the bot's moves next to blocks and `collect` stalls. **Paper 1.21.10 is the newest version that needs no patch.** `scripts/server.ts` still runs 1.21.4, which also works. Measured in [[mineflayer-plugin-compat]]. Fighting doesn't wrap `mineflayer-pvp`; see the merge below.
+The seed set wraps `mineflayer-pathfinder` (2.4.5) and `mineflayer-collectblock` (1.6.0, which uses `mineflayer-tool`). Both are old but are what Mindcraft runs on ([[mindcraft-and-voyager]]). **Server pin: Paper 26.1.2, plus one physics line** (`bot.physics.playerHalfWidth = Math.fround(0.6) / 2`). Without that line, 1.21.11+ servers reject the bot's moves next to blocks and `collect` stalls. `scripts/server.ts` runs it and `src/main.ts` sets the line on spawn. **Paper 1.21.10 is the newest version that needs no patch.** Measured in [[mineflayer-plugin-compat]]. Fighting doesn't wrap `mineflayer-pvp`; see the merge below.
 
 **Wrapped plugins don't stay on one channel.** collectblock paths, equips a tool and digs, so it uses legs, aim and hands. The pathfinder alone also reaches past the legs ([[mineflayer-plugin-compat]]):
 - it calls `bot.look` every tick while walking (aim);
@@ -39,18 +39,13 @@ So a behavior **claims a set of channels**, and starting it replaces whatever ho
 
 ## Guards
 There's no separate filter layer in M1:
-1. **One guarded pathfinder `Movements` config:** `maxDropDown = 3`, avoid lava and fire, no parkour, no towering. Only collectblock's copy may dig, because collectblock skips any target the `Movements` says can't be broken.
+1. **One guarded pathfinder `Movements` config, shared by everything that paths, collect included:** `maxDropDown = 3`, avoid lava and fire, no parkour, no towering. Digging is on, because collectblock skips any target the `Movements` says can't be broken, but `blocksCantBreak` holds every block except `*_log` and `*_leaves`. `bot.collectBlock.movements` is unset, so collectblock doesn't install its own copy (which kept digging after collect and had `dontCreateFlow` off). Chosen in [[mineflayer-plugin-compat]]: logs only leaves low-leaf trees unreachable, and digging anything lets the pathfinder dig itself into a hole.
 2. **One wrapper on `bot.setControlState`, `bot.dig` and `bot.placeBlock`:**
    - **Movement:** checks the square a move would step onto for lava, a drop of more than 3, or void.
    - **Dig:** refuses a block next to lava, or the block under the bot's feet when what's below it is unsafe.
    - **Place:** refuses a block in the bot's own body.
 
    It clears the input and emits `vetoed` on the behavior holding that channel.
-
-**Gaps in guard 1, measured in [[mineflayer-plugin-compat]]:**
-- collectblock installs its copy on the pathfinder and nothing switches it back, so `navigate` and `follow` after a `collect` can dig.
-- collectblock also sets `dontCreateFlow = false` on that copy.
-- The most reliable setup was one shared config whose `blocksCantBreak` holds everything except `*_log` and `*_leaves`, with `bot.collectBlock.movements = null`.
 
 ## Who does what
 | | Job |

@@ -131,7 +131,7 @@ A first slice runs in `src/`. It has:
 - whispers as the instruction channel;
 - JSONL traces with raw snapshots.
 
-`npm run e2e` starts a local Paper 1.21.4 server, the agent and a scripted player. All three milestone instructions pass, and two runs in a row gave the same results:
+`npm run e2e` starts a local Paper server, the agent and a scripted player. On Paper 1.21.4, all three milestone instructions passed, and two runs in a row gave the same results (table below). Since 2026-10-11 the server is Paper 26.1.2 with the half-width fix and the one shared guarded `Movements` ([[seed-behaviors]]). On a fresh world, one run passed all 19 checks with similar times: come here 2.6 s, collect about 16 s, follow 3.4 s, defend 4.4 s. Jeeve survived on 10.8 health.
 
 | Instruction | Time |
 |---|---|
@@ -147,7 +147,7 @@ What it taught us:
 - **Channels are coupled through the view.** The pathfinder steers by looking, so `track` yields to the legs while they move. That's the first concrete cross-channel rule from [[layers]].
 - **Wrapped plugins have hidden state.**
   - `pathfinder.stop()` takes effect later, and the next `setGoal()` runs it immediately, wiping the new goal. collectblock's cancel leaves exactly such a stop behind, so a `follow` started right after `collect` silently never moved. Behaviors now flush a pending stop before setting a goal.
-  - collectblock also skips any target the pathfinder's `Movements` says can't be broken, so with digging off it "succeeded" without collecting anything. Only its copy of the guarded config may dig, and a collect pass that collects nothing now reports `stuck` instead of looping.
+  - collectblock also skips any target the pathfinder's `Movements` says can't be broken, so with digging off it "succeeded" without collecting anything. The one guarded config now digs, but only logs and leaves ([[seed-behaviors]] → Guards), and a collect pass that collects nothing now reports `stuck` instead of looping.
 - **Escalations on close calls.** About 17% of calls still escalate, mostly `keep_current` against a close alternative on aim. Whether 0.5 is the right threshold is a calibration question (Open questions).
 
 Not yet built, and deliberately so:
