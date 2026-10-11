@@ -5,13 +5,17 @@
 // Sandbox: node:vm, a fresh realm per module with no require/process/network, string eval disabled, and a
 // hard per-call timeout. ponytail: not a security boundary; fine while the only author is our own System 2
 // on a local machine. Revisit (worker thread or SES compartment) before running anywhere else.
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import vm from 'node:vm'
 
 export type ModuleKind = 'check' | 'watch'
 export type ModuleSource = { kind: ModuleKind, name: string, description: string, code: string }
 export type Snapshot = Record<string, unknown>
 export type Stats = { calls: number, errors: number, totalMs: number, maxMs: number, lastError?: string }
-export type Module = ModuleSource & { version: number, id: string, run: (s: Snapshot) => boolean, stats: Stats, disabled?: string }
+export type Origin = { session: string, goal: string, created_at: string }
+export type Module = ModuleSource & { version: number, id: string, run: (s: Snapshot) => boolean, stats: Stats, disabled?: string, origin?: Origin, trial?: Trial }
+// One library entry: the latest version of a module, as written to the library file.
+type Stored = ModuleSource & { version: number, origin?: Origin, trial?: Trial, disabled?: string }
 export type Trial = { states: number, trues: number, errors: number, maxMs: number, error?: string }
 
 export const MODULE_LIMITS = {
@@ -63,17 +67,50 @@ export function compileModule (src: ModuleSource, version: number, onDisable: (m
   return m
 }
 
+// The library persists across runs: a JSON file holding the latest version of each module. Commit the
+// ones worth keeping; git history is the record of how the set was hillclimbed.
 export class ModuleRegistry {
   modules = new Map<string, Module>() // name → latest version
   onDisable: (m: Module, reason: string) => void
+  file: string | null
 
-  constructor (onDisable: (m: Module, reason: string) => void = () => {}) { this.onDisable = onDisable }
+  constructor (onDisable: (m: Module, reason: string) => void = () => {}, file: string | null = null) {
+    this.file = file
+    this.onDisable = (m, reason) => { this.save(); onDisable(m, reason) }
+  }
+
+  // Modules were trialled when they were written; on load they're only compiled. Disabled ones stay off.
+  load (): { loaded: string[], skipped: string[] } {
+    const loaded: string[] = []
+    const skipped: string[] = []
+    if (!this.file || !existsSync(this.file)) return { loaded, skipped }
+    for (const s of JSON.parse(readFileSync(this.file, 'utf8')).modules as Stored[]) {
+      if (s.disabled) { skipped.push(`${s.name}@${s.version}: disabled (${s.disabled})`); continue }
+      try {
+        const m = compileModule(s, s.version, this.onDisable)
+        Object.assign(m, { origin: s.origin, trial: s.trial })
+        this.modules.set(s.name, m)
+        loaded.push(m.id)
+      } catch (err) { skipped.push(`${s.name}@${s.version}: ${String(err)}`) }
+    }
+    return { loaded, skipped }
+  }
+
+  save () {
+    if (!this.file) return
+    const modules: Stored[] = [...this.modules.values()].sort((a, b) => a.name.localeCompare(b.name)).map(m => ({
+      kind: m.kind, name: m.name, description: m.description, code: m.code, version: m.version,
+      ...(m.origin ? { origin: m.origin } : {}), ...(m.trial ? { trial: m.trial } : {}), ...(m.disabled ? { disabled: m.disabled } : {})
+    }))
+    writeFileSync(`${this.file}.tmp`, JSON.stringify({ modules }, null, 2) + '\n')
+    renameSync(`${this.file}.tmp`, this.file)
+  }
 
   get (name: string) { return this.modules.get(name) }
 
   // Compile, then trial on recent real states: it must return a boolean every time, within budget.
   // Only a module that passes is registered (as the next version of its name).
-  register (src: ModuleSource, trialStates: Snapshot[]): { module?: Module, trial: Trial } {
+  register (src: ModuleSource, trialStates: Snapshot[], origin?: Origin): { module?: Module, trial: Trial } {
     const version = (this.modules.get(src.name)?.version ?? 0) + 1
     let m: Module
     try { m = compileModule(src, version, this.onDisable) } catch (err) {
@@ -87,7 +124,9 @@ export class ModuleRegistry {
     else if (probe.stats.maxMs > MODULE_LIMITS.budgetMs) trial.error = `too slow: ${trial.maxMs} ms > ${MODULE_LIMITS.budgetMs} ms`
     else if (!trialStates.length) trial.error = 'no recent states to trial on'
     if (trial.error) return { trial }
+    Object.assign(m, { origin, trial })
     this.modules.set(src.name, m)
+    this.save()
     return { module: m, trial }
   }
 

@@ -1,5 +1,8 @@
 // Offline self-check: node src/selfcheck.ts. No server, no network.
 import assert from 'node:assert/strict'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Vec3 } from 'vec3'
 import { coalescing, makeDecider } from './decide.ts'
 import { direction, distanceBucket, newHandles } from './encoder.ts'
@@ -207,6 +210,22 @@ async function decideWith (answers: Record<string, any>) {
   const flaky = compileModule({ ...night, name: 'flaky', code: '(s) => s.missing.field' }, 1, m => disabled.push(m.id))
   for (let i = 0; i < 5; i++) flaky.run(snap())
   assert.deepEqual([disabled, flaky.stats.errors, flaky.run(snap())], [['flaky@1'], 3, false]) // stops running after 3 errors
+
+  // The library persists across runs: the latest version of each module, with where it came from.
+  const file = join(mkdtempSync(join(tmpdir(), 'jeeve-')), 'library.json')
+  const first = new ModuleRegistry(() => {}, file)
+  const origin = { session: 's-1', goal: 'g-1: wait until dark', created_at: '2026-10-11T00:00:00Z' }
+  first.register(night, [snap()], origin)
+  first.register({ ...night, name: 'broken_later', code: '(s) => s.world.is_day === true' }, [snap()])
+  const broken = first.get('broken_later')!
+  broken.code = '(s) => s.nope.nope' // simulate a module that starts failing at runtime
+  const live = compileModule(broken, broken.version, (m, r) => first.onDisable(m, r))
+  first.modules.set('broken_later', live)
+  for (let i = 0; i < 3; i++) live.run(snap())
+  const second = new ModuleRegistry(() => {}, file)
+  const loaded = second.load()
+  assert.deepEqual([loaded.loaded, loaded.skipped.length, second.get('is_night')?.origin, second.get('is_night')?.run(snap({ world: { is_day: false } }))],
+    [['is_night@1'], 1, origin, true]) // disabled modules stay off across runs
 }
 
 console.log('selfcheck ok')
