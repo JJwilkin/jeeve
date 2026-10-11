@@ -64,7 +64,6 @@ All custom attributes use the `jeeve.*` prefix.
 - Setup: project `jeeve-dev`, judgeval-js 1.3.5, 10 synthetic windows of 23 spans each.
 - With `forceFlush`: a window's root and all its spans are queryable through virtual SQL **0.7–0.9 s** after the root ends.
 - Without it: 4.4–5.1 s.
-- Across all judgeval Node.js traffic on staging over the prior 7 days, ingest lag was p50 0.24 s, p90 5.1 s, p99 32 s.
 
 The inner loop doesn't depend on any of this; it reads the live event stream in-process ([[learning]]). The outer loop can query a window about a second after it closes.
 
