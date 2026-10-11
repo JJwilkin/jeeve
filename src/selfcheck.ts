@@ -3,12 +3,17 @@ import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { EventEmitter } from 'node:events'
 import { Vec3 } from 'vec3'
+import pf from 'mineflayer-pathfinder'
+import registryFor from 'prismarine-registry'
+import worldLoader from 'prismarine-world'
+import chunkLoader from 'prismarine-chunk'
 import { coalescing, makeDecider } from './decide.ts'
 import { direction, distanceBucket, makeEgocentric, newHandles, rawSnapshot } from './encoder.ts'
-import { blockAt, notableBlocks, scan } from './world.ts'
+import { blockAt, notableBlocks, reachable, scan } from './world.ts'
 import { compile, glob, Goals } from './goals.ts'
-import { controlVector, unsafeAt } from './guards.ts'
+import { controlVector, guardedMovements, unsafeAt } from './guards.ts'
 import { compileModule, ModuleRegistry } from './modules.ts'
 import { DEFAULT_PROGRAM, optionsFor, validate, version } from './program.ts'
 
@@ -272,6 +277,32 @@ async function decideWith (answers: Record<string, any>) {
     { name: 'oak_log', count: 'many (6)', nearest: 'close, right' },
     { name: 'oak_leaves', count: 'many', nearest: 'close, right, ~3 up' }
   ])
+}
+
+// reachable: the real pathfinder and guarded Movements on a flat world. An unreachable block exhausts the box
+// around the bot and the block (noPath, not timeout); a path that detours 12 blocks still fits in it.
+{
+  const registry = registryFor('1.21.8')
+  const World = (worldLoader as any)(registry)
+  const Chunk = (chunkLoader as any)(registry)
+  const world = new World().sync
+  const set = (x: number, y: number, z: number, name: string) => world.setBlockStateId(new Vec3(x, y, z), registry.blocksByName[name].defaultState)
+  for (let cx = -4; cx < 4; cx++) for (let cz = -4; cz < 4; cz++) world.setColumn(cx, cz, new Chunk({ minY: -64, worldHeight: 384 }))
+  for (let x = -64; x < 64; x++) for (let z = -64; z < 64; z++) set(x, -1, z, 'grass_block')
+  set(6, 0, 0, 'oak_log')
+  for (let y = 0; y < 12; y++) for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) set(-10 + dx, y, dz, 'stone')
+  set(-10, 12, 0, 'oak_log') // on top of a stone pillar: no placing, and stone can't be broken
+  for (let z = -12; z <= 12; z++) for (let y = 0; y < 3; y++) set(12, y, z, 'stone')
+  set(14, 0, 0, 'oak_log') // behind a wall: the path goes round its end
+  const bot: any = Object.assign(new EventEmitter(), {
+    registry, world, game: { minY: -64 }, entities: {}, inventory: { items: () => [], slots: [] },
+    entity: { position: new Vec3(0.5, 0, 0.5), onGround: true, effects: {}, height: 1.8 },
+    blockAt: (p: Vec3) => world.getBlock(p), clearControlStates () {}
+  })
+  pf.pathfinder(bot)
+  bot.pathfinder.setMovements(guardedMovements(bot))
+  const status = async (p: [number, number, number]) => (await reachable(bot, p)).status
+  assert.deepEqual([await status([6, 0, 0]), await status([-10, 12, 0]), await status([14, 0, 0])], ['success', 'noPath', 'success'])
 }
 
 console.log('selfcheck ok')

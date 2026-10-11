@@ -121,7 +121,7 @@ const PERCEPTION: Anthropic.Tool[] = [
   },
   {
     name: 'reachable',
-    description: 'Can you walk to where a block is within arm\'s reach (about 4.5 blocks from your eyes), using the same pathfinder as collect: no placing blocks, and no breaking anything but logs and leaves? Judged on the world as it is now: a block behind others of the same tree may become reachable once those are broken. status timeout means no path was found within a second. Absolute position.',
+    description: 'Can you walk to where a block is within arm\'s reach (about 4.5 blocks from your eyes), using the same pathfinder as collect: no placing blocks, and no breaking anything but logs and leaves? Judged on the world as it is now: a block behind others of the same tree may become reachable once those are broken. status noPath means no path stays within 16 blocks of you and the block; timeout means the search ran out of time (unknown). Absolute position.',
     input_schema: {
       type: 'object', additionalProperties: false, required: ['position'],
       properties: { position: { type: 'array', items: { type: 'integer' }, minItems: 3, maxItems: 3 } }

@@ -69,11 +69,23 @@ export function scan (bot: Bot, q: { match: string, radius?: number, los?: boole
 // Can the guarded pathfinder get to where the block is within arm's reach (the goal collectblock uses),
 // without placing blocks or breaking anything but logs and leaves? Async: A* yields between chunks. It judges
 // the world as it is now: a log hidden behind other logs is unreachable until they're gone, though collect
-// gets there by digging in order. `timeout`: no path found within the time limit.
+// gets there by digging in order. The search stays inside the box around the bot and the block, padded by
+// REACH_PAD: on open ground an unbounded A* never runs out of nodes, so "no" could only ever be `timeout`.
+// `noPath`: no path inside that box. `timeout`: the box wasn't exhausted within the time limit.
+export const REACH_PAD = 16
 export async function reachable (bot: Bot, p: Pos, timeoutMs = 1000) {
   const goal = new pf.goals.GoalLookAtBlock(new Vec3(p[0], p[1], p[2]), bot.world)
+  const me = feet(bot)
+  const lo = [Math.min(me.x, p[0]), Math.min(me.y, p[1]), Math.min(me.z, p[2])].map(v => v - REACH_PAD)
+  const hi = [Math.max(me.x, p[0]), Math.max(me.y, p[1]), Math.max(me.z, p[2])].map(v => v + REACH_PAD)
+  // A per-call view of the shared Movements: same rules, neighbors outside the box dropped. Writes (the entity
+  // collision index) land on the view, not the shared one.
+  const shared = bot.pathfinder.movements
+  const moves: typeof shared = Object.create(shared)
+  moves.getNeighbors = n => shared.getNeighbors.call(moves, n).filter(m =>
+    m.x >= lo[0] && m.x <= hi[0] && m.y >= lo[1] && m.y <= hi[1] && m.z >= lo[2] && m.z <= hi[2])
   let r: { status: string, cost: number, path: unknown[] } | undefined
-  for (const step of bot.pathfinder.getPathFromTo(bot.pathfinder.movements, bot.entity.position, goal, { timeout: timeoutMs })) {
+  for (const step of bot.pathfinder.getPathFromTo(moves, bot.entity.position, goal, { timeout: timeoutMs })) {
     r = (step as { result: typeof r }).result
     if (r!.status !== 'partial') break
     await new Promise(resolve => setImmediate(resolve))

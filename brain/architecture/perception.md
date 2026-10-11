@@ -15,7 +15,7 @@ Two tools cover "how many, where, how high, can I reach it". Both are general; n
 | Tool | Answers | How |
 |---|---|---|
 | `scan(match, radius ≤ 32, los?)` | how many, where, how high | Mineflayer's `findBlocks` with the block ids that match a glob. It skips chunk sections whose palette lacks those ids, so it isn't a 65³ loop. Matches are grouped into 26-connected clusters, nearest first. |
-| `reachable(position)` | can I get within arm's reach | The pathfinder's A* with the one guarded `Movements` ([[seed-behaviors]]) toward `GoalLookAtBlock`. That's the goal `collect` uses. It yields between A* chunks and is bounded at 1 s. (A 32-block `searchRadius` was tried and reverted: A* pruned the path to a ground-level log 6 blocks away, which `collect` then reached.) **It judges the world as it is now:** a log behind other logs is unreachable until they're broken, though `collect` gets there by digging in order. `timeout` means no path was found in time, i.e. unknown. |
+| `reachable(position)` | can I get within arm's reach | The pathfinder's A* with the one guarded `Movements` ([[seed-behaviors]]) toward `GoalLookAtBlock`. That's the goal `collect` uses. It yields between A* chunks and is bounded at 1 s. **The search stays inside the box around the bot and the block, padded by 16** (a neighbor filter on a per-call view of the shared `Movements`). On open ground an unbounded A* never runs out of nodes, so before this "no" could only be `timeout`. (A 32-block `searchRadius` was tried and reverted: it's a cost margin, not a distance, and A* pruned the path to a ground-level log 6 blocks away, which `collect` then reached.) **It judges the world as it is now:** a log behind other logs is unreachable until they're broken, though `collect` gets there by digging in order. `noPath` means no path inside the box; `timeout` means the box wasn't exhausted in time, i.e. unknown. |
 
 **Not built:**
 - **`look`, GITM-style ray casts.** The fairness use of ray casts is covered by `scan`'s `los` flag, and no goal yet needs "what's in front of me".
@@ -96,7 +96,7 @@ Built in `src/world.ts`, `src/system2.ts` (the tools and parallel dispatch), `sr
 | Worst case (looks mostly one at a time, up to 7 looks) | 4 | 32–33 s |
 
 - One scan costs 6–40 ms, and the results are 0.3–0.8 KB.
-- **`reachable` is only half useful so far.** It confirms a reachable block in 1–100 ms. For a block that isn't reachable (a top log behind leaves, the canopy) it runs to the 1 s timeout: "unknown", not "no". System 2 treats that sensibly, but each call costs a second. Bounding the search so "no" comes back fast is an open question (the radius bound was wrong; see the table above).
+- **`reachable` answers both ways.** Before the box bound, a block that wasn't reachable (a top log behind other logs, the canopy) ran to the 1 s timeout: "unknown", not "no". With the box (e2e on 2026-10-11): `noPath` in 85–108 ms for the top log and a canopy leaf, and `success` in 0.2 ms for a low leaf. Offline (the selfcheck world), exhausting the box takes 150–330 ms depending on its size.
 - **Batching is inconsistent.** System 2 sometimes looks in parallel (logs and leaves together; scan and `reachable` together), and sometimes one tool per turn.
 - No encode ran over budget with notable positions in the snapshot.
 - The bot keeps acting meanwhile, so the cost is when the goal's check lands, not reaction time.
@@ -108,6 +108,6 @@ Built in `src/world.ts`, `src/system2.ts` (the tools and parallel dispatch), `sr
 ## Open questions
 - **A window cut during a System 2 call.** The `system2` span can end after its window root, because a 60 s cut doesn't wait for the call. Its spans still export, but the trace was finalized without them. Seen in traces? Then end and reopen the span at the cut, as behaviors do.
 - **Block states.** `blockAt` and `scan` return names only. System 2 rightly expected a logless canopy to decay, but player-placed leaves are `persistent` ([[runtime-authored-behaviors]] e2e). Expose a few states (e.g. `persistent`, `axis`) if more cases like this show up.
-- **A fast "no" from `reachable`.** Bound A* by node count, or by a radius measured from the target rather than as a cost margin, so unreachable targets return `noPath` instead of `timeout`.
+- **The `reachable` box.** A path that only exists by leaving the box (a detour of more than 16 blocks) reads as `noPath`. Pad 8 already pruned a 12-block detour round a wall in the selfcheck. If traces show `noPath` for a block `collect` then reaches, widen the pad.
 - **Batching.** If traces keep showing one look per turn, try a stronger prompt, or put the first scan's result into the instruction context.
 - **Clusters merge neighbors.** Two touching trees are one cluster. `names` and bounds usually show it. Split by type, or by trunk, only if traces show System 2 misreading clusters.
