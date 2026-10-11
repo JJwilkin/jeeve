@@ -162,6 +162,29 @@ const status = await (await fetch(`http://127.0.0.1:${API}/status`)).json() as a
 check('local API: POST /instructions replaces the root goal', post.status === 202 && status.goals.path[0]?.text === 'stand still and wait')
 check('"follow me and defend me" was abandoned, not failed', status.goals.past.some((l: string) => l.includes('abandoned: follow me and defend me')))
 
+// Going back to a place: System 2 sets the goal's place; once Jeeve is moved out of view of it (and of Josh),
+// only navigate:place leads back.
+{
+  const SPOT = { x: 0, z: -20 }
+  server.command(`fill ${SPOT.x - 2} -60 ${SPOT.z - 2} ${SPOT.x + 20} -56 ${SPOT.z + 2} air`)
+  server.command(`setblock ${SPOT.x} -60 ${SPOT.z} pumpkin`)
+  server.command(`tp Jeeve ${SPOT.x + 2} -60 ${SPOT.z}`)
+  server.command(`tp Josh ${SPOT.x} -60 ${SPOT.z + 2}`)
+  await sleep(1000)
+  josh.whisper('Jeeve', 'stay by that pumpkin')
+  await until('"stay by the pumpkin": System 2 sets the goal\'s place', () => !!leaf()?.text.startsWith('stay by') && !!leaf()?.place, 45000)
+  console.log(`goal place ${JSON.stringify(leaf()?.place)}, pumpkin at ${SPOT.x} -60 ${SPOT.z}`)
+  const before = traceRecords().length
+  server.command(`tp Jeeve ${SPOT.x + 18} -60 ${SPOT.z}`)
+  server.command(`tp Josh ${SPOT.x - 2} -60 ${SPOT.z}`) // out of Jeeve's view too, or "go to Josh" also leads back
+  const fromSpot = () => Math.hypot(agent.bot.entity.position.x - SPOT.x - 0.5, agent.bot.entity.position.z - SPOT.z - 0.5)
+  await until('"stay by the pumpkin": the teleport lands', () => fromSpot() > 15, 5000)
+  await until('"stay by the pumpkin": Jeeve walks back after being moved 18 blocks off', () => fromSpot() < 4, 45000)
+  check('"stay by the pumpkin": Jev picked navigate:place', traceRecords().slice(before).some(r => r.kind === 'behavior_start' && r.attrs['jeeve.behavior.params'] === 'navigate:place'))
+  // Release the place, or Jeeve rightly heads back to the pumpkin from wherever the next scenario puts him.
+  await fetch(`http://127.0.0.1:${API}/instructions`, { method: 'POST', body: JSON.stringify({ from: 'operator', text: 'stand still and wait' }) })
+}
+
 // Behaviors System 2 writes: a tree whose canopy is out of reach from the ground (eyes at -58.4, lowest
 // leaf centre at -53.5). Collect can't get the leaves; System 2 has to write a behavior that builds up.
 // Last, because Jeeve may end up on a pillar. Persistent leaves, so none decay instead of being broken.

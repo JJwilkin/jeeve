@@ -11,7 +11,7 @@ const MAX_TURNS = 4
 
 export type Decision = {
   note: string
-  goal: { done_when: CheckSpec | null, escalate_if: CheckSpec[], budget_s: number | null, review_s: number | null } | null
+  goal: { done_when: CheckSpec | null, escalate_if: CheckSpec[], budget_s: number | null, review_s: number | null, place: number[] | null } | null
   goal_action: 'none' | 'fail' | 'renew'
   push_child: { text: string, done_when: CheckSpec | null, budget_s: number | null } | null
   program: { guidance: string | null, allowed_behaviors: string[] | null, heartbeat_ms: number | null, watch: string[] | null } | null
@@ -55,12 +55,13 @@ const TOOLS: Anthropic.Tool[] = [
           ...nullable('object'),
           description: "Set the active goal's success check. null leaves it unchanged. Required on a new instruction.",
           additionalProperties: false,
-          required: ['done_when', 'escalate_if', 'budget_s', 'review_s'],
+          required: ['done_when', 'escalate_if', 'budget_s', 'review_s', 'place'],
           properties: {
             done_when: { anyOf: [{ $ref: '#/$defs/check' }, { type: 'null' }], description: 'null for open-ended goals (they end only on a new instruction).' },
             escalate_if: { type: 'array', items: { $ref: '#/$defs/check' }, description: 'Conditions that should call you back, e.g. the protected player far away for 10 s.' },
             budget_s: nullable('integer', { description: 'Closed goals: time limit before you are called back.' }),
-            review_s: nullable('integer', { description: 'Open-ended goals: how often you review them.' })
+            review_s: nullable('integer', { description: 'Open-ended goals: how often you review them.' }),
+            place: { anyOf: [{ type: 'array', items: { type: 'integer' } }, { type: 'null' }], description: 'Where the goal happens, absolute [x, y, z] (e.g. a block of the tree from scan). null: nowhere in particular.' }
           }
         },
         goal_action: { type: 'string', enum: ['none', 'fail', 'renew'], description: 'fail: give up on the active goal (say why in message). renew: restart its budget or review timer.' },
@@ -172,6 +173,8 @@ ${Object.entries(BEHAVIORS).map(([n, b]) => `- ${n} (${b.channels.join('+')}): $
 
 Success checks are code you parameterize: near_entity(player, radius), inventory_delta(match glob, count), entity_alive(player). Under an inventory_delta check, the fast model is offered collect only for block types the check still needs, with the count still missing, so for a goal that gathers blocks use inventory_delta with the exact count. Under an authored check, it is offered the block types in view, with how many are within 8 blocks. Code evaluates them every tick, marks a goal completed when its done_when passes, and tells the player. You never need to say "done".
 
+The fast model only sees targets near the bot. If a goal happens at a place (a tree to break, a spot to guard or build at), set goal.place to a block there, e.g. one scan found. The fast model is told either "you are at the goal's place" (within 3 blocks) or "you are not at the goal's place yet", and in the second case it is offered navigate to the place, so it can walk back after wandering off or out of view. Write guidance about the place in those words, not in blocks or distances (e.g. "if you are not at the goal's place yet, walk back to it"): it is weak with numbers, and stood still short of the place when told "within ~3 blocks" or "close". Setting goal again replaces the place too, so repeat it.
+
 When no built-in check can express a goal, write one. Put a module in new_modules and reference it as {"module": "authored", "name": ...} in done_when or escalate_if. You can also write watch modules: list their names in program.watch, and the fast model is woken each time one turns true. A module is a JavaScript function expression \`(s) => boolean\` over a plain-data snapshot:
 s = { t, self: { pos: [x, y, z], yaw, health, food, held, below }, entities: [{ id, name, type, username, pos, vel }], inventory: { item_name: count }, blocks: { block_name: [[x, y, z], ...nearest 8] /* only types that are rare (64 or fewer) within 8 blocks of the bot's feet in every direction */ }, world: { time_of_day /* 0-24000 ticks; night is about 13000-23000 */, is_day, raining } }
 A type missing from s.blocks may just be out of that view (the bot walked off, or the canopy is more than 8 up), so a "none left" check must also require the bot to be within a few blocks of the place. Helpers: dist(a, b) for positions, count(s, "*_log") for inventory globs. Modules are pure: no I/O, no state between calls, no eval. They must finish in under ${MODULE_LIMITS.budgetMs} ms, and they run several times a second. Before registering, a module is trialled on recent real snapshots and refused if it throws or returns a non-boolean. A refusal comes back to you as an escalation. Modules you registered earlier are listed in your context, so reuse them by name.
@@ -193,7 +196,7 @@ Columns: span_name, session_id, trace_id, started_at, input, output, attributes 
 Keys: jeeve.window_index, jeeve.prev_trace_id, jeeve.goal.path, jeeve.goal.id, jeeve.goal.transition, jeeve.program.version,
 jeeve.program.because, jeeve.decide.trigger, jeeve.decide.changed, jeeve.decide.escalate, jeeve.decide.latency_ms, jeeve.decide.raw_state,
 jeeve.behavior.name, jeeve.behavior.params, jeeve.behavior.run_id, jeeve.behavior.end_reason (done, stuck, none_found, target_dead,
-target_lost, vetoed, replaced, stopped, cut, goal_closed, death; authored behaviors also error, timeout), jeeve.behavior.decided_by
+target_lost, vetoed, replaced, stopped, cut, goal_closed, place_changed, death; authored behaviors also error, timeout), jeeve.behavior.decided_by
 (a decide span, or system2:<span> for a trial), jeeve.behavior.version, jeeve.behavior.detail (authored: error and last actions),
 jeeve.module.id, jeeve.module.kind, jeeve.module.activation (ok, failed_trial, trial_started, loaded, disabled), jeeve.system2.trigger, jeeve.perceive.tool, jeeve.perceive.query, jeeve.perceive.mode (xray, los).
 Window events (events_json on window spans): death, damage, owner_damage, vetoed, chat.`

@@ -36,6 +36,13 @@ assert.deepEqual(keys(optionsFor(['legs'], allowed, enc, 'follow:E0', want)), ['
 assert.deepEqual(keys(optionsFor(['hands'], allowed, enc, null, want)), ['keep_current', 'attack_when_ready:E0', 'attack_when_ready:E1'])
 assert.deepEqual(keys(optionsFor(['legs', 'aim', 'hands'], allowed, enc, null, want)), ['keep_current', 'collect:oak_log(4)'])
 assert.deepEqual(optionsFor(['legs', 'aim', 'hands'], allowed, enc, null, want)['collect:oak_log(4)'].block, { name: 'oak_log', count: 4 })
+// The goal's place: navigate is offered a walk back to it, collect isn't, and a running walk back is only keep_current.
+{
+  const away = { ...enc, place: { pos: [10, 0, 0] as [number, number, number], desc: 'medium, right' } }
+  assert.deepEqual(optionsFor(['legs'], allowed, away, null, want)['navigate:place'], { desc: "Walk back to the goal's place (medium, right), then stop", behavior: 'navigate', place: [10, 0, 0] })
+  assert.deepEqual(keys(optionsFor(['legs', 'aim', 'hands'], allowed, away, null, want)), ['keep_current', 'collect:oak_log(4)'])
+  assert.ok(!('navigate:place' in optionsFor(['legs'], allowed, away, 'navigate:place', want)))
+}
 
 // Bounds: the default passes; too many options, or an allowed behavior no question offers, don't.
 validate(DEFAULT_PROGRAM)
@@ -81,7 +88,7 @@ assert.match(version(DEFAULT_PROGRAM), /^v-[0-9a-f]{8}$/)
 }
 
 // One decision end to end with a fake bot and a fake Jev.
-async function decideWith (answers: Record<string, any>) {
+async function decideWith (answers: Record<string, any>, place: [number, number, number] | null = null) {
   const me = { id: 1, position: new Vec3(0, 0, 0), velocity: new Vec3(0, 0, 0), yaw: 0, type: 'player', username: 'Jeeve' }
   const josh = { id: 2, position: new Vec3(0, 0, -5), velocity: new Vec3(0, 0, 0), type: 'player', username: 'Josh', height: 1.8 }
   const bot: any = {
@@ -90,10 +97,11 @@ async function decideWith (answers: Record<string, any>) {
     blockAt: (p: Vec3) => p.x === 0 && p.y === 0 && p.z === -3 ? { name: 'oak_log', position: p } : null
   }
   const started: string[] = []
+  const targets: unknown[] = []
   const channels: any = {
     slots: { legs: null, aim: null, hands: null },
     describe: () => ({ legs: 'idle', aim: 'idle', hands: 'idle' }),
-    set: (key: string, _b: string, _t: unknown, by: string) => started.push(`${key}@${by}`),
+    set: (key: string, _b: string, t: unknown, by: string) => { started.push(`${key}@${by}`); targets.push(t) },
     stop: () => {}
   }
   const traces: any[] = []
@@ -103,12 +111,12 @@ async function decideWith (answers: Record<string, any>) {
     bot, program: DEFAULT_PROGRAM, handles: newHandles(), channels,
     record: r => { traces.push(r); return 'span-1' },
     escalate: reason => escalations.push(reason),
-    directive: () => ({ text: 'collect 10 logs', from: 'Josh', at: 0, inventory: {} }), events: () => [],
+    directive: () => ({ text: 'collect 10 logs', from: 'Josh', at: 0, inventory: {}, place }), events: () => [],
     remaining: () => 10,
     ask: async (state, questions) => { seen = { state, questions }; return { model: 'fake', answers } }
   })
   await decide(['test'])
-  return { started, trace: traces[0], seen, escalations }
+  return { started, targets, trace: traces[0], seen, escalations }
 }
 
 {
@@ -146,6 +154,34 @@ async function decideWith (answers: Record<string, any>) {
   assert.deepEqual(r.escalations, [])
 }
 
+{
+  // The goal's place, encoded from the bot (yaw 0 faces -z): offered while away, started as a place target.
+  const answers = { legs: { choice: 'navigate:place', confidence: 0.9 }, escalate: { noul: 0.1 } }
+  const away = await decideWith(answers, [0, 3, 10])
+  assert.equal(away.seen.questions.legs.criteria['navigate:place'], "Walk back to the goal's place (medium, behind, ~3 up), then stop")
+  assert.deepEqual([away.started, away.targets], [['navigate:place@span-1'], [{ place: [0, 3, 10] }]])
+  assert.equal(away.seen.state.directive.place, "you are not at the goal's place yet; it is medium, behind, ~3 up") // Jev sees where it is from the goal's place
+  const there = await decideWith(answers, [1, 5, 1]) // within 3 blocks horizontally: already there
+  assert.ok(!('navigate:place' in there.seen.questions.legs.criteria))
+  assert.equal(there.seen.state.directive.place, "you are at the goal's place; it is behind-right, ~5 up")
+  assert.deepEqual(there.trace.output.applied.legs, 'unknown_option')
+}
+
+// navigate walks to a place by x and z only: the block System 2 named may be up in a canopy.
+{
+  let goal: any
+  const bot: any = { pathfinder: { setGoal: (g: unknown) => { goal = g } }, on: () => {}, removeListener: () => {} }
+  const ended: string[] = []
+  const ch = new Channels(bot, { start: () => {}, event: () => {}, end: (_s, r) => ended.push(r) })
+  ch.set('navigate:place', 'navigate', { place: [10, 5, -3] })
+  assert.deepEqual([goal.constructor.name, goal.x, goal.z, goal.rangeSq], ['GoalNearXZ', 10, -3, 4])
+  // The walk belongs to that place: it keeps going while the place stands, and stops once it moves or goes.
+  ch.stopStalePlace([10, 5, -3])
+  assert.deepEqual([ch.slots.legs?.status, ended], ['running', []])
+  ch.stopStalePlace(null)
+  assert.deepEqual([ch.slots.legs, ended], [null, ['place_changed']])
+}
+
 // Goal tree: instructions replace the root, checks complete goals, escalate_if waits for for_ms,
 // programs stack with goals.
 {
@@ -181,11 +217,14 @@ async function decideWith (answers: Record<string, any>) {
   goals.tick(bot)
   assert.deepEqual(escalated, [`${b.id}:escalate_if:near_entity`]) // fires once per episode of the condition
   const child = goals.create('get away from the creeper', b.id, null, bot)
+  b.place = [5, 0, 5]
   assert.equal(goals.program()?.guidance, 'stay close') // inherited from the parent
+  assert.deepEqual(goals.place(), [5, 0, 5]) // so is the place
   assert.equal(goals.pathText(), `${b.id}:follow me > ${child.id}:get away from the creeper`)
   const c = goals.instruction('come here', { player: 'Josh', via: 'whisper' }, bot)
   assert.deepEqual(c.abandoned.map(g => g.id), [child.id, b.id])
   assert.equal(goals.program(), null) // back to the default
+  assert.equal(goals.place(), null)
 }
 
 // Modules System 2 writes: sandboxed, trialled before registering, disabled after repeated errors.

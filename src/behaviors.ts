@@ -21,6 +21,7 @@ export type Spec = {
   channels: Channel[]
   targets: 'entity' | 'block'
   describe: (target: string) => string
+  describePlace?: (where: string) => string // also takes the goal's place as a target ({ place: [x, y, z] })
   start: (bot: Bot, target: any, emit: Emit) => Running
   version?: number // authored behaviors; seed behaviors are version 1
   disabled?: string // an authored behavior that kept failing: no longer offered
@@ -52,9 +53,12 @@ export const BEHAVIORS: Record<string, Spec> = {
     channels: ['legs'],
     targets: 'entity',
     describe: t => `Walk to where ${t} is right now, then stop`,
-    start (bot, target: Entity, emit) {
-      const p = target.position
-      setGoal(bot, new goals.GoalNear(p.x, p.y, p.z, 2))
+    describePlace: where => `Walk back to the goal's place (${where}), then stop`,
+    start (bot, target: Entity | { place: Xyz }, emit) {
+      // ponytail: a place ignores height (the trunk or canopy System 2 scanned may not be standable); a goal
+      // underground would need GoalNear with a standable spot.
+      if ('place' in target) setGoal(bot, new goals.GoalNearXZ(target.place[0], target.place[2], 2))
+      else setGoal(bot, new goals.GoalNear(target.position.x, target.position.y, target.position.z, 2))
       const off = listen(bot, {
         goal_reached: () => emit('done'),
         path_update: (r: { status: string }) => { if (r.status === 'noPath' || r.status === 'timeout') emit('stuck') }
@@ -140,7 +144,7 @@ export const STOP_DESC: Record<Channel, string> = {
 }
 
 // pinned: a trial System 2 started; Jev can't replace it.
-type Slot = { key: string, runId: string, behavior: string, version: number, channels: Channel[], run: Running, status: string, emit: Emit, decidedBy?: string, pinned?: boolean }
+type Slot = { key: string, runId: string, behavior: string, version: number, channels: Channel[], run: Running, status: string, emit: Emit, target: unknown, decidedBy?: string, pinned?: boolean }
 export type ChannelHooks = {
   event: (slot: Slot, event: string) => void // every event, terminal or progress
   start: (slot: Slot) => void
@@ -160,10 +164,10 @@ export class Channels {
 
   // key is the option key, e.g. `follow:E3`. One owner per channel: holders of any claimed channel stop first.
   // spec: a behavior not in BEHAVIORS yet (an authored one on trial).
-  set (key: string, behavior: string, target: Entity | { name: string, count: number }, decidedBy?: string, opts: { spec?: Spec, pinned?: boolean } = {}) {
+  set (key: string, behavior: string, target: Entity | { name: string, count: number } | { place: Xyz }, decidedBy?: string, opts: { spec?: Spec, pinned?: boolean } = {}) {
     const spec = opts.spec ?? BEHAVIORS[behavior]
     this.stop(spec.channels)
-    const slot: Slot = { key, runId: `r-${++this.runs}`, behavior, version: spec.version ?? 1, channels: spec.channels, status: 'running', run: { stop () {} }, emit: () => {}, decidedBy, pinned: opts.pinned }
+    const slot: Slot = { key, runId: `r-${++this.runs}`, behavior, version: spec.version ?? 1, channels: spec.channels, status: 'running', run: { stop () {} }, emit: () => {}, target, decidedBy, pinned: opts.pinned }
     slot.emit = (event, terminal = true) => {
       if (slot.status !== 'running') return
       if (terminal) slot.status = event
@@ -193,6 +197,12 @@ export class Channels {
     if (!slot?.run.onVeto) return slot?.emit(`vetoed (${reason})`)
     slot.emit(`vetoed (${reason})`, false)
     slot.run.onVeto(reason)
+  }
+
+  // A walk back to a goal's place belongs to that place: it stops once the goal's place moves or goes.
+  stopStalePlace (place: Xyz | null) {
+    const at = (this.slots.legs?.target as { place?: Xyz } | undefined)?.place
+    if (at && this.slots.legs?.status === 'running' && String(at) !== String(place)) this.stop(['legs'], 'place_changed')
   }
 
   describe (): Record<Channel, string> {

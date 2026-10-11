@@ -94,6 +94,7 @@ export async function startAgent (opts: AgentOptions) {
   // A root closing is a goal boundary: cut the window. Programs stack with goals, so re-sync.
   function afterGoalChange (closed: Goal) {
     recorder.goalPath = goals.pathText()
+    channels.stopStalePlace(goals.place())
     if (!closed.parent) {
       directive = null
       channels.stop(CHANNELS, 'goal_closed')
@@ -190,7 +191,7 @@ export async function startAgent (opts: AgentOptions) {
   function wireDecider () {
     const decide = makeDecider({
       bot, program, handles, channels, remaining,
-      directive: () => directive && { ...directive, goal: goalLine() },
+      directive: () => directive && { ...directive, goal: goalLine(), place: goals.place() },
       events: () => recentFor(EVENT_WINDOW_MS),
       record: span => {
         lastView = (span.input as { state: unknown }).state
@@ -347,6 +348,11 @@ export async function startAgent (opts: AgentOptions) {
       goal.escalate_if = d.goal.escalate_if.map((c: CheckSpec) => check(c, goal)).filter(c => c !== null)
       goal.budget_ms = d.goal.budget_s ? d.goal.budget_s * 1000 : null
       goal.review_ms = d.goal.review_s ? d.goal.review_s * 1000 : null
+      const at = d.goal.place
+      const ok = at?.length === 3 && at.every(Number.isFinite)
+      if (at && !ok) problems.push(`place must be [x, y, z], got ${JSON.stringify(at)}`)
+      goal.place = ok ? at!.map(Math.floor) as Pos : null
+      channels.stopStalePlace(goals.place())
       goal.started = Date.now()
     }
     if (d.goal_action === 'renew') goal.started = Date.now()
@@ -462,6 +468,7 @@ export async function startAgent (opts: AgentOptions) {
   // ---- instructions: whispers from allowed players, or the local API ----
   function instruct (text: string, from: { player: string, via: 'whisper' | 'api' }) {
     const { root, abandoned } = goals.instruction(text, from, bot)
+    channels.stopStalePlace(null) // other behaviors keep running while System 2 reads the instruction
     for (const g of abandoned) recorder.record('goal', { attrs: { 'jeeve.goal.id': g.id, 'jeeve.goal.transition': 'abandoned' }, output: { summary: g.summary } })
     recorder.goalPath = goals.pathText()
     recorder.cut('goal_boundary')
