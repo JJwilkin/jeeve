@@ -7,9 +7,9 @@
   },
   "scripts": {
     "server": "node scripts/server.ts",
-    "agent": "node --env-file=../judgment/.env --env-file=../judgment/.env.typesafe src/main.ts",
+    "agent": "node --env-file=../judgment/.env.jeeve src/main.ts",
     "check": "node src/selfcheck.ts",
-    "e2e": "node --env-file=../judgment/.env --env-file=../judgment/.env.typesafe scripts/e2e.ts",
+    "e2e": "node --env-file=../judgment/.env.jeeve scripts/e2e.ts",
     "typecheck": "tsc"
   },
   "dependencies": {

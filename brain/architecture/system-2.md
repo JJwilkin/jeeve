@@ -169,7 +169,7 @@ Taken on Joshua's "go with the recommendations" (2026-10-10). Each one can be re
 5. *(Made while writing this note.)* **Code changes status only for `completed` and `abandoned`.** A budget or `escalate_if` escalates rather than failing the goal directly, so failing is always System 2's call.
 6. *(Made while writing this note.)* **Lessons kept past their goal expire at episode end by default.** Cross-episode lessons wait for the outer loop (stage 4).
 7. *(Made while writing this note.)* **The local API has no auth beyond binding to 127.0.0.1.** Revisit before the agent runs anywhere but this machine.
-8. *(Made while implementing, 2026-10-11.)* **Model and effort.** `claude-opus-5-5`: `medium` for instructions, `low` for escalations. Override with `JEEVE_SYSTEM2_MODEL`.
+8. *(Made while implementing, 2026-10-11.)* **Model and effort.** `claude-opus-5-5`: `medium` for instructions, `low` for escalations. Override with `JEEVE_SYSTEM2_MODEL`. **Reviewed 2026-10-11: accepted.** Speed matters little here, because System 1 handles reacting to the world, so System 2 can take longer to think.
 9. *(Implementing.)* **Low-confidence escalations reach System 2,** deduplicated at 30 s per goal and program version. That's about 2–3 extra calls per instruction (each ~5 s, ~3k cached input tokens). Raise the threshold or the no-repeat window if that's too chatty.
 10. *(Implementing.)* **A second `stuck` / `none_found` under the same goal escalates;** the first is left to Jev.
 11. *(Implementing.)* **When a root goal closes,** its channels stop and the bot idles until the next instruction.
