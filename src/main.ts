@@ -291,9 +291,9 @@ export async function startAgent (opts: AgentOptions) {
     goal.log.push(`system2: ${d.note}`)
     recorder.stats.note = d.note
     const live = goal.status === 'active' || goal.status === 'suspended'
+    if (!live) return // the goal was closed while System 2 was thinking: keep only the note (a message would be stale)
     const root = goals.nodes.find(g => g.id === goals.path()[0]?.id)
     if (d.message && root?.from?.via === 'whisper') bot.whisper(root.from.player, d.message)
-    if (!live) return // the goal was closed while System 2 was thinking: keep only the note
 
     // Modules first, so the rest of the decision can reference them. Each refusal is evidence for the next try.
     const problems: string[] = []

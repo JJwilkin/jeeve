@@ -95,6 +95,7 @@ The smallest scaffold that should work before System 2 tunes anything. It's the 
 - **Encoder (`egocentric`):**
   - the bot's own status: health, food, held item;
   - up to 8 entities within 16 blocks, as stable handle, type, *named* distance and direction ("close, ahead-left"), closing speed, and held item;
+  - up to 6 notable blocks (types rare nearby), each with a count bucket, exact up to 9 ("a few (4)"), and the nearest one's distance, direction and height ("close, right, ~3 up"), [[perception]];
   - each channel's current behavior and its status;
   - a ~5 s event window;
   - the directive.
@@ -121,7 +122,7 @@ From cheapest to most realistic:
 
 These are tools System 2 can use and a record to search later, not gates. Outcome signals for open-ended objectives are still roadmap stage 4.
 
-**Replay needs raw state in the trace.** Each `decide()` span logs a compact raw snapshot (entities, inventory, the bot's own status, events, a 16³ block cube) besides the encoded text. The estimate is ~15 KB raw, or ~2–4 KB compressed, per decision. That's ~10–25 MB/h compressed per bot at 1–3 decisions/s, about 1–5× the encoded text we log anyway. To save more, log the block cube only when it changes. The span schema is in [[trace-schema]].
+**Replay needs raw state in the trace.** Each `decide()` span logs a compact raw snapshot (entities, inventory, the bot's own status, events, ~~a 16³ block cube~~ notable blocks with positions, [[perception]]) besides the encoded text. The estimate is ~15 KB raw, or ~2–4 KB compressed, per decision. That's ~10–25 MB/h compressed per bot at 1–3 decisions/s, about 1–5× the encoded text we log anyway. To save more, log the block cube only when it changes. The span schema is in [[trace-schema]].
 
 ## First implementation (2026-10-10)
 A first slice runs in `src/`. It has:
@@ -166,7 +167,7 @@ Built in `src/modules.ts` for two module kinds:
 - **checks:** goal success checks and `escalate_if` conditions ([[system-2]]);
 - **watch conditions:** they wake Jev with the trigger `watch:<name>` when they turn true.
 
-Both are JavaScript function expressions, `(s) => boolean`, over the raw snapshot. That snapshot is the module API: it holds the bot's own state, entities, inventory, world time and weather, and the block underfoot. The same snapshot is logged on every `decide` span, so a module can be replayed on old states.
+Both are JavaScript function expressions, `(s) => boolean`, over the raw snapshot. That snapshot is the module API: it holds the bot's own state, entities, inventory, world time and weather, the block underfoot, and (since [[perception]]) notable blocks with their positions. The same snapshot is logged on every `decide` span, so a module can be replayed on old states.
 
 **Pipeline:** System 2 puts modules in `new_modules` in its decision, and they're registered before the rest of the decision is applied.
 1. **Compile** in a fresh sandbox.

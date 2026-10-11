@@ -28,6 +28,7 @@ A fight that crosses a cut is stitched back together by `run_id`.
 window                   root
 ├─ carry_over            first child: hands context forward
 ├─ system2               Claude call (instruction or escalation)
+│  └─ perceive           one per scan / reachable call System 2 makes ([[perception]])
 ├─ program               one per new System 1 program version (includes guidance)
 ├─ decide                one per Jev call (most of the spans)
 ├─ behavior.<name>       one per behavior run within this window
@@ -42,6 +43,7 @@ All custom attributes use the `jeeve.*` prefix.
 | `window` | none | `jeeve.window_index`, `jeeve.prev_trace_id`, `jeeve.window.reason` (`time`, `goal_boundary`, `episode_end`), `jeeve.goal.path` (`g-4:collect 10 logs > g-5:…`, at window open) | game events that aren't behavior events: `death`, `damage`, `owner_damage` (the player an open-ended goal protects, [[system-2]]), `chat`. Each carries the program version in effect. |
 | `carry_over` | in: goal path, program version, previous window's summary, open behavior runs | `jeeve.prev_trace_id` | none |
 | `system2` | in: instruction text and sender, or the escalation · out: goal, check, program changes | `jeeve.system2.trigger` (`instruction`, `escalation:<reason>`), plus model and tokens via `recordLLMMetadata` | none |
+| `perceive` | in: the query · out: the full result | `jeeve.perceive.tool` (`scan`, `reachable`), `.query`, `.mode` (`xray`, `los`; scan only), `.latency_ms`, `.result_bytes` | none |
 | `program` | in: manifest diff from the parent · out: full manifest | `jeeve.program.version`, `.parent`, `.reason`, `.cites` (trace and span ids), `.activation` (`ok`, `failed_check`, `rolled_back`) | none |
 | `decide` | in: the encoded state as Jev saw it, plus the questions with options **in the order shown** · out: choices, probabilities, confidence | `jeeve.program.version`, `jeeve.decide.trigger` (merged triggers), `.changed`, `.latency_ms`, `.state_age_ms` (how stale the state was when the answer arrived), `.deadline_missed`, `.escalate`, `.raw_state` (compact raw snapshot for replay) | none |
 | `behavior.<name>` | none | `jeeve.behavior.name`, `.version`, `.params`, `.run_id`, `.channels`, `.decided_by` (the `decide` span id), `.end_reason`, `.continued` | `progress`, `vetoed` (guard and reason), and the other behavior events |
@@ -50,8 +52,8 @@ All custom attributes use the `jeeve.*` prefix.
 **Every `decide` call keeps its full state.** The many `keep_current` calls are the evidence for telling a bad choice from a broken behavior ([[behaviors-and-guards]]). `jeeve.decide.changed` lets queries skip them.
 
 **The raw snapshot is for replay** ([[system-1]]):
-- **What's in it:** entities, inventory, the bot's own status, the event window, and a 16³ block cube, as JSON in `jeeve.decide.raw_state`.
-- **The block cube is logged only when it changes.** The first `decide` of every window always logs it, so replay never needs to look across traces.
+- **What's in it:** entities, inventory, the bot's own status, the event window, and notable blocks with positions (nearest 8 per type), as JSON in `jeeve.decide.raw_state`.
+- ~~**A 16³ block cube, logged only when it changes.**~~ *Superseded by [[perception]]:* notable blocks with positions (~1 KB) instead of the full cube (~5k blocks). Add the cube when a replayed encoder needs terrain.
 - **Option order is part of the input,** because order changes Jev's answers ([[jev-measurements]]).
 
 ## Ingest
@@ -141,8 +143,11 @@ Built in `src/trace.ts`, exporting to staging project `jeeve-dev` via judgeval-j
 - `jeeve.system2.latency_ms`, `.turns` and `.refusal`;
 - `jeeve.behavior.decided_by`, as specified.
 
+**Since 2026-10-11 ([[perception]]):**
+- **`perceive` spans** are children of the `system2` span, which now opens when the call starts rather than being recorded after it.
+- **The raw snapshot carries notable blocks** with positions instead of a block cube.
+
 **Not yet:**
-- **The raw snapshot has no block cube.** The default encoder doesn't need terrain yet.
 - **Semantic search isn't used.** System 2 has SQL only (`run_sql`).
 
 ## Open questions

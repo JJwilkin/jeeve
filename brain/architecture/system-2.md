@@ -180,6 +180,7 @@ Built in `src/goals.ts`, `src/system2.ts` and `src/main.ts`, and exercised by `n
 
 **System 2 is Claude Opus 5.5 in a short tool loop:**
 - `run_sql` over its own traces through judgeval's `client.sql()`;
+- `scan` and `reachable`, read-only world queries, traced as `perceive` spans ([[perception]]). Tool calls in one turn run in parallel;
 - a strict `submit_decision` tool that returns goal check, `escalate_if`, budget or review interval, a program patch, a goal action (`none` | `fail` | `renew`), an optional sub-goal and an optional message;
 - effort `medium` for instructions and `low` for escalations;
 - server-side `fallbacks: "default"`, and the stable system prompt is cached.

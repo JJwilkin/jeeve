@@ -73,7 +73,7 @@ export function scan (bot: Bot, q: { match: string, radius?: number, los?: boole
 export async function reachable (bot: Bot, p: Pos, timeoutMs = 1000) {
   const goal = new pf.goals.GoalLookAtBlock(new Vec3(p[0], p[1], p[2]), bot.world)
   let r: { status: string, cost: number, path: unknown[] } | undefined
-  for (const step of bot.pathfinder.getPathFromTo(bot.pathfinder.movements, bot.entity.position, goal, { timeout: timeoutMs, searchRadius: SCAN_LIMITS.radius })) {
+  for (const step of bot.pathfinder.getPathFromTo(bot.pathfinder.movements, bot.entity.position, goal, { timeout: timeoutMs })) {
     r = (step as { result: typeof r }).result
     if (r!.status !== 'partial') break
     await new Promise(resolve => setImmediate(resolve))

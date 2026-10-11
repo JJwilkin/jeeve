@@ -58,6 +58,8 @@ All three instructions pass, and so do a live guard veto and the local API. Syst
 
 **Next:**
 - System 2 writing encoders and option generators: deferred. Checks and watch conditions are done and persist in a module library ([[system-1]] → "Modules System 2 writes");
+- behaviors System 2 writes at runtime ([[runtime-authored-behaviors]], task);
+- ~~perception as tools~~: done 2026-10-11. System 2 looks with `scan` and `reachable` ([[perception]]); next is block states and more consistent batching of looks;
 - lessons that outlive their goal;
 - judges and the outer loop (stage 4);
 - the PvP arena and benchmarks ([[benchmarks]]).
