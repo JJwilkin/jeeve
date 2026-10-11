@@ -40,6 +40,7 @@ See the [roadmap](brain/roadmap.md).
 npm install
 npm run check        # offline self-check
 npm run e2e          # local server + agent + a scripted player; real Jev, Claude and Judgment staging
+JEEVE_PORT=25566 npm run e2e   # a parallel run: own port, own world in .server/runs/<port>/ (about 20 min)
 npm run server       # just the server (type console commands into it)
 JEEVE_ALLOWED=YourName npm run agent   # the agent; whisper it instructions in game
 ```
