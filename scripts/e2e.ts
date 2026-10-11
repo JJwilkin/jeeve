@@ -196,9 +196,12 @@ await until('"break the tree": an authored behavior runs (written now, or reused
 await until('"break the tree": every leaf is broken', () => treeLeft('leaves').length === 0, 360000)
 console.log(`left around the tree: leaves [${treeLeft('leaves').join(' ')}], logs [${treeLeft('log').join(' ')}]`)
 console.log(`authored runs here: ${authoredRuns().map(r => `${r.attrs['jeeve.behavior.params']} (${r.attrs['jeeve.behavior.decided_by']?.startsWith('system2:') ? 'trial' : 'Jev'})`).join(', ')}`)
+// The leaves can be gone while the trial's code is still running (it may climb down after), and pass_when is judged
+// 3 ticks after it returns, so wait for registration rather than check it at once.
+await until('a behavior System 2 wrote passed its trial and is registered', () => registered().length > 0, 150000)
 {
   const ids = registered().map(m => m.id)
-  check('a behavior System 2 wrote passed its trial and is registered', ids.length > 0, ids.map(id => `${id}: ${JSON.stringify(agent.modules.get(id.split('@')[0])?.trial)}`).join('; '))
+  console.log(`registered behaviors: ${ids.map(id => `${id}: ${JSON.stringify(agent.modules.get(id.split('@')[0])?.trial)}`).join('; ')}`)
   const { loaded } = new ModuleRegistry(() => {}, LIBRARY).load()
   check('behaviors persist: a fresh registry reloads the authored behaviors from the library', ids.length > 0 && ids.every(id => loaded.includes(id)), loaded.join(', '))
 }
