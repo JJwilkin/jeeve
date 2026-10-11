@@ -73,6 +73,15 @@ await until('"collect 10 logs": System 2 sets inventory_delta(*_log, 10)', () =>
 await until('"collect 10 logs": 10 logs in inventory', () => logs() >= 10, 120000)
 await until('"collect 10 logs": Josh hears "done"', () => whispers.some(w => w.startsWith('done: collect 10 logs')), 20000)
 
+// A goal no built-in check covers: System 2 has to write a check module, which code then evaluates.
+josh.whisper('Jeeve', 'wait here until it gets dark')
+await until('"until dark": System 2 writes and registers a check module', () => leaf()?.done_when?.spec.module === 'authored', 45000)
+const authored = agent.goals.leaf()?.done_when?.desc ?? ''
+check('"until dark": the authored check is false in daylight', !whispers.some(w => w.startsWith('done: wait here')), authored)
+server.command('time set 14000')
+await until('"until dark": night falls and Josh hears "done"', () => whispers.some(w => w.startsWith('done: wait here until it gets dark')), 15000)
+server.command('time set day')
+
 josh.whisper('Jeeve', 'follow me and defend me')
 await sleep(1500)
 server.command('tp Josh 34 -60 -4')
@@ -121,7 +130,7 @@ if (agent.recorder.exporting) {
       names = Object.fromEntries(res.rows.map((r: any) => [r.span_name, Number(r.n)]))
     }
     console.log('judgment spans by name:', JSON.stringify(names))
-    const want = ['window', 'carry_over', 'decide', 'system2', 'program', 'goal', 'behavior.collect', 'behavior.follow', 'behavior.attack_when_ready']
+    const want = ['window', 'carry_over', 'decide', 'system2', 'program', 'goal', 'module', 'behavior.collect', 'behavior.follow', 'behavior.attack_when_ready']
     check('Judgment has every span kind for this session', want.every(n => (names[n] ?? 0) > 0), want.filter(n => !names[n]).join(', ') || 'all present')
     const lineage = await client.sql(`SELECT count() AS n FROM telemetry.spans WHERE session_id = '${session}' AND span_name = 'window' AND attributes['jeeve.prev_trace_id'] != ''`)
     check('windows are linked by prev_trace_id', Number((lineage.rows[0] as any).n) > 0, `${(lineage.rows[0] as any).n} linked windows`)

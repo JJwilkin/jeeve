@@ -8,9 +8,10 @@ import collectblock from 'mineflayer-collectblock'
 import { Judgeval } from 'judgeval'
 import { CHANNELS, Channels } from './behaviors.ts'
 import { coalescing, makeDecider, type Ask } from './decide.ts'
-import { inventoryCounts, newHandles, type Directive } from './encoder.ts'
+import { inventoryCounts, newHandles, rawSnapshot, type Directive } from './encoder.ts'
 import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal } from './goals.ts'
 import { guardedMovements, installGuards } from './guards.ts'
+import { ModuleRegistry, type Snapshot } from './modules.ts'
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
 import { makeSystem2, type Decision } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
@@ -60,6 +61,16 @@ export async function startAgent (opts: AgentOptions) {
   let watchdog = { decides: 0, errors: 0, previous: null as Program | null }
   const fires = (event: string) => program.triggers.events.includes(event.split(' ')[0])
   const failures = new Map<string, number>() // per goal: stuck / none_found count
+
+  // ---- modules System 2 writes: trialled on recent real states, disabled after repeated errors ----
+  const recentStates: Snapshot[] = [] // raw snapshots from recent decide calls, for trials
+  const modules = new ModuleRegistry((m, reason) => {
+    recorder.record('module', { attrs: { 'jeeve.module.id': m.id, 'jeeve.module.kind': m.kind, 'jeeve.module.activation': 'disabled' }, output: { reason, stats: m.stats } })
+    note(`module ${m.id} disabled: ${reason}`)
+    const leaf = goals.leaf()
+    if (leaf) escalate('module_disabled', { module: m.id, reason }, leaf)
+  })
+  const lookup = (name: string) => modules.get(name)
 
   const goals = new Goals({
     completed: g => {
@@ -158,6 +169,8 @@ export async function startAgent (opts: AgentOptions) {
       events: () => recentFor(EVENT_WINDOW_MS),
       record: span => {
         lastView = (span.input as { state: unknown }).state
+        recentStates.push(JSON.parse(span.attrs['jeeve.decide.raw_state'] as string))
+        if (recentStates.length > 30) recentStates.shift()
         // Watchdog: 3 failed calls in the first 10 after an activation roll back to the previous program.
         watchdog.decides++
         if ((span.output as { error?: string }).error) watchdog.errors++
@@ -226,6 +239,7 @@ export async function startAgent (opts: AgentOptions) {
       goals: goals.status(bot),
       program: { version: version(program), guidance: program.guidance, allowed_behaviors: program.allowed_behaviors, heartbeat_ms: program.triggers.heartbeat_ms },
       fast_model_view: lastView,
+      modules: modules.list(),
       recent_events: recentFor(30_000),
       window: { session_id: session, previous_trace_id: recorder.prevTraceId, summary_so_far: recorder.summary() }
     }
@@ -256,9 +270,26 @@ export async function startAgent (opts: AgentOptions) {
     const root = goals.nodes.find(g => g.id === goals.path()[0]?.id)
     if (d.message && root?.from?.via === 'whisper') bot.whisper(root.from.player, d.message)
     if (!live) return // the goal was closed while System 2 was thinking: keep only the note
+
+    // Modules first, so the rest of the decision can reference them. Each refusal is evidence for the next try.
+    const problems: string[] = []
+    for (const src of d.new_modules ?? []) {
+      const { module, trial } = modules.register(src, [...recentStates, rawSnapshot(bot)])
+      recorder.record('module', {
+        attrs: { 'jeeve.module.id': module?.id ?? src.name, 'jeeve.module.kind': src.kind, 'jeeve.module.activation': module ? 'ok' : 'failed_trial', 'jeeve.program.cites': cite },
+        input: src, output: trial
+      })
+      goal.log.push(module ? `registered ${module.id} (true on ${trial.trues}/${trial.states} recent states)` : `module ${src.name} refused: ${trial.error}`)
+      if (!module) problems.push(`module ${src.name} refused: ${trial.error}`)
+    }
+    const check = (spec: CheckSpec, g: Goal) => {
+      try { return compile(spec, g, lookup) } catch (err) { problems.push(String(err)); return null }
+    }
+
     if (d.goal) {
-      goal.done_when = d.goal.done_when ? compile(d.goal.done_when, goal) : null
-      goal.escalate_if = d.goal.escalate_if.map((c: CheckSpec) => compile(c, goal))
+      const done = d.goal.done_when ? check(d.goal.done_when, goal) : null
+      if (!d.goal.done_when || done) goal.done_when = done // keep the old check if the new one can't compile
+      goal.escalate_if = d.goal.escalate_if.map((c: CheckSpec) => check(c, goal)).filter(c => c !== null)
       goal.budget_ms = d.goal.budget_s ? d.goal.budget_s * 1000 : null
       goal.review_ms = d.goal.review_s ? d.goal.review_s * 1000 : null
       goal.started = Date.now()
@@ -272,7 +303,15 @@ export async function startAgent (opts: AgentOptions) {
         reason: d.note,
         guidance: d.program.guidance ?? base.guidance,
         allowed_behaviors: d.program.allowed_behaviors ?? base.allowed_behaviors,
-        triggers: { ...base.triggers, heartbeat_ms: Math.min(5000, Math.max(LIMITS.minIntervalMs, d.program.heartbeat_ms ?? base.triggers.heartbeat_ms)) }
+        triggers: {
+          ...base.triggers,
+          heartbeat_ms: Math.min(5000, Math.max(LIMITS.minIntervalMs, d.program.heartbeat_ms ?? base.triggers.heartbeat_ms)),
+          watch: (d.program.watch ?? base.triggers.watch ?? []).filter(n => {
+            const ok = modules.get(n)?.kind === 'watch'
+            if (!ok) problems.push(`no registered watch module named ${n}`)
+            return ok
+          })
+        }
       }
       try { validate(next); goal.program = next } catch (err) {
         recorder.record('program', { attrs: { 'jeeve.program.version': version(next), 'jeeve.program.activation': 'failed_check', 'jeeve.program.cites': cite }, output: { error: String(err) } })
@@ -280,7 +319,7 @@ export async function startAgent (opts: AgentOptions) {
     }
     if (d.push_child) {
       const child = goals.create(d.push_child.text, goal.id, null, bot)
-      child.done_when = d.push_child.done_when ? compile(d.push_child.done_when, child) : null
+      child.done_when = d.push_child.done_when ? check(d.push_child.done_when, child) : null
       child.budget_ms = d.push_child.budget_s ? d.push_child.budget_s * 1000 : null
       recorder.record('goal', { attrs: { 'jeeve.goal.id': child.id, 'jeeve.goal.path': goals.pathText(), 'jeeve.goal.transition': 'pushed' }, input: { text: child.text } })
     }
@@ -293,6 +332,7 @@ export async function startAgent (opts: AgentOptions) {
     recorder.goalPath = goals.pathText()
     const want = goals.program() ?? DEFAULT_PROGRAM
     if (version(want) !== version(program)) activate(want, `system2: ${d.note}`, [cite])
+    if (problems.length) escalate('module_failed', { problems }, goal)
   }
 
   // ---- instructions: whispers from allowed players, or the local API ----
@@ -318,7 +358,7 @@ export async function startAgent (opts: AgentOptions) {
     api = createServer((req, res) => {
       const reply = (code: number, body: unknown) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
       if (req.method === 'GET' && req.url === '/status') {
-        return reply(200, { goals: goals.status(bot), program: version(program), channels: channels.describe(), session, trace_window: recorder.index })
+        return reply(200, { goals: goals.status(bot), program: version(program), channels: channels.describe(), modules: modules.list(), session, trace_window: recorder.index })
       }
       if (req.method === 'POST' && req.url === '/instructions') {
         let body = ''
@@ -354,11 +394,22 @@ export async function startAgent (opts: AgentOptions) {
 
     let hostileNear = false
     let ticks = 0
+    const watching = new Map<string, boolean>()
     bot.on('physicsTick', () => {
       const near = Object.values(bot.entities).some(e => e.type === 'hostile' && e.position.distanceTo(bot.entity.position) <= program.triggers.hostile_within)
       if (near && !hostileNear) { note('hostile mob within range'); if (fires('hostile_near')) wake('hostile_near') }
       hostileNear = near
-      if (++ticks % 5 === 0) goals.tick(bot) // checks every 250 ms
+      if (++ticks % 5 !== 0) return
+      goals.tick(bot) // checks every 250 ms
+      // Watch modules wake Jev when they turn true (rising edge only).
+      const watch = program.triggers.watch ?? []
+      if (!watch.length) return
+      const snap = rawSnapshot(bot)
+      for (const name of watch) {
+        const on = modules.get(name)?.run(snap) ?? false
+        if (on && !watching.get(name)) { note(`watch ${name} turned true`); wake(`watch:${name}`) }
+        watching.set(name, on)
+      }
     })
     setInterval(() => { if (recorder.window && Date.now() - recorder.openedAt >= WINDOW_MS) recorder.cut('time') }, 1000)
   })

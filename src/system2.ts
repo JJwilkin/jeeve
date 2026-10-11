@@ -4,6 +4,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { BEHAVIORS } from './behaviors.ts'
 import type { CheckSpec } from './goals.ts'
+import { MODULE_LIMITS, type ModuleSource } from './modules.ts'
 
 export const MODEL = process.env.JEEVE_SYSTEM2_MODEL ?? 'claude-opus-5-5'
 const MAX_TURNS = 4
@@ -13,7 +14,8 @@ export type Decision = {
   goal: { done_when: CheckSpec | null, escalate_if: CheckSpec[], budget_s: number | null, review_s: number | null } | null
   goal_action: 'none' | 'fail' | 'renew'
   push_child: { text: string, done_when: CheckSpec | null, budget_s: number | null } | null
-  program: { guidance: string | null, allowed_behaviors: string[] | null, heartbeat_ms: number | null } | null
+  program: { guidance: string | null, allowed_behaviors: string[] | null, heartbeat_ms: number | null, watch: string[] | null } | null
+  new_modules: ModuleSource[]
   message: string | null
 }
 
@@ -21,9 +23,10 @@ const nullable = (type: string, extra: Record<string, unknown> = {}) => ({ type:
 const CHECK = {
   type: 'object',
   additionalProperties: false,
-  required: ['module', 'player', 'radius', 'match', 'count', 'negate', 'for_ms'],
+  required: ['module', 'name', 'player', 'radius', 'match', 'count', 'negate', 'for_ms'],
   properties: {
-    module: { type: 'string', enum: ['near_entity', 'inventory_delta', 'entity_alive'] },
+    module: { type: 'string', enum: ['near_entity', 'inventory_delta', 'entity_alive', 'authored'] },
+    name: nullable('string', { description: 'authored: the name of a check module you registered (now or earlier)' }),
     player: nullable('string', { description: 'near_entity, entity_alive: player name' }),
     radius: nullable('number', { description: 'near_entity: blocks' }),
     match: nullable('string', { description: 'inventory_delta: item name glob, e.g. "*_log"' }),
@@ -41,7 +44,7 @@ const TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object',
       additionalProperties: false,
-      required: ['note', 'goal', 'goal_action', 'push_child', 'program', 'message'],
+      required: ['note', 'goal', 'goal_action', 'push_child', 'program', 'new_modules', 'message'],
       $defs: { check: CHECK },
       properties: {
         note: { type: 'string', description: 'One line for the goal log: what you decided and why.' },
@@ -69,11 +72,25 @@ const TOOLS: Anthropic.Tool[] = [
           ...nullable('object'),
           description: "Change System 1's program for the active goal. null keeps it. Changes revert when the goal closes.",
           additionalProperties: false,
-          required: ['guidance', 'allowed_behaviors', 'heartbeat_ms'],
+          required: ['guidance', 'allowed_behaviors', 'heartbeat_ms', 'watch'],
           properties: {
+            watch: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }], description: 'Names of watch modules that wake the fast model when they turn true. null keeps the current list.' },
             guidance: nullable('string', { description: 'Full replacement guidance for the fast model. Concrete and short.' }),
             allowed_behaviors: { anyOf: [{ type: 'array', items: { type: 'string', enum: Object.keys(BEHAVIORS) } }, { type: 'null' }] },
             heartbeat_ms: nullable('integer', { description: 'How often the fast model re-decides without an event (200–5000).' })
+          }
+        },
+        new_modules: {
+          type: 'array',
+          description: 'Modules to register before the rest of this decision is applied. Usually empty.',
+          items: {
+            type: 'object', additionalProperties: false, required: ['kind', 'name', 'description', 'code'],
+            properties: {
+              kind: { type: 'string', enum: ['check', 'watch'] },
+              name: { type: 'string', description: 'snake_case; registering an existing name makes a new version' },
+              description: { type: 'string' },
+              code: { type: 'string', description: 'A JavaScript function expression (s) => boolean over the snapshot.' }
+            }
           }
         },
         message: nullable('string', { description: 'Whisper to the player who gave the instruction. Only for failures, refusals or clarifying questions.' })
@@ -96,6 +113,10 @@ Behaviors System 1 can choose from:
 ${Object.entries(BEHAVIORS).map(([n, b]) => `- ${n} (${b.channels.join('+')}): ${b.describe('<target>')}`).join('\n')}
 
 Success checks are code you parameterize: near_entity(player, radius), inventory_delta(match glob, count), entity_alive(player). Code evaluates them every tick, marks a goal completed when its done_when passes, and tells the player. You never need to say "done".
+
+When no built-in check can express a goal, write one. Put a module in new_modules and reference it as {"module": "authored", "name": ...} in done_when or escalate_if. You can also write watch modules: list their names in program.watch, and the fast model is woken each time one turns true. A module is a JavaScript function expression \`(s) => boolean\` over a plain-data snapshot:
+s = { t, self: { pos: [x, y, z], yaw, health, food, held, below }, entities: [{ id, name, type, username, pos, vel }], inventory: { item_name: count }, world: { time_of_day /* 0-24000 ticks; night is about 13000-23000 */, is_day, raining } }
+Helpers: dist(a, b) for positions, count(s, "*_log") for inventory globs. Modules are pure: no I/O, no state between calls, no eval. They must finish in under ${MODULE_LIMITS.budgetMs} ms, and they run several times a second. Before registering, a module is trialled on recent real snapshots and refused if it throws or returns a non-boolean. A refusal comes back to you as an escalation. Modules you registered earlier are listed in your context, so reuse them by name.
 
 On a new instruction: set the goal's done_when (or null if open-ended), escalate_if conditions, and a budget (closed goals) or review interval (open-ended goals). Adjust the program only if the default guidance is not enough. On an escalation: read what happened and decide whether to change the program, fail the goal (with a message saying why), push a sub-goal, or carry on (goal_action "none", everything else null).
 

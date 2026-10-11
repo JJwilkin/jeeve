@@ -9,7 +9,7 @@ export type Program = {
   reason: string
   encoder: { module: string, params: Parameters<typeof makeEgocentric>[0] }
   questions: Record<string, Choice | { type: 'noul', instructions: string }>
-  triggers: { events: string[], hostile_within: number, heartbeat_ms: number }
+  triggers: { events: string[], hostile_within: number, heartbeat_ms: number, watch?: string[] } // watch: authored watch modules
   escalate_when: { confidence_below: number, noul_above: number }
   allowed_behaviors: string[]
   guidance: string

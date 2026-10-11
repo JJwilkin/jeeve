@@ -1,12 +1,14 @@
 // The goal tree (brain/architecture/system-2.md). Only System 2 writes nodes and fails goals; code
 // changes status only for `completed` (the check passed) and `abandoned` (a new instruction).
 import type { Bot } from 'mineflayer'
-import { inventoryCounts } from './encoder.ts'
+import { inventoryCounts, rawSnapshot } from './encoder.ts'
+import type { Module } from './modules.ts'
 import type { Program } from './program.ts'
 
 // A check is a generic predicate over raw state; System 2 picks the module and fills in the values.
 export type CheckSpec = {
-  module: 'near_entity' | 'inventory_delta' | 'entity_alive'
+  module: 'near_entity' | 'inventory_delta' | 'entity_alive' | 'authored'
+  name: string | null // authored: a check module System 2 registered (src/modules.ts)
   player: string | null // near_entity, entity_alive
   radius: number | null // near_entity
   match: string | null // inventory_delta: item name glob, e.g. "*_log"
@@ -41,7 +43,10 @@ export const noteDeath = (player: string) => deaths.set(player, Date.now())
 export const glob = (pattern: string) => new RegExp('^' + pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$')
 const playerEntity = (bot: Bot, name: string | null) => name ? bot.players[name]?.entity : undefined
 
-export function compile (spec: CheckSpec, goal: Pick<Goal, 'inventory'>): Compiled {
+// Authored checks run on the raw snapshot; the registry lookup is passed in by the runtime.
+export type ModuleLookup = (name: string) => Module | undefined
+
+export function compile (spec: CheckSpec, goal: Pick<Goal, 'inventory'>, modules?: ModuleLookup): Compiled {
   const base = (() => {
     switch (spec.module) {
       case 'near_entity': {
@@ -58,6 +63,11 @@ export function compile (spec: CheckSpec, goal: Pick<Goal, 'inventory'>): Compil
         const start = count(goal.inventory)
         const have = (bot: Bot) => Math.max(0, count(inventoryCounts(bot)) - start)
         return { desc: `${want} more ${spec.match}`, test: (bot: Bot) => have(bot) >= want, progress: (bot: Bot) => ({ have: Math.min(have(bot), want), want }) }
+      }
+      case 'authored': {
+        const m = spec.name ? modules?.(spec.name) : undefined
+        if (!m || m.kind !== 'check') throw new Error(`no registered check module named ${spec.name}`)
+        return { desc: `${m.id}: ${m.description}`, test: (bot: Bot) => m.run(rawSnapshot(bot)) }
       }
       case 'entity_alive':
         return {

@@ -5,6 +5,7 @@ import { coalescing, makeDecider } from './decide.ts'
 import { direction, distanceBucket, newHandles } from './encoder.ts'
 import { compile, glob, Goals } from './goals.ts'
 import { controlVector, unsafeAt } from './guards.ts'
+import { compileModule, ModuleRegistry } from './modules.ts'
 import { DEFAULT_PROGRAM, optionsFor, validate, version } from './program.ts'
 
 // Direction is egocentric: yaw 0 faces north (-z), positive turns left.
@@ -180,6 +181,32 @@ async function decideWith (answers: Record<string, any>) {
   const c = goals.instruction('come here', { player: 'Josh', via: 'whisper' }, bot)
   assert.deepEqual(c.abandoned.map(g => g.id), [child.id, b.id])
   assert.equal(goals.program(), null) // back to the default
+}
+
+// Modules System 2 writes: sandboxed, trialled before registering, disabled after repeated errors.
+{
+  const snap = (over: object = {}) => ({ self: { pos: [0, 64, 0], health: 20 }, entities: [], inventory: { oak_log: 3, birch_log: 2 }, world: { time_of_day: 6000, is_day: true }, ...over })
+  const night = { kind: 'check' as const, name: 'is_night', description: 'night has fallen', code: '(s) => !s.world.is_day' }
+  const reg = new ModuleRegistry()
+  const ok = reg.register(night, [snap(), snap({ world: { time_of_day: 14000, is_day: false } })])
+  assert.deepEqual([ok.module?.id, ok.trial.trues, ok.trial.errors, ok.trial.error], ['is_night@1', 1, 0, undefined])
+  assert.equal(reg.register(night, [snap()]).module?.id, 'is_night@2') // a new version, not a replacement in place
+  assert.equal(compileModule({ ...night, code: '(s) => count(s, "*_log") >= 5 && dist(s.self.pos, [3, 64, 4]) === 5' }, 1).run(snap()), true) // prelude helpers
+
+  const reject = (code: string) => reg.register({ ...night, name: 'bad', code }, [snap()]).trial.error ?? ''
+  assert.match(reject('(s) => {'), /^compile: SyntaxError/)
+  assert.match(reject('42'), /^compile: TypeError: code must be a function/)
+  assert.match(reject('(s) => s.world.time_of_day'), /not a boolean/)
+  assert.match(reject('(s) => { while (true) {} }'), /timed out/)
+  assert.match(reject('(s) => eval("true")'), /Code generation from strings disallowed/)
+  assert.equal(reg.get('bad'), undefined) // nothing failing a trial gets registered
+  // No Node in the sandbox: these return true only if process/require are absent.
+  assert.equal(compileModule({ ...night, code: '(s) => typeof process === "undefined" && typeof require === "undefined"' }, 1).run(snap()), true)
+
+  const disabled: string[] = []
+  const flaky = compileModule({ ...night, name: 'flaky', code: '(s) => s.missing.field' }, 1, m => disabled.push(m.id))
+  for (let i = 0; i < 5; i++) flaky.run(snap())
+  assert.deepEqual([disabled, flaky.stats.errors, flaky.run(snap())], [['flaky@1'], 3, false]) // stops running after 3 errors
 }
 
 console.log('selfcheck ok')

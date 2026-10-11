@@ -134,12 +134,19 @@ export function makeEgocentric (params: { entity_cap: number, radius: number, bl
 }
 
 // Compact raw snapshot logged with every decision, so a new encoder can be replayed on old states.
+// It is also the input to modules System 2 writes (src/modules.ts), so keep it plain JSON.
 // ponytail: no block cube yet; add a 16³ cube (logged only on change) once an encoder needs terrain.
 export function rawSnapshot (bot: Bot, radius = 32) {
   const me = bot.entity
   const r = (v: { x: number, y: number, z: number }) => [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(2)]
   return {
-    self: { pos: r(me.position), yaw: +me.yaw.toFixed(3), health: bot.health, food: bot.food, held: bot.heldItem?.name ?? null },
+    t: Date.now(),
+    self: {
+      pos: r(me.position), yaw: +me.yaw.toFixed(3), health: bot.health, food: bot.food,
+      held: bot.heldItem?.name ?? null, below: bot.blockAt?.(me.position.offset(0, -1, 0))?.name ?? null
+    },
+    inventory: bot.inventory ? inventoryCounts(bot) : {},
+    world: { time_of_day: bot.time?.timeOfDay ?? null, is_day: bot.time?.isDay ?? null, raining: bot.isRaining ?? null },
     entities: Object.values(bot.entities)
       .filter(e => e !== me && e.position.distanceTo(me.position) <= radius)
       .map(e => ({ id: e.id, name: e.name, type: e.type, username: e.username, pos: r(e.position), vel: r(e.velocity) }))
