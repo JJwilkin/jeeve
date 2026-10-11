@@ -4,6 +4,10 @@
 import type { Bot } from 'mineflayer'
 import type { Entity } from 'prismarine-entity'
 import pf from 'mineflayer-pathfinder'
+import { Vec3 } from 'vec3'
+import { inventoryCounts } from './encoder.ts'
+import { glob } from './goals.ts'
+import { BEHAVIOR_ENDINGS, startBehavior, type Module } from './modules.ts'
 
 const { goals } = pf
 
@@ -11,12 +15,16 @@ export type Channel = 'legs' | 'aim' | 'hands'
 export const CHANNELS: Channel[] = ['legs', 'aim', 'hands']
 // terminal events end the run's status (done, stuck, vetoed…); progress events are only recorded.
 type Emit = (event: string, terminal?: boolean) => void
-type Running = { stop: () => void }
-type Spec = {
+// onVeto: an authored run handles a guard veto itself (the vetoed call rejects); detail goes on its span.
+type Running = { stop: () => void, onVeto?: (reason: string) => void, detail?: () => unknown }
+export type Spec = {
   channels: Channel[]
   targets: 'entity' | 'block'
   describe: (target: string) => string
+  describePlace?: (where: string) => string // also takes the goal's place as a target ({ place: [x, y, z] })
   start: (bot: Bot, target: any, emit: Emit) => Running
+  version?: number // authored behaviors; seed behaviors are version 1
+  disabled?: string // an authored behavior that kept failing: no longer offered
 }
 
 // Subscribe to bot events for the lifetime of one behavior run.
@@ -45,9 +53,12 @@ export const BEHAVIORS: Record<string, Spec> = {
     channels: ['legs'],
     targets: 'entity',
     describe: t => `Walk to where ${t} is right now, then stop`,
-    start (bot, target: Entity, emit) {
-      const p = target.position
-      setGoal(bot, new goals.GoalNear(p.x, p.y, p.z, 2))
+    describePlace: where => `Walk back to the goal's place (${where}), then stop`,
+    start (bot, target: Entity | { place: Xyz }, emit) {
+      // ponytail: a place ignores height (the trunk or canopy System 2 scanned may not be standable); a goal
+      // underground would need GoalNear with a standable spot.
+      if ('place' in target) setGoal(bot, new goals.GoalNearXZ(target.place[0], target.place[2], 2))
+      else setGoal(bot, new goals.GoalNear(target.position.x, target.position.y, target.position.z, 2))
       const off = listen(bot, {
         goal_reached: () => emit('done'),
         path_update: (r: { status: string }) => { if (r.status === 'noPath' || r.status === 'timeout') emit('stuck') }
@@ -132,7 +143,8 @@ export const STOP_DESC: Record<Channel, string> = {
   hands: 'Keep hands idle'
 }
 
-type Slot = { key: string, runId: string, behavior: string, channels: Channel[], run: Running, status: string, emit: Emit, decidedBy?: string }
+// pinned: a trial System 2 started; Jev can't replace it.
+type Slot = { key: string, runId: string, behavior: string, version: number, channels: Channel[], run: Running, status: string, emit: Emit, target: unknown, decidedBy?: string, pinned?: boolean }
 export type ChannelHooks = {
   event: (slot: Slot, event: string) => void // every event, terminal or progress
   start: (slot: Slot) => void
@@ -151,10 +163,11 @@ export class Channels {
   }
 
   // key is the option key, e.g. `follow:E3`. One owner per channel: holders of any claimed channel stop first.
-  set (key: string, behavior: string, target: Entity | { name: string, count: number }, decidedBy?: string) {
-    const spec = BEHAVIORS[behavior]
+  // spec: a behavior not in BEHAVIORS yet (an authored one on trial).
+  set (key: string, behavior: string, target: Entity | { name: string, count: number } | { place: Xyz }, decidedBy?: string, opts: { spec?: Spec, pinned?: boolean } = {}) {
+    const spec = opts.spec ?? BEHAVIORS[behavior]
     this.stop(spec.channels)
-    const slot: Slot = { key, runId: `r-${++this.runs}`, behavior, channels: spec.channels, status: 'running', run: { stop () {} }, emit: () => {}, decidedBy }
+    const slot: Slot = { key, runId: `r-${++this.runs}`, behavior, version: spec.version ?? 1, channels: spec.channels, status: 'running', run: { stop () {} }, emit: () => {}, target, decidedBy, pinned: opts.pinned }
     slot.emit = (event, terminal = true) => {
       if (slot.status !== 'running') return
       if (terminal) slot.status = event
@@ -178,12 +191,165 @@ export class Channels {
   }
 
   // A guard blocked something on this channel: the behavior holding it learns it was vetoed.
-  veto (channel: Channel, reason: string) { this.slots[channel]?.emit(`vetoed (${reason})`) }
+  // An authored run gets the veto as a rejected call and may carry on, so there it's only recorded.
+  veto (channel: Channel, reason: string) {
+    const slot = this.slots[channel]
+    if (!slot?.run.onVeto) return slot?.emit(`vetoed (${reason})`)
+    slot.emit(`vetoed (${reason})`, false)
+    slot.run.onVeto(reason)
+  }
+
+  // A walk back to a goal's place belongs to that place: it stops once the goal's place moves or goes.
+  stopStalePlace (place: Xyz | null) {
+    const at = (this.slots.legs?.target as { place?: Xyz } | undefined)?.place
+    if (at && this.slots.legs?.status === 'running' && String(at) !== String(place)) this.stop(['legs'], 'place_changed')
+  }
 
   describe (): Record<Channel, string> {
     return Object.fromEntries(CHANNELS.map(c => {
       const s = this.slots[c]
       return [c, s ? `${s.key} (${s.status})` : 'idle']
     })) as Record<Channel, string>
+  }
+}
+
+// ---- behaviors System 2 writes (brain/architecture/behaviors-and-guards.md → "Runtime-authored behaviors") ----
+// Authored code never holds `bot`. It gets an API: read-only world queries (src/world.ts, shared with
+// perception), the bot's own state, and actions. Every action goes through the bot methods installGuards
+// wrapped, so a guard vetoes authored code exactly as it vetoes a seed behavior, and each action needs the
+// channel it drives, so a behavior can't move legs it doesn't hold.
+export type WorldReads = {
+  blockAt: (bot: Bot, pos: [number, number, number]) => string | null
+  scan: (bot: Bot, opts: { match: string, radius?: number, los?: boolean, max?: number }) => unknown
+  reachable: (bot: Bot, pos: [number, number, number]) => Promise<unknown>
+}
+type Xyz = [number, number, number]
+const CONTROLS = new Set(['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint'])
+const r2 = (v: number) => +v.toFixed(2)
+const xyz = (args: unknown[]): Xyz => {
+  const [x, y, z] = args.map(Number)
+  if (![x, y, z].every(Number.isFinite)) throw new Error('expected x, y, z numbers')
+  return [Math.floor(x), Math.floor(y), Math.floor(z)]
+}
+const entityData = (e: Entity) => ({ id: e.id, name: e.name, type: e.type, username: e.username, pos: [r2(e.position.x), r2(e.position.y), r2(e.position.z)] })
+
+export const API_READS = ['self', 'inventory', 'entities', 'blockAt']
+export const API_ACTIONS = ['scan', 'reachable', 'control', 'look', 'dig', 'place', 'equip', 'wait', 'goto']
+
+function actionApi (bot: Bot, channels: Channel[], world: WorldReads) {
+  const need = (c: Channel) => { if (!channels.includes(c)) throw new Error(`needs the ${c} channel`) }
+  const reads: Record<string, (...a: unknown[]) => unknown> = {
+    self: () => {
+      const e = bot.entity
+      return { pos: [r2(e.position.x), r2(e.position.y), r2(e.position.z)], yaw: r2(e.yaw), pitch: r2(e.pitch), on_ground: e.onGround, health: bot.health, food: bot.food, held: bot.heldItem?.name ?? null }
+    },
+    inventory: () => inventoryCounts(bot),
+    entities: (radius = 32) => Object.values(bot.entities).filter(e => e !== bot.entity && e.position.distanceTo(bot.entity.position) <= Number(radius)).map(entityData),
+    blockAt: (...a) => world.blockAt(bot, xyz(a))
+  }
+  const actions: Record<string, (...a: unknown[]) => Promise<unknown>> = {
+    // Async although it's a read: host time inside a sync call would count against the realm's 20 ms slice.
+    scan: async (opts) => world.scan(bot, opts as Parameters<WorldReads['scan']>[1]),
+    reachable: async (...a) => world.reachable(bot, xyz(a)),
+    control: async (name, on) => {
+      need('legs')
+      if (!CONTROLS.has(String(name))) throw new Error(`control must be one of ${[...CONTROLS].join(', ')}`)
+      bot.setControlState(name as any, !!on)
+    },
+    look: async (...a) => { need('aim'); const [x, y, z] = a.map(Number); await bot.lookAt(new Vec3(x, y, z), true) },
+    dig: async (...a) => {
+      need('hands')
+      const block = bot.blockAt(new Vec3(...xyz(a)))
+      if (!block || block.boundingBox === 'empty') throw new Error(`nothing to dig at ${xyz(a).join(' ')}`)
+      await bot.dig(block, true)
+      return block.name
+    },
+    // Places the held block at a position, against any solid neighbour.
+    place: async (...a) => {
+      need('hands')
+      const t = new Vec3(...xyz(a))
+      if (bot.blockAt(t)?.boundingBox !== 'empty') throw new Error(`${t} is not empty`)
+      for (const d of [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]]) {
+        const ref = bot.blockAt(t.offset(d[0], d[1], d[2]))
+        if (ref?.boundingBox === 'block') { await bot.placeBlock(ref, new Vec3(-d[0], -d[1], -d[2])); return bot.blockAt(t)?.name ?? null }
+      }
+      throw new Error(`no solid block next to ${t} to place against`)
+    },
+    equip: async (pattern) => {
+      need('hands')
+      const item = bot.inventory.items().find(i => glob(String(pattern)).test(i.name))
+      if (!item) throw new Error(`no item matching ${pattern}`)
+      await bot.equip(item, 'hand')
+      return item.name
+    },
+    wait: async (ticks = 1) => { await bot.waitForTicks(Math.min(200, Math.max(1, Math.floor(Number(ticks))))) },
+    goto: async (...a) => {
+      need('legs')
+      const [x, y, z] = xyz(a)
+      setGoal(bot, new goals.GoalNear(x, y, z, Number(a[3] ?? 1))) // flush a pending stop first
+      await new Promise<void>((resolve, reject) => {
+        const off = listen(bot, {
+          goal_reached: () => { off(); resolve() },
+          path_update: (r: { status: string }) => { if (r.status === 'noPath' || r.status === 'timeout') { off(); bot.pathfinder.setGoal(null); reject(new Error(`no path (${r.status})`)) } }
+        })
+      })
+    }
+  }
+  return { reads, actions }
+}
+
+// A Spec that runs authored code in a fresh sandbox per run. Ends with what the code returns (done, stuck,
+// none_found), `vetoed` if a veto went uncaught, `error` if it threw, `timeout` past its time limit.
+export function authoredSpec (m: Pick<Module, 'name' | 'description' | 'code' | 'channels' | 'targets' | 'timeout_s' | 'version'>, world: WorldReads): Spec {
+  const channels = m.channels as Channel[]
+  return {
+    channels,
+    targets: m.targets!,
+    version: m.version,
+    describe: t => `${m.description} (target: ${t})`,
+    start (bot, target, emit) {
+      const { reads, actions } = actionApi(bot, channels, world)
+      const log: Array<{ call: string, ok: boolean, out: unknown, ms: number }> = [] // the last 30 actions, for System 2
+      const inflight = new Set<(err: Error) => void>()
+      let error: string | undefined
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const cleanup = () => {
+        clearTimeout(timer)
+        if (channels.includes('legs')) { for (const c of CONTROLS) bot.setControlState(c as any, false); bot.pathfinder.setGoal(null) }
+        if (channels.includes('hands')) bot.stopDigging()
+      }
+      const runner = startBehavior(m.code, target?.position ? entityData(target) : target, {
+        reads: Object.keys(reads),
+        actions: Object.keys(actions),
+        read: (name, args) => reads[name](...args),
+        act: (name, args) => {
+          const t0 = Date.now()
+          const call = `${name}(${args.map(a => JSON.stringify(a)).join(', ')})`
+          let reject: (err: Error) => void = () => {}
+          return new Promise((resolve, rej) => {
+            reject = rej
+            inflight.add(rej)
+            actions[name](...args).then(resolve, rej)
+          }).then(
+            out => { log.push({ call, ok: true, out, ms: Date.now() - t0 }); return out },
+            err => { log.push({ call, ok: false, out: String(err.message ?? err), ms: Date.now() - t0 }); throw err }
+          ).finally(() => { inflight.delete(reject); if (log.length > 30) log.shift() })
+        },
+        // Deferred: code that fails at once would otherwise end the run inside Channels.set, before it has a slot.
+        end: r => queueMicrotask(() => {
+          cleanup()
+          const value = r.value ?? 'done'
+          const ok = BEHAVIOR_ENDINGS.includes(value as string)
+          error = r.error ?? (ok ? undefined : `returned ${JSON.stringify(value)}, not one of ${BEHAVIOR_ENDINGS.join(', ')}`)
+          emit(r.error?.startsWith('vetoed') ? 'vetoed' : error ? 'error' : value as string)
+        })
+      })
+      timer = setTimeout(() => { runner.cancel(); cleanup(); error = `time limit of ${m.timeout_s} s`; emit('timeout') }, m.timeout_s! * 1000)
+      return {
+        stop: () => { runner.cancel(); cleanup() },
+        onVeto: reason => { for (const reject of inflight) reject(new Error(`vetoed: ${reason}`)); inflight.clear() },
+        detail: () => ({ error, actions: log })
+      }
+    }
   }
 }

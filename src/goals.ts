@@ -4,6 +4,7 @@ import type { Bot } from 'mineflayer'
 import { inventoryCounts, rawSnapshot } from './encoder.ts'
 import type { Module } from './modules.ts'
 import type { Program } from './program.ts'
+import type { Pos } from './world.ts'
 
 // A check is a generic predicate over raw state; System 2 picks the module and fills in the values.
 export type CheckSpec = {
@@ -29,6 +30,7 @@ export type Goal = {
   escalate_if: Compiled[]
   budget_ms: number | null // closed goals: time limit; open-ended goals use review_ms
   review_ms: number | null
+  place: Pos | null // where the goal happens, set by System 2; Jev is offered walking back to it
   program: Program | null // pushed with this node; closing the node restores its parent's
   inventory: Record<string, number> // held when the node was created, for inventory_delta
   started: number // also reset when a budget or review is renewed
@@ -109,11 +111,13 @@ export class Goals {
 
   // The program in effect: the deepest one pushed on the active path, or null for the default.
   program (): Program | null { return this.path().reverse().find(g => g.program)?.program ?? null }
+  // The place in effect, found the same way.
+  place (): Pos | null { return this.path().reverse().find(g => g.place)?.place ?? null }
 
   create (text: string, parent: string | null, from: Goal['from'], bot: Bot): Goal {
     const g: Goal = {
       id: `g-${this.next++}`, parent, text, from, status: 'active', done_when: null, escalate_if: [],
-      budget_ms: null, review_ms: null, program: null, inventory: inventoryCounts(bot), started: Date.now(), log: []
+      budget_ms: null, review_ms: null, place: null, program: null, inventory: inventoryCounts(bot), started: Date.now(), log: []
     }
     if (parent) { const p = this.nodes.find(n => n.id === parent)!; p.status = 'suspended' }
     this.nodes.push(g)
@@ -169,7 +173,7 @@ export class Goals {
   status (bot: Bot) {
     return {
       path: this.path().map(g => ({
-        id: g.id, text: g.text, status: g.status, done_when: g.done_when?.desc ?? null,
+        id: g.id, text: g.text, status: g.status, place: g.place, done_when: g.done_when?.desc ?? null,
         progress: g.done_when?.progress?.(bot) ?? null, escalate_if: g.escalate_if.map(c => c.desc), log: g.log.slice(-10)
       })),
       past: this.past.slice(-5)

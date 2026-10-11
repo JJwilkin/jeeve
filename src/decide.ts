@@ -97,6 +97,7 @@ export function makeDecider (ctx: DecideCtx) {
       const a = res?.answers?.[id]
       if (!a) continue
       if (q.claims.some(c => claimed.has(c))) { applied[id] = 'overridden'; continue }
+      if (q.claims.some(c => ctx.channels.slots[c]?.pinned && ctx.channels.slots[c]?.status === 'running')) { applied[id] = 'pinned'; continue } // a trial runs
       const [status, act] = plan(ctx, q, a.choice, options[id][a.choice])
       applied[id] = status
       if (act) actions.push(act)
@@ -140,6 +141,7 @@ function plan (ctx: DecideCtx, q: Choice, choice: string, opt: Option | undefine
   if (choice === 'stop') return ['stopped', () => ctx.channels.stop(q.claims, 'stopped')]
   if (!opt?.behavior) return ['unknown_option']
   if (opt.block) return ['started', by => ctx.channels.set(choice, opt.behavior!, opt.block!, by)]
+  if (opt.place) return ['started', by => ctx.channels.set(choice, opt.behavior!, { place: opt.place! }, by)]
   const id = ctx.handles.byHandle.get(opt.handle!)
   const target = id === undefined ? undefined : ctx.bot.entities[id]
   if (!target) return ['stale_target']

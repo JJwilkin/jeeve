@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto'
 import { BEHAVIORS, STOP_DESC, type Channel } from './behaviors.ts'
 import { makeEgocentric, type Encoded } from './encoder.ts'
+import type { Pos } from './world.ts'
 
 export type Choice = { type: 'choice', claims: Channel[], instructions: string }
 export type Program = {
@@ -25,17 +26,19 @@ export const ENCODERS: Record<string, typeof makeEgocentric> = { 'egocentric@1':
 export const version = (p: Program) => 'v-' + createHash('sha256').update(JSON.stringify(p)).digest('hex').slice(0, 8)
 
 const sameSet = (a: Channel[], b: Channel[]) => a.length === b.length && a.every(c => b.includes(c))
-export const behaviorsFor = (claims: Channel[], allowed: string[]) => allowed.filter(b => sameSet(BEHAVIORS[b].channels, claims))
+// A disabled authored behavior stays allowed (the program still validates) but is no longer offered.
+export const behaviorsFor = (claims: Channel[], allowed: string[]) => allowed.filter(b => BEHAVIORS[b] && !BEHAVIORS[b].disabled && sameSet(BEHAVIORS[b].channels, claims))
 
 // An entity target is a handle, resolved to a live entity when the answer arrives.
-export type Option = { desc: string, behavior?: string, handle?: string, block?: { name: string, count: number } }
+export type Option = { desc: string, behavior?: string, handle?: string, block?: { name: string, count: number }, place?: Pos }
 
 // Option generator `behaviors_x_targets`: behaviors whose channel set is the question's × encoded
 // targets (entities, or block types with what's left of the goal's count), plus `keep_current` and `stop`.
+// A behavior that takes places (navigate) also gets the goal's place, so Jev can walk back once it's out of view.
 // No two options may mean the same thing: Jev splits probability between them and confidence collapses.
 // So `stop` is offered only while something runs, and the running option only as `keep_current`.
 export function optionsFor (
-  claims: Channel[], allowed: string[], enc: Pick<Encoded, 'entities' | 'blocks'>,
+  claims: Channel[], allowed: string[], enc: Pick<Encoded, 'entities' | 'blocks' | 'place'>,
   running: string | null, remaining: (block: string) => number
 ): Record<string, Option> {
   const whole = claims.length > 1
@@ -50,6 +53,7 @@ export function optionsFor (
         const n = remaining(b.name)
         return n > 0 ? [[`${name}:${b.name}(${n})`, { desc: spec.describe(`${n} ${b.name} (${b.desc})`), behavior: name, block: { name: b.name, count: n } }]] : []
       })
+    if (spec.describePlace && enc.place) targets.push([`${name}:place`, { desc: spec.describePlace(enc.place.desc), behavior: name, place: enc.place.pos }])
     for (const [key, opt] of targets) if (key !== running) opts[key] = opt
   }
   return opts
@@ -69,17 +73,17 @@ export function validate (p: Program) {
   const n = Object.keys(p.questions).length
   if (n === 0 || n > LIMITS.questions) throw new Error(`questions: ${n} (max ${LIMITS.questions})`)
   if (!ENCODERS[p.encoder.module]) throw new Error(`unknown encoder ${p.encoder.module}`)
-  for (const b of p.allowed_behaviors) if (!BEHAVIORS[b]) throw new Error(`unknown behavior ${b}`)
+  for (const b of p.allowed_behaviors) if (!BEHAVIORS[b]) throw new Error(`unknown behavior ${b} (an authored behavior can be allowed once its trial passes)`)
   const covered = new Set<string>()
   for (const q of Object.values(p.questions)) {
     if (q.type !== 'choice') continue
-    // Worst case options: keep_current + stop + behaviors × target cap.
+    // Worst case options: keep_current + stop + behaviors × target cap (+ the goal's place).
     const max = 2 + behaviorsFor(q.claims, p.allowed_behaviors).reduce((sum, b) =>
-      sum + (BEHAVIORS[b].targets === 'entity' ? p.encoder.params.entity_cap : p.encoder.params.block_cap), 0)
+      sum + (BEHAVIORS[b].targets === 'entity' ? p.encoder.params.entity_cap : p.encoder.params.block_cap) + (BEHAVIORS[b].describePlace ? 1 : 0), 0)
     if (max > LIMITS.options) throw new Error(`${q.claims.join('+')}: up to ${max} options (max ${LIMITS.options})`)
     for (const b of behaviorsFor(q.claims, p.allowed_behaviors)) covered.add(b)
   }
-  const unasked = p.allowed_behaviors.filter(b => !covered.has(b))
+  const unasked = p.allowed_behaviors.filter(b => !covered.has(b) && !BEHAVIORS[b].disabled)
   if (unasked.length) throw new Error(`allowed but no question offers them: ${unasked.join(', ')}`)
 }
 

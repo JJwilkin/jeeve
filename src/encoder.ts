@@ -3,7 +3,7 @@
 import type { Bot } from 'mineflayer'
 import type { Entity } from 'prismarine-entity'
 import { Vec3 } from 'vec3'
-import { notableBlocks } from './world.ts'
+import { notableBlocks, type Pos } from './world.ts'
 
 export type Handles = { byId: Map<number, string>, byHandle: Map<string, number>, next: number }
 export const newHandles = (): Handles => ({ byId: new Map(), byHandle: new Map(), next: 0 })
@@ -41,11 +41,12 @@ const IGNORED_TYPES = new Set(['object', 'orb', 'projectile', 'other', 'global']
 export const describeEntity = (e: Entity) =>
   e.type === 'player' ? `player ${e.username}` : `${e.name ?? 'unknown'}${e.type === 'hostile' ? ' (hostile)' : ''}`
 
-export type Directive = { text: string, from: string, at: number, inventory: Record<string, number>, goal?: string | null }
+export type Directive = { text: string, from: string, at: number, inventory: Record<string, number>, goal?: string | null, place?: Pos | null }
 export type Encoded = {
   state: Record<string, unknown>
   entities: Array<{ id: string, desc: string }>
   blocks: Array<{ name: string, desc: string }>
+  place?: { pos: Pos, desc: string } | null // the goal's place, unless the bot is already there
 }
 
 export const inventoryCounts = (bot: Bot) => {
@@ -94,11 +95,20 @@ export function makeEgocentric (params: { entity_cap: number, radius: number, bl
       }
     })
     const blocks = describeBlocks(bot, params.block_radius, params.rare_max, params.block_cap)
+    const at = ctx.directive?.place
+    // Horizontal, as navigate walks to a place; height is shown apart. Already there (navigate's range):
+    // walking back would mean the same as standing still.
+    const [pdx, pdz] = at ? [at[0] + 0.5 - me.position.x, at[2] + 0.5 - me.position.z] : [0, 0]
+    // Said as at / not at: given "far" or "close" (vs "very close") Jev often stood still short of the place
+    // (brain/architecture/behaviors-and-guards.md → "Going back to a place").
+    const bucket = distanceBucket(Math.hypot(pdx, pdz))
+    const where = `${direction(pdx, pdz, me.yaw)}${vertical(at ? at[1] - Math.floor(me.position.y) : 0)}`
+    const place = at && bucket !== 'very close' ? { pos: at, desc: `${bucket}, ${where}` } : null
     const speaker = ctx.directive && Object.values(bot.entities).find(e => e.username === ctx.directive!.from)
     return {
       state: {
         directive: ctx.directive
-          ? { text: ctx.directive.text, from: `player ${ctx.directive.from}${speaker ? ` (${handleFor(ctx.handles, speaker.id)})` : ' (not in view)'}`, ...(ctx.directive.goal ? { goal: ctx.directive.goal } : {}) }
+          ? { text: ctx.directive.text, from: `player ${ctx.directive.from}${speaker ? ` (${handleFor(ctx.handles, speaker.id)})` : ' (not in view)'}`, ...(ctx.directive.goal ? { goal: ctx.directive.goal } : {}), ...(at ? { place: `you are ${place ? 'not at the goal\'s place yet' : 'at the goal\'s place'}; it is ${place ? `${bucket}, ` : ''}${where}` } : {}) }
           : 'none yet: stay safe and wait',
         self: {
           health: healthBucket(bot.health),
@@ -112,7 +122,8 @@ export function makeEgocentric (params: { entity_cap: number, radius: number, bl
         recent_events: ctx.events
       },
       entities: entities.map(e => ({ id: e.id, desc: `${e.what}, ${e.where}` })),
-      blocks: blocks.map(b => ({ name: b.name, desc: `${b.count}, nearest ${b.nearest}` }))
+      blocks: blocks.map(b => ({ name: b.name, desc: `${b.count}, nearest ${b.nearest}` })),
+      place
     }
   }
 }

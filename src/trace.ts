@@ -144,10 +144,12 @@ export class Recorder {
     if (event.startsWith('vetoed')) this.stats.events.vetoed = (this.stats.events.vetoed ?? 0) + 1
   }
 
-  endBehavior (runId: string, reason: string) {
+  // detail: an authored run's error and last actions, so a failure can be read back from the trace.
+  endBehavior (runId: string, reason: string, detail?: unknown) {
     const run = this.runs.get(runId)
     if (!run) return
     run.span.setAttribute('jeeve.behavior.end_reason', reason)
+    if (detail) run.span.setAttribute('jeeve.behavior.detail', json(detail).slice(0, 8000))
     run.span.end()
     this.runs.delete(runId)
     const k = `${run.name}:${reason}`

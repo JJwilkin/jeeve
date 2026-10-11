@@ -181,7 +181,7 @@ Built in `src/goals.ts`, `src/system2.ts` and `src/main.ts`, and exercised by `n
 **System 2 is Claude Opus 5.5 in a short tool loop:**
 - `run_sql` over its own traces through judgeval's `client.sql()`;
 - `scan` and `reachable`, read-only world queries, traced as `perceive` spans ([[perception]]). Tool calls in one turn run in parallel;
-- a strict `submit_decision` tool that returns goal check, `escalate_if`, budget or review interval, a program patch, a goal action (`none` | `fail` | `renew`), an optional sub-goal and an optional message;
+- a strict `submit_decision` tool that returns goal check, `escalate_if`, budget or review interval, the goal's place ([[behaviors-and-guards]] → "Going back to a place"), a program patch, a goal action (`none` | `fail` | `renew`), an optional sub-goal and an optional message;
 - effort `medium` for instructions and `low` for escalations;
 - server-side `fallbacks: "default"`, and the stable system prompt is cached.
 
@@ -203,6 +203,8 @@ All three are sensible with no prompt tuning.
 - Without the schema, System 2 spent its 4 turns discovering column names and never decided.
 - Now the system prompt carries the virtual SQL schema (`discoverSchema()`, fetched once per run, so it stays cached) plus Jeeve's span names and `jeeve.*` keys. The last turn offers only `submit_decision`.
 - Asked about a past session, it answered correctly in one query.
+
+**Writing behaviors:** a third tool, `write_behavior`, not strict. It's queued and applied with the decision, and the trial result comes back as a `behavior_trial` escalation ([[behaviors-and-guards]] → "How it's built"). Adding behaviors to `new_modules` instead hit the grammar limit again.
 
 **Strict-schema limit:** a strict `submit_decision` plus any second tool failed with "compiled grammar is too large". Defining the check object once (`$defs` / `$ref`) instead of three times fixed it, and `run_sql` (one string argument) isn't strict.
 

@@ -34,6 +34,14 @@ From [Models](https://docs.typesafe.ai/models.md), [API](https://docs.typesafe.a
 - **Questions are nearly free.** Ask per-channel questions, scores and the escalate check in one call. The same fact makes order-debiasing free: ask the same Choice forward and reversed in one call and average.
 - **Options and state size are limited by accuracy, not latency.** Filter in the encoder, and keep each Choice's list short where the decision is a close call.
 - **Do arithmetic in code.** Pass closing speed, distance buckets and directions, not raw vectors. That's the vendor's advice; our easy test couldn't tell the two apart.
+- **Spell facts out, and match the guidance's words to the state's (measured 2026-10-11).** We replayed two recorded e2e states, 6 calls each with shuffled options: Jeeve far from the place it was told to stay by, choosing between "Stand still" and "Walk back to the goal's place (far, ahead)". P(walk back) went:
+  - 0.25 / 0.08 with the state as recorded (`place: "far, ahead"`, and guidance saying "within ~3 blocks");
+  - 0.85 / 0.69 with the state as a sentence ("you are far from the goal's place; it is ahead");
+  - 0.83 / 0.68 with the guidance in the state's words ("very close", "close, medium or far") instead of block counts;
+  - 0.98 / 0.97 with both.
+
+  Adding the distance to the "Stand still" option instead (0.47 / 0.20) helped less. Jev doesn't join a terse field to numeric guidance.
+- **Say the fact the decision turns on, not a scale (measured 2026-10-11).** With "you are close to the goal's place", Jev stood still 7.5 blocks short (P(walk on) 0.12–0.29), even though the guidance said "if you are close, medium or far, navigate back". "close" vs "very close" is too fine a line, and "close to" reads as "by it". "You are not at the goal's place yet; it is close, ahead" got 0.93, and 0.98–0.99 with guidance in the same words. Details in [[behaviors-and-guards]] → "Going back to a place".
 - **Still unmeasured:**
   - calibration of `confidence` against System 2 labels,
   - p99 under multi-bot load from where the bots will run,

@@ -57,8 +57,8 @@ Evaluation scenarios, including the PvP arena, run on our own server. Behaving l
 All three instructions pass, and so do a live guard veto and the local API. System 2 sets each goal's check, code reports "done", and the episode is verified in Judgment by SQL.
 
 **Next:**
-- System 2 writing encoders and option generators: deferred. Checks and watch conditions are done and persist in a module library ([[system-1]] → "Modules System 2 writes");
-- behaviors System 2 writes at runtime ([[runtime-authored-behaviors]], task);
+- System 2 writing encoders and option generators: deferred. Checks, watch conditions and behaviors are done and persist in a module library ([[system-1]] → "Modules System 2 writes", [[behaviors-and-guards]] → "How it's built");
+- ~~behaviors System 2 writes at runtime~~ ([[runtime-authored-behaviors]], done 2026-10-11: it wrote, trialled and fixed a pillaring behavior to clear an out-of-reach canopy);
 - ~~perception as tools~~: done 2026-10-11. System 2 looks with `scan` and `reachable` ([[perception]]); next is block states and more consistent batching of looks;
 - lessons that outlive their goal;
 - judges and the outer loop (stage 4);
