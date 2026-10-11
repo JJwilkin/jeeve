@@ -60,6 +60,9 @@ All three instructions pass, and so do a live guard veto and the local API. Syst
 - System 2 writing encoders and option generators: deferred. Checks, watch conditions and behaviors are done and persist in a module library ([[system-1]] → "Modules System 2 writes", [[behaviors-and-guards]] → "How it's built");
 - ~~behaviors System 2 writes at runtime~~ ([[runtime-authored-behaviors]], done 2026-10-11: it wrote, trialled and fixed a pillaring behavior to clear an out-of-reach canopy);
 - ~~perception as tools~~: done 2026-10-11. System 2 looks with `scan` and `reachable` ([[perception]]); next is block states and more consistent batching of looks;
+- the full player action API, so System 2 can write crafting, container, combat and chat behaviors live ([[full-player-action-api]], task);
+- System 2A (orchestrator) / 2B (builder) split ([[system-2a-2b]], task);
+- "defend me" fixes: attribute damage to its source, let a fast health drop bypass the no-repeat window, fail the e2e on any death ([[system-1]] and [[system-2]] → Open questions);
 - lessons that outlive their goal;
 - judges and the outer loop (stage 4);
 - the PvP arena and benchmarks ([[benchmarks]]).

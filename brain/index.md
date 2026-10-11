@@ -26,6 +26,8 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[system-2-and-goals]] (done → [[system-2]]): the goal-tree data model, instruction intake, success checks, how System 2 writes program changes, escalations and window summaries
 - [[runtime-authored-behaviors]] (done → [[behaviors-and-guards]]): System 2 writes, trials and registers new behaviors (first case: pillaring to reach leaves), on the shared block view from [[perception]]
 - [[perception-tools]] (done → [[perception]]): System 2 asks for detail (scan, reachable) instead of guessing from buckets; owns the block view; exact counts and heights in the summary
+- [[full-player-action-api]] (todo): give code System 2 writes every action a player has (craft, containers, attack, use, eat, chat…), keeping no raw bot, guards and channels
+- [[system-2a-2b]] (todo): split System 2 into an orchestrator (2A, custom loop) and a builder (2B, Vercel AI SDK; Luna later) that talk through capability requests and trial windows
 
 ### Architecture
 - [[overview]]: what we build vs. what the agent discovers, the discovery loop, fast and slow thinking, goals and time as one hierarchy, open questions

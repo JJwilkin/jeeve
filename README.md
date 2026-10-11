@@ -23,6 +23,8 @@ The repo is an Obsidian vault; open the root folder as a vault.
 The first milestone runs end to end on a local server:
 - System 1 decides on Jev, over the seed behaviors and both guard layers;
 - System 2 on Claude turns instructions into goals with success checks and tunes System 1's program;
+- System 2 looks at the world with `scan` and `reachable` ([perception](brain/architecture/perception.md));
+- System 2 writes, trials and saves new behaviors when none fits, e.g. a pillaring behavior to reach a canopy ([behaviors and guards](brain/architecture/behaviors-and-guards.md));
 - every episode is traced to Judgment.
 
 See the [roadmap](brain/roadmap.md).
