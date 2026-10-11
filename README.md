@@ -20,15 +20,37 @@ The repo is an Obsidian vault; open the root folder as a vault.
 - [Brain index](brain/index.md): every research and architecture note
 
 ## Status
-Architecture mostly settled. A first runtime slice runs: System 1 on Jev, seed behaviors on channels, instructions by whisper, decisions traced to `traces/*.jsonl`. No System 2 or Judgment ingest yet. See the [roadmap](brain/roadmap.md).
+The first milestone runs end to end on a local server:
+- System 1 decides on Jev, over the seed behaviors and both guard layers;
+- System 2 on Claude turns instructions into goals with success checks and tunes System 1's program;
+- every episode is traced to Judgment.
+
+See the [roadmap](brain/roadmap.md).
 
 ## Run it
-Needs Node ≥ 22.18, Java 21 (`brew install openjdk@21`), the Paper 1.21.4 jar in `.server/`, and `TYPESAFE_API_KEY` in `../judgment/.env.typesafe`.
+**Requirements:**
+- Node ≥ 22.18;
+- Java 21 (`brew install openjdk@21`);
+- the Paper 1.21.4 jar in `.server/`;
+- credentials:
+  - `TYPESAFE_API_KEY` in `../judgment/.env.typesafe`;
+  - `ANTHROPIC_API_KEY` and `JUDGMENT_API_KEY` / `JUDGMENT_ORG_ID` / `JUDGMENT_API_URL` (staging) in `../judgment/.env`.
+
+  Without Anthropic, System 2 is off; without Judgment, traces go only to `traces/*.jsonl`.
+
 ```bash
 npm install
 npm run check        # offline self-check
-npm run e2e          # local server + agent + a scripted player: "come here", "follow me and defend me"
+npm run e2e          # local server + agent + a scripted player; real Jev, Claude and Judgment staging
 npm run server       # just the server (type console commands into it)
 JEEVE_ALLOWED=YourName npm run agent   # the agent; whisper it instructions in game
 ```
 The first server start needs `MINECRAFT_EULA=true` to accept the [Minecraft EULA](https://aka.ms/MinecraftEULA).
+
+**Instructions from outside the game** go to the agent's local API, bound to 127.0.0.1:
+```bash
+curl -s localhost:7777/instructions -d '{"from":"operator","text":"come here"}'
+```
+```bash
+curl -s localhost:7777/status
+```

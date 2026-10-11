@@ -31,6 +31,8 @@ Done. The design is in [[learning]] and [[trace-schema]]:
 
 **Open:** semantic search once it's ready ([[trace-schema]]). The previous-window summary is written by code ([[system-2]]).
 
+**Implemented 2026-10-11** (`src/trace.ts`). The e2e checks every span kind and the window lineage in Judgment by SQL ([[trace-schema]] → "Implementation").
+
 Traces feed System 2 as evidence and examples, not as training data.
 
 ## 4. Goals and reward (open)
@@ -47,4 +49,15 @@ See [[layers]].
 
 Evaluation scenarios, including the PvP arena, run on our own server. Behaving like a legitimate client on public servers (anti-cheat, fairness) comes later.
 
-**Started 2026-10-10:** System 1 runtime slice in `src/` ([[system-1]] → "First implementation"). All three instructions ("come here", "collect 10 logs", "follow me and defend me") pass end to end, with the merged seed set and both guard layers. Still to do: System 2 (designed in [[system-2]]) and Judgment ingest ([[trace-schema]]).
+**Reached 2026-10-11.** `npm run e2e` runs the whole stack on a local Paper server:
+- System 1 on Jev ([[system-1]] → "First implementation");
+- System 2 on Claude, with the goal tree ([[system-2]] → "Implementation");
+- traces in Judgment ([[trace-schema]] → "Implementation").
+
+All three instructions pass, and so do a live guard veto and the local API. System 2 sets each goal's check, code reports "done", and the episode is verified in Judgment by SQL.
+
+**Next:**
+- System 2 writing modules (encoders, checks, watch conditions);
+- lessons that outlive their goal;
+- judges and the outer loop (stage 4);
+- the PvP arena and benchmarks ([[benchmarks]]).

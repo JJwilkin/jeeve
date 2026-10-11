@@ -127,6 +127,25 @@ GROUP BY v ORDER BY decides DESC LIMIT 20
 - **Cost:** Jev input costs under $1 per hour at $0.042 per million tokens ([[decision-models]]).
 - **No sampling for M1.** If it's needed later, the first knobs are dropping the encoded state from `keep_current` calls (keeping a hash), then logging the raw snapshot less often.
 
+## Implementation (2026-10-11)
+Built in `src/trace.ts`, exporting to staging project `jeeve-dev` via judgeval-js 1.3.5. Every span is also mirrored to `traces/<session>.jsonl`, which works without credentials.
+- **One session per agent run.** The episode is the process.
+- **Windows cut** at 60 s, on a new instruction, and when a root goal completes or fails.
+- **Carry-over span:** carries the code-written summary of the previous window: goal path, behavior runs by how they ended, events, escalations, System 2 notes and program versions ([[system-2]]).
+- **Lineage:** each window links to the previous one with an OTel span link and `jeeve.prev_trace_id`.
+- **Spans are made with the OTel tracer judgeval registers,** with the window span as their parent. `judgment.session_id` is set on every span directly rather than through baggage, which gives the same result.
+- **Verified by `npm run e2e`.** A SQL query by `session_id` finds `window`, `carry_over`, `decide`, `system2`, `program`, `goal` and `behavior.*` spans, and every window after the first has a `prev_trace_id`.
+
+**Attributes added beyond the table above:**
+- `jeeve.decide.encode_ms`;
+- `jeeve.program.because`: why a version was activated. Keeping the cause out of the manifest keeps versions stable: the default is always the same hash;
+- `jeeve.system2.latency_ms`, `.turns` and `.refusal`;
+- `jeeve.behavior.decided_by`, as specified.
+
+**Not yet:**
+- **The raw snapshot has no block cube.** The default encoder doesn't need terrain yet.
+- **Semantic search isn't used.** System 2 has SQL only (`run_sql`).
+
 ## Open questions
 - ~~**Who writes the previous-window summary** in `carry_over`: System 2, or a cheap summarizer at the cut?~~ Answered in [[system-2]]: code, as a structured summary at the cut.
 - **Semantic search.** When it's ready, thousands of near-identical `keep_current` states could drown it. The likely fix is indexing only `changed = true`.

@@ -169,6 +169,50 @@ Taken on Joshua's "go with the recommendations" (2026-10-10). Each one can be re
 5. *(Made while writing this note.)* **Code changes status only for `completed` and `abandoned`.** A budget or `escalate_if` escalates rather than failing the goal directly, so failing is always System 2's call.
 6. *(Made while writing this note.)* **Lessons kept past their goal expire at episode end by default.** Cross-episode lessons wait for the outer loop (stage 4).
 7. *(Made while writing this note.)* **The local API has no auth beyond binding to 127.0.0.1.** Revisit before the agent runs anywhere but this machine.
+8. *(Made while implementing, 2026-10-11.)* **Model and effort.** `claude-opus-5-5`: `medium` for instructions, `low` for escalations. Override with `JEEVE_SYSTEM2_MODEL`.
+9. *(Implementing.)* **Low-confidence escalations reach System 2,** deduplicated at 30 s per goal and program version. That's about 2–3 extra calls per instruction (each ~5 s, ~3k cached input tokens). Raise the threshold or the no-repeat window if that's too chatty.
+10. *(Implementing.)* **A second `stuck` / `none_found` under the same goal escalates;** the first is left to Jev.
+11. *(Implementing.)* **When a root goal closes,** its channels stop and the bot idles until the next instruction.
+12. *(Implementing.)* **`owner_damage`** is damage to the player who gave the active root instruction.
+
+## Implementation (2026-10-11)
+Built in `src/goals.ts`, `src/system2.ts` and `src/main.ts`, and exercised by `npm run e2e` (two passing runs in a row).
+
+**System 2 is Claude Opus 5.5 in a short tool loop:**
+- `run_sql` over its own traces through judgeval's `client.sql()`;
+- a strict `submit_decision` tool that returns goal check, `escalate_if`, budget or review interval, a program patch, a goal action (`none` | `fail` | `renew`), an optional sub-goal and an optional message;
+- effort `medium` for instructions and `low` for escalations;
+- server-side `fallbacks: "default"`, and the stable system prompt is cached.
+
+**Measured latency:** instructions take 5–9 s; escalations usually 4–7 s, with one at 22 s. That's slower than the 2–5 s assumed above, but the bot acts on the raw instruction meanwhile.
+
+**What it decided:**
+
+| Instruction | Check | Other |
+|---|---|---|
+| "come here" | `near_entity(Josh, 3)` | 60 s budget |
+| "collect 10 logs" | `inventory_delta("*_log", 10)` | 300 s budget |
+| "follow me and defend me" | none: open-ended | `escalate_if`: Josh farther than 16–24 blocks for 10–15 s, or Josh dead; a 120–180 s review |
+
+All three are sensible with no prompt tuning.
+
+**The inner loop works.** Low-confidence escalations (30 s no-repeat per goal and program version) reach System 2 two or three times per instruction. It reads the fast model's view and tightens the guidance ("S1 was torn between collect and following Josh, so guidance now says stay on collect"). Confidence then recovers.
+
+**Strict-schema limit:** a strict `submit_decision` plus any second tool failed with "compiled grammar is too large". Defining the check object once (`$defs` / `$ref`) instead of three times fixed it, and `run_sql` (one string argument) isn't strict.
+
+**Implemented as designed:**
+- intake by whisper and by `127.0.0.1` API;
+- code-written "done" whispers;
+- only System 2 fails goals;
+- programs stack with goals and revert on close;
+- merged triggers, with escalations for goals that have closed dropped;
+- no repeats;
+- window summaries written by code.
+
+**Not built:**
+- **Lessons kept past their goal.** Only the code-written summary and System 2's last note carry forward.
+- **Modules written by System 2.**
+- **Several players.** The latest instruction wins.
 
 ## Open questions
 - **The no-repeat window.** Is 30 s right? It's a guess until traces show escalation rates.

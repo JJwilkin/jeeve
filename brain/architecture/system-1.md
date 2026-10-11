@@ -151,11 +151,15 @@ What it taught us:
 - **Escalations on close calls.** About 17% of calls still escalate, mostly `keep_current` against a close alternative on aim. Whether 0.5 is the right threshold is a calibration question (Open questions).
 
 Not yet built, and deliberately so:
-- **System 2.** Escalations are traced, not acted on. Its design is in [[system-2]]. The program is fixed to the default, so module authoring, activation checks beyond `validate()`, and the watchdog arrive with System 2.
-- **The goal count.** Until System 2 sets goals, the count for `collect` is the first number in the directive, counted from when it was given. This is a marked stand-in.
-- **Guard vetoes in a live run.** The guard wrapper is unit-tested, but no e2e scenario has made it fire yet. The pathfinder avoids lava and drops first.
+- ~~**System 2**, activation checks and the watchdog.~~ Built 2026-10-11 ([[system-2]] → "Implementation"):
+  - **Activation check:** `validate()`, plus an encoder dry run against 5× the encode budget.
+  - **Watchdog:** 3 failed Jev calls among the first 10 after an activation roll the program back.
+  - **Program versions:** the activation cause goes on the `program` span, so the default program has a stable hash.
+- **Module authoring.** System 2 changes settings (guidance, allowed behaviors, heartbeat) but can't write encoders, checks or watch conditions yet. That needs a sandbox decision first.
+- **The goal count in the gap.** System 2 sets the real check in ~5–9 s. Until it lands, `collect` counts the first number in the instruction. This is a marked stand-in.
+- ~~**Guard vetoes in a live run.**~~ The e2e now makes one fire: a raw `forward` off a 5-block pillar is vetoed and the bot stays put.
 - **The stance channel.**
-- **Judgment ingest.** Traces are JSONL; the span schema is in [[trace-schema]].
+- ~~**Judgment ingest.**~~ Built ([[trace-schema]] → "Implementation").
 
 ## Open questions
 - **Order bias.** Is reversed-order averaging enough, or do programs need a full shuffle-and-average? It costs nothing in latency, since extra questions are free ([[jev-measurements]]).
