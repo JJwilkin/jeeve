@@ -4,12 +4,13 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Vec3 } from 'vec3'
+import { authoredSpec, Channels } from './behaviors.ts'
 import { coalescing, makeDecider } from './decide.ts'
 import { direction, distanceBucket, makeEgocentric, newHandles, rawSnapshot } from './encoder.ts'
 import { blockAt, notableBlocks, scan } from './world.ts'
 import { compile, glob, Goals } from './goals.ts'
 import { controlVector, unsafeAt } from './guards.ts'
-import { compileModule, ModuleRegistry } from './modules.ts'
+import { compileBehavior, compileModule, ModuleRegistry, startBehavior, type BehaviorHost } from './modules.ts'
 import { DEFAULT_PROGRAM, optionsFor, validate, version } from './program.ts'
 
 // Direction is egocentric: yaw 0 faces north (-z), positive turns left.
@@ -272,6 +273,74 @@ async function decideWith (answers: Record<string, any>) {
     { name: 'oak_log', count: 'many (6)', nearest: 'close, right' },
     { name: 'oak_leaves', count: 'many', nearest: 'close, right, ~3 up' }
   ])
+}
+
+// Behaviors System 2 writes: async code in a fresh realm per run, talking to the host only through strings.
+{
+  const run = (code: string, over: Partial<BehaviorHost> = {}) => new Promise<{ value?: unknown, error?: string }>(resolve => {
+    startBehavior(code, { name: 'oak_leaves', count: 2 }, {
+      reads: ['blockAt'], actions: ['wait'],
+      read: (_n, [x]) => x === 0 ? 'oak_log' : null,
+      act: async (_n, [t]) => { await new Promise(r => setTimeout(r, 5)); return t },
+      end: resolve, ...over
+    })
+  })
+  // Sync reads, awaited actions, the target as plain data.
+  assert.deepEqual(await run('async (api, t) => [api.blockAt(0, 0, 0), api.blockAt(1, 0, 0), await api.wait(3), t.name].join(",")'), { value: 'oak_log,,3,oak_leaves' })
+  assert.deepEqual(await run('async (api) => { await api.wait(1); throw new Error("boom") }'), { error: 'boom' })
+  // No way back to the host: no bridge, no host Function through the api, no Node, no string eval.
+  assert.deepEqual(await run('async (api) => [typeof __bridge, typeof process, typeof require].join()'), { value: 'undefined,undefined,undefined' })
+  assert.match((await run('async (api) => api.blockAt.constructor("return process")()')).error!, /Code generation from strings disallowed/)
+  // A busy loop after an await is killed by the per-entry timeout instead of freezing the bot.
+  assert.match((await run('async (api) => { await api.wait(1); while (true) {} }')).error!, /timed out/)
+  // A cancelled run is never entered again and reports nothing.
+  {
+    let ended = false
+    const r = startBehavior('async (api) => { await api.wait(1); return "done" }', null, { reads: [], actions: ['wait'], read: () => null, act: () => new Promise(res => setTimeout(res, 20)), end: () => { ended = true } })
+    r.cancel()
+    await new Promise(res => setTimeout(res, 50))
+    assert.equal(ended, false)
+  }
+  const shape = { kind: 'behavior' as const, name: 'pillar', description: 'pillar up', code: 'async (api, t) => "done"', channels: ['legs', 'aim', 'hands'], targets: 'block' as const, timeout_s: 30 }
+  compileBehavior(shape)
+  compileBehavior({ ...shape, channels: ['hands'] })
+  assert.throws(() => compileBehavior({ ...shape, channels: ['legs', 'hands'] }), /channels must be one of/)
+  assert.throws(() => compileBehavior({ ...shape, timeout_s: 600 }), /timeout_s/)
+  assert.throws(() => compileBehavior({ ...shape, code: '42' }), /function expression/)
+
+  // On the channel runtime, with a fake bot whose guard vetoes every forward: the veto rejects the call.
+  const fakeWorld = { blockAt: () => null, scan: () => ({}), reachable: async () => ({ reachable: false }) }
+  const ended: string[] = []
+  const events: string[] = []
+  let channels: Channels
+  const bot: any = {
+    entity: { position: new Vec3(0, 0, 0), yaw: 0, pitch: 0, onGround: true }, entities: {}, health: 20, food: 20, heldItem: null,
+    inventory: { items: () => [] },
+    setControlState: (_c: string, on: boolean) => { if (on) channels.veto('legs', 'forward: drop of more than 3') },
+    pathfinder: { setGoal: () => {} }, stopDigging: () => {}, waitForTicks: async () => {}
+  }
+  channels = new Channels(bot, { start: () => {}, event: (_s, e) => events.push(e), end: (_s, r) => ended.push(r) })
+  const play = async (code: string, ch = ['legs']) => {
+    ended.length = 0
+    events.length = 0
+    const spec = authoredSpec({ ...shape, code, channels: ch, version: 1 }, fakeWorld)
+    channels.set('t:trial', 't', { name: 'stone', count: 1 }, 'operator', { spec, pinned: true })
+    await new Promise(r => setTimeout(r, 30))
+    return { end: ended[0], events: [...events], detail: channels.slots[ch[0] as 'legs']?.run.detail?.() as any }
+  }
+  const vetoed = await play('async (api) => { await api.control("forward", true); return "done" }')
+  assert.deepEqual([vetoed.end, vetoed.events], ['vetoed', ['vetoed (forward: drop of more than 3)', 'vetoed']])
+  assert.deepEqual(vetoed.detail.actions.map((a: any) => [a.call, a.ok]), [['control("forward", true)', false]])
+  assert.equal((await play('async (api) => { try { await api.control("forward", true) } catch (e) { return "stuck" } }')).end, 'stuck') // caught: the code adapts
+  assert.match((await play('async (api) => { await api.dig(0, 0, 0) }')).detail.error, /needs the hands channel/)
+  assert.match((await play('async (api) => "finished"')).detail.error, /returned "finished"/)
+
+  // The library keeps behaviors with their channels and target type, and reloads them.
+  const file = join(mkdtempSync(join(tmpdir(), 'jeeve-')), 'library.json')
+  new ModuleRegistry(() => {}, file).addBehavior(shape, 1, { target: { block: 'oak_leaves', count: 2, entity: null }, end: 'done', ms: 1200 })
+  const again = new ModuleRegistry(() => {}, file)
+  assert.deepEqual(again.load().loaded, ['pillar@1'])
+  assert.deepEqual([again.get('pillar')?.channels, again.get('pillar')?.targets, again.nextVersion('pillar')], [['legs', 'aim', 'hands'], 'block', 2])
 }
 
 console.log('selfcheck ok')

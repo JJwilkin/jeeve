@@ -49,7 +49,7 @@ Measured: see "Implementation".
 - `blockAt(pos)`, `scan(…)`, `reachable(pos)`, `notableBlocks(…)`.
 - **System 2's tools** call `scan` and `reachable`.
 - **The encoder and the raw snapshot** use `notableBlocks`.
-- **Behaviors System 2 writes** ([[runtime-authored-behaviors]]) get `blockAt` and `scan` as synchronous reads and `reachable` as an async call, unchanged, through their action API. That task builds its API on this layer; it doesn't add block queries of its own.
+- **Behaviors System 2 writes** ([[runtime-authored-behaviors]]) get `blockAt` as a synchronous read and `scan` and `reachable` as async calls, unchanged, through their action API (`scan` is async there because host time inside a synchronous call counts against the realm's 20 ms slice). That task builds its API on this layer; it doesn't add block queries of its own.
 - **Modules** (checks and watch conditions) stay pure over the snapshot. Their block view is the snapshot's `blocks`. They don't call `scan`.
 
 ## The always-on summary
@@ -79,7 +79,7 @@ Built in `src/world.ts`, `src/system2.ts` (the tools and parallel dispatch), `sr
 - **In the first run it wrote a better-grounded check:** "no `oak_log` left in column x=10, z=12". It found the trunk's absolute coordinates with `scan`.
 - **That check exposed a coupling System 2 couldn't see.** `collect` is offered only from an `inventory_delta` check's remaining count, so under an authored check Jev had no collect option. System 2 spent three escalations rewriting guidance for an option that didn't exist.
   - The stopgap is a prompt sentence: gathering goals use `inventory_delta`.
-  - [[runtime-authored-behaviors]] fixes it at the root: under an authored check, the count offered is the number of blocks of that type within 32.
+  - [[runtime-authored-behaviors]] fixes it at the root: under an authored check, the count offered is the number of blocks of that type in view (within 8). Counting within 32 sent `collect` after far-off logs.
 
 **"break the leaves too":** the brief assumed the leaves were out of reach. For an oak, they mostly aren't: they sit at +1 to +4, and once the trunk is gone Jeeve can stand under them.
 - **The real gap is that `collect` measures progress by items, and leaves drop nothing without shears.**

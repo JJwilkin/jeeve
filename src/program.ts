@@ -25,7 +25,8 @@ export const ENCODERS: Record<string, typeof makeEgocentric> = { 'egocentric@1':
 export const version = (p: Program) => 'v-' + createHash('sha256').update(JSON.stringify(p)).digest('hex').slice(0, 8)
 
 const sameSet = (a: Channel[], b: Channel[]) => a.length === b.length && a.every(c => b.includes(c))
-export const behaviorsFor = (claims: Channel[], allowed: string[]) => allowed.filter(b => sameSet(BEHAVIORS[b].channels, claims))
+// A disabled authored behavior stays allowed (the program still validates) but is no longer offered.
+export const behaviorsFor = (claims: Channel[], allowed: string[]) => allowed.filter(b => BEHAVIORS[b] && !BEHAVIORS[b].disabled && sameSet(BEHAVIORS[b].channels, claims))
 
 // An entity target is a handle, resolved to a live entity when the answer arrives.
 export type Option = { desc: string, behavior?: string, handle?: string, block?: { name: string, count: number } }
@@ -69,7 +70,7 @@ export function validate (p: Program) {
   const n = Object.keys(p.questions).length
   if (n === 0 || n > LIMITS.questions) throw new Error(`questions: ${n} (max ${LIMITS.questions})`)
   if (!ENCODERS[p.encoder.module]) throw new Error(`unknown encoder ${p.encoder.module}`)
-  for (const b of p.allowed_behaviors) if (!BEHAVIORS[b]) throw new Error(`unknown behavior ${b}`)
+  for (const b of p.allowed_behaviors) if (!BEHAVIORS[b]) throw new Error(`unknown behavior ${b} (an authored behavior can be allowed once its trial passes)`)
   const covered = new Set<string>()
   for (const q of Object.values(p.questions)) {
     if (q.type !== 'choice') continue
@@ -79,7 +80,7 @@ export function validate (p: Program) {
     if (max > LIMITS.options) throw new Error(`${q.claims.join('+')}: up to ${max} options (max ${LIMITS.options})`)
     for (const b of behaviorsFor(q.claims, p.allowed_behaviors)) covered.add(b)
   }
-  const unasked = p.allowed_behaviors.filter(b => !covered.has(b))
+  const unasked = p.allowed_behaviors.filter(b => !covered.has(b) && !BEHAVIORS[b].disabled)
   if (unasked.length) throw new Error(`allowed but no question offers them: ${unasked.join(', ')}`)
 }
 

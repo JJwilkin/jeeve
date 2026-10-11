@@ -6,16 +6,16 @@ import mineflayer from 'mineflayer'
 import pf from 'mineflayer-pathfinder'
 import collectblock from 'mineflayer-collectblock'
 import { Judgeval } from 'judgeval'
-import { CHANNELS, Channels } from './behaviors.ts'
+import { authoredSpec, BEHAVIORS, CHANNELS, Channels, type Spec, type WorldReads } from './behaviors.ts'
 import { coalescing, makeDecider, type Ask } from './decide.ts'
 import { inventoryCounts, newHandles, rawSnapshot, type Directive } from './encoder.ts'
 import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal } from './goals.ts'
 import { guardedMovements, installGuards } from './guards.ts'
-import { ModuleRegistry, type Snapshot } from './modules.ts'
+import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type BehaviorTrial, type ModuleSource, type Snapshot } from './modules.ts'
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
-import { makeSystem2, type Decision, type Perceive } from './system2.ts'
+import { makeSystem2, type BehaviorDraft, type Decision, type Perceive } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
-import { reachable, scan, type Pos } from './world.ts'
+import { blockAt, reachable, scan, type Pos } from './world.ts'
 
 export type AgentOptions = {
   host?: string
@@ -75,6 +75,11 @@ export async function startAgent (opts: AgentOptions) {
   }, library)
   const libraryLoad = modules.load()
   const lookup = (name: string) => modules.get(name)
+  const world: WorldReads = { blockAt, scan, reachable } // the shared block view (src/world.ts), as authored code sees it
+  // Behaviors from the library join the seed set; Jev sees them wherever System 2's program allows them.
+  for (const m of modules.modules.values()) if (m.kind === 'behavior') BEHAVIORS[m.name] = { ...authoredSpec(m, world), disabled: m.disabled }
+  const authoredFailures = new Map<string, number>() // behavior name → failed runs in a row
+  let trial: TrialRun | null = null // the one live trial, if any (see startTrial)
 
   const goals = new Goals({
     completed: g => {
@@ -101,16 +106,29 @@ export async function startAgent (opts: AgentOptions) {
   const channels = new Channels(bot, {
     start: slot => recorder.startBehavior(slot.runId, slot.behavior, {
       'jeeve.behavior.params': slot.key, 'jeeve.behavior.channels': slot.channels.join('+'),
-      'jeeve.behavior.decided_by': slot.decidedBy, 'jeeve.behavior.version': 1
+      'jeeve.behavior.decided_by': slot.decidedBy, 'jeeve.behavior.version': slot.version
     }),
-    end: (slot, reason) => recorder.endBehavior(slot.runId, reason),
+    end: (slot, reason) => {
+      recorder.endBehavior(slot.runId, reason, slot.run.detail?.())
+      if (slot.pinned) return finishTrial(reason, slot.run.detail?.() as RunDetail | undefined) // only trials are pinned
+      // An authored behavior that keeps failing (its own error or time limit) is disabled, as checks are.
+      const m = modules.get(slot.behavior)
+      if (m?.kind !== 'behavior') return
+      const n = reason === 'error' || reason === 'timeout' ? (authoredFailures.get(m.name) ?? 0) + 1 : reason === 'done' ? 0 : authoredFailures.get(m.name) ?? 0
+      authoredFailures.set(m.name, n)
+      if (n >= MODULE_LIMITS.maxErrors && !m.disabled) {
+        const why = `${n} failed runs in a row; last: ${(slot.run.detail?.() as RunDetail | undefined)?.error ?? reason}`
+        if (BEHAVIORS[m.name]) BEHAVIORS[m.name].disabled = why
+        modules.disable(m, why)
+      }
+    },
     event: (slot, event) => {
       note(`${slot.key} ${event}`)
       recorder.behaviorEvent(slot.runId, event)
       const name = event.split(' ')[0]
       if (fires(name)) wake(`${slot.key}:${name}`)
       // A second stuck / none_found under the same goal escalates; the first is Jev's to retry.
-      if (name === 'stuck' || name === 'none_found') {
+      if ((name === 'stuck' || name === 'none_found') && !slot.pinned) { // a trial's result goes to System 2 anyway
         const leaf = goals.leaf()
         const k = `${leaf?.id}:${name}`
         failures.set(k, (failures.get(k) ?? 0) + 1)
@@ -129,6 +147,9 @@ export async function startAgent (opts: AgentOptions) {
       const p = check.progress!(bot)
       return glob(check.spec.match ?? '*').test(block) ? p.want - p.have : 0
     }
+    // An authored check (e.g. "no leaves left") has no count: offer what's in view (the encoder's block radius).
+    // A wider count sends collect after far blocks and away from the goal's place.
+    if (check?.spec.module === 'authored') return bot.findBlocks({ matching: bot.registry.blocksByName[block]?.id, maxDistance: program.encoder.params.block_radius, count: 64 }).length
     if (check) return 0
     const want = Number(directive.text.match(/\d+/)?.[0] ?? 1)
     return Math.max(0, want - ((inventoryCounts(bot)[block] ?? 0) - (directive.inventory[block] ?? 0)))
@@ -234,11 +255,14 @@ export async function startAgent (opts: AgentOptions) {
   let pending: Trigger[] = []
   const lastSent = new Map<string, number>()
 
+  // During a trial Jev can't act on the pinned channels, so its doubts are expected; the trial's result is what counts.
+  const jevDoubtDuringTrial = (reason: string) => !!trial && (reason === 'low_confidence' || reason === 'jev_escalate')
+
   function escalate (reason: string, detail: unknown, goal: Goal) {
     note(`escalation: ${reason}`)
     recorder.stats.escalations.push(reason)
     const key = `${reason}|${goal.id}|${version(program)}`
-    if (reason !== 'instruction' && Date.now() - (lastSent.get(key) ?? 0) < NO_REPEAT_MS) {
+    if (jevDoubtDuringTrial(reason) || (reason !== 'instruction' && reason !== 'behavior_trial' && Date.now() - (lastSent.get(key) ?? 0) < NO_REPEAT_MS)) {
       recorder.jsonl({ kind: 'escalation_suppressed', reason, goal: goal.id })
       return
     }
@@ -250,7 +274,8 @@ export async function startAgent (opts: AgentOptions) {
 
   const wakeSystem2 = coalescing(async () => {
     const onPath = new Set(goals.path().map(g => g.id))
-    const triggers = pending.filter(t => onPath.has(t.goal)) // escalations for goals that closed meanwhile are moot
+    // Escalations for goals that closed meanwhile are moot, and so are Jev's doubts queued just before a trial began.
+    const triggers = pending.filter(t => onPath.has(t.goal) && !jevDoubtDuringTrial(t.reason))
     pending = []
     if (!triggers.length || !system2 || stopped) return
     const goal = goals.nodes.find(g => g.id === (triggers.find(t => t.reason === 'instruction') ?? triggers.at(-1)!).goal)!
@@ -306,6 +331,12 @@ export async function startAgent (opts: AgentOptions) {
       goal.log.push(module ? `registered ${module.id} (true on ${trial.trues}/${trial.states} recent states)` : `module ${src.name} refused: ${trial.error}`)
       if (!module) problems.push(`module ${src.name} refused: ${trial.error}`)
     }
+    // After modules, so a trial's pass_when can name a check registered in this decision.
+    for (const b of d.new_behaviors ?? []) {
+      const problem = startTrial(b, goal, cite)
+      goal.log.push(problem ?? `trial started: ${b.name}`)
+      if (problem) problems.push(problem)
+    }
     const check = (spec: CheckSpec, g: Goal) => {
       try { return compile(spec, g, lookup) } catch (err) { problems.push(String(err)); return null }
     }
@@ -357,6 +388,75 @@ export async function startAgent (opts: AgentOptions) {
     const want = goals.program() ?? DEFAULT_PROGRAM
     if (version(want) !== version(program)) activate(want, `system2: ${d.note}`, [cite])
     if (problems.length) escalate('module_failed', { problems }, goal)
+  }
+
+  // ---- behaviors System 2 writes: one live trial at a time, under guards, pinned against Jev ----
+  // Pass: the run returns "done", or the goal it was written for completes while it runs. Either way the
+  // result, with the error and the last actions, goes back to System 2 as a behavior_trial escalation.
+  type RunDetail = { error?: string, actions: unknown[] }
+  type TrialRun = { src: ModuleSource, spec: Spec, passWhen: string | null, version: number, goal: Goal | null, target: unknown, t0: number, done?: (r: BehaviorTrial & { passed: boolean }) => void }
+  const findEntity = (name: string | null) => {
+    if (!name) return null
+    const e = bot.players[name]?.entity ?? Object.values(bot.entities)
+      .filter(e => e !== bot.entity && e.name === name)
+      .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
+    return e ?? null
+  }
+
+  function startTrial (n: BehaviorDraft, goal: Goal | null, cite: string, done?: TrialRun['done']): string | null {
+    const src: ModuleSource = { kind: 'behavior', name: n.name, description: n.description, code: n.code, channels: n.channels, targets: n.targets, timeout_s: n.timeout_s }
+    let problem: string | null = null
+    try { compileBehavior(src) } catch (err) { problem = `behavior ${n.name} refused: ${String(err)}` }
+    const t = n.trial
+    const target = !t ? null : src.targets === 'block' ? (t.block ? { name: t.block, count: t.count ?? 1 } : null) : findEntity(t.entity ?? null)
+    if (!problem && trial) problem = `behavior ${n.name}: the trial of ${trial.src.name} is still running`
+    if (!problem && !target) problem = `behavior ${n.name}: trial target not found (${JSON.stringify(t)})`
+    const passWhen = t?.pass_when || null
+    if (!problem && passWhen && modules.get(passWhen)?.kind !== 'check') problem = `behavior ${n.name}: pass_when names no registered check module (${passWhen})`
+    const version = modules.nextVersion(n.name)
+    recorder.record('module', {
+      attrs: { 'jeeve.module.id': `${n.name}@${version}`, 'jeeve.module.kind': 'behavior', 'jeeve.module.activation': problem ? 'failed_trial' : 'trial_started', 'jeeve.program.cites': cite },
+      input: src, output: problem ? { error: problem } : { target: t }
+    })
+    if (problem) return problem
+    const spec = authoredSpec({ ...src, version }, world)
+    trial = { src, spec, passWhen, version, goal, target: t, t0: Date.now(), done }
+    note(`trial of ${n.name}@${version} started`)
+    channels.set(`${n.name}:trial`, n.name, target as never, `system2:${cite}`, { spec, pinned: true })
+    return null
+  }
+
+  function finishTrial (end: string, detail?: RunDetail) {
+    const t = trial
+    if (!t) return
+    trial = null
+    // "done" is the code's own claim; a pass_when check tests it in the world, a few ticks later so the view has
+    // caught up (world.ts caches block views for 50 ms, and e2e run 8 judged a leaf it had just broken).
+    if (end === 'done' && t.passWhen) void bot.waitForTicks(3).then(() => settleTrial(t, end, detail))
+    else settleTrial(t, end, detail)
+  }
+
+  function settleTrial (t: TrialRun, end: string, detail?: RunDetail) {
+    const judged = rawSnapshot(bot)
+    const claimFails = end === 'done' && t.passWhen && !modules.get(t.passWhen)?.run(judged)
+    if (claimFails) detail = { ...detail, actions: detail?.actions ?? [], error: `returned done, but pass_when ${t.passWhen} is false on ${JSON.stringify({ self: judged.self, blocks: judged.blocks })}` }
+    const passed = (end === 'done' && !claimFails) || (end === 'goal_closed' && t.goal?.status === 'completed')
+    const result: BehaviorTrial = { target: t.target, end, ms: Date.now() - t.t0, ...(detail?.error ? { error: detail.error } : {}) }
+    const id = `${t.src.name}@${t.version}`
+    if (passed) {
+      modules.addBehavior(t.src, t.version, result, { session, goal: t.goal ? `${t.goal.id}: ${t.goal.text}` : 'operator', created_at: new Date().toISOString() })
+      BEHAVIORS[t.src.name] = t.spec
+      authoredFailures.delete(t.src.name)
+    }
+    recorder.record('module', {
+      attrs: { 'jeeve.module.id': id, 'jeeve.module.kind': 'behavior', 'jeeve.module.activation': passed ? 'ok' : 'failed_trial' },
+      input: t.src, output: { trial: result, actions: detail?.actions }
+    })
+    note(`trial of ${id} ${passed ? 'passed' : `failed: ${end}`}`)
+    console.log(`[behavior] trial of ${id} ${passed ? 'passed' : 'failed'}: ${end}${detail?.error ? ` (${detail.error})` : ''}`)
+    t.goal?.log.push(`trial of ${id} ${passed ? 'passed: registered' : `failed: ${end}`}`)
+    t.done?.({ ...result, passed })
+    if (t.goal) escalate('behavior_trial', { behavior: id, passed, ...result, actions: detail?.actions, self: rawSnapshot(bot).self }, t.goal)
   }
 
   // ---- instructions: whispers from allowed players, or the local API ----
@@ -475,7 +575,12 @@ export async function startAgent (opts: AgentOptions) {
     await recorder.shutdown()
     bot.quit()
   }
-  return { bot, channels, goals, recorder, stop, traceFile: recorder.file, session }
+  // Trial a behavior outside any goal (the e2e's guard fixture uses the same pipeline System 2 does).
+  const trialBehavior = (n: BehaviorDraft) => new Promise<BehaviorTrial & { passed: boolean }>((resolve, reject) => {
+    const problem = startTrial(n, null, 'operator', resolve)
+    if (problem) reject(new Error(problem))
+  })
+  return { bot, channels, goals, modules, recorder, stop, trialBehavior, traceFile: recorder.file, session }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

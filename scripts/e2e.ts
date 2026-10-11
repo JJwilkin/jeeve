@@ -3,6 +3,7 @@
 // Uses the real Jev, Claude (System 2) and Judgment staging. Run: MINECRAFT_EULA=true npm run e2e (EULA once).
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import mineflayer from 'mineflayer'
+import { Vec3 } from 'vec3'
 import { Judgeval } from 'judgeval'
 import { startAgent } from '../src/main.ts'
 import { ModuleRegistry } from '../src/modules.ts'
@@ -58,6 +59,13 @@ await sleep(1500)
 agent.bot.setControlState('forward', false)
 check('guard: raw forward off a 5-block drop is vetoed', agent.bot.entity.position.y >= y0 - 0.1 && (agent.recorder.stats.events.vetoed ?? 0) > 0,
   `y ${y0} → ${agent.bot.entity.position.y.toFixed(2)}, vetoes ${agent.recorder.stats.events.vetoed ?? 0}`)
+// The same edge, from authored code: a fixture behavior through the pipeline System 2's behaviors use.
+const fixture = await agent.trialBehavior({
+  name: 'e2e_step_forward', description: 'e2e fixture: walk forward', channels: ['legs'], targets: 'block', timeout_s: 5,
+  code: 'async (api) => { await api.control("forward", true); await api.wait(30); return "done" }', trial: { block: 'stone', count: 1 }
+})
+check('guard: authored code walking off the pillar is vetoed', fixture.end === 'vetoed' && !fixture.passed && agent.bot.entity.position.y >= y0 - 0.1,
+  `end ${fixture.end}, error ${fixture.error}, y ${agent.bot.entity.position.y.toFixed(2)}`)
 server.command('fill 50 -60 0 50 -56 0 air')
 
 server.command('tp Jeeve 0 -60 0')
@@ -153,6 +161,42 @@ const post = await fetch(`http://127.0.0.1:${API}/instructions`, { method: 'POST
 const status = await (await fetch(`http://127.0.0.1:${API}/status`)).json() as any
 check('local API: POST /instructions replaces the root goal', post.status === 202 && status.goals.path[0]?.text === 'stand still and wait')
 check('"follow me and defend me" was abandoned, not failed', status.goals.past.some((l: string) => l.includes('abandoned: follow me and defend me')))
+
+// Behaviors System 2 writes: a tree whose canopy is out of reach from the ground (eyes at -58.4, lowest
+// leaf centre at -53.5). Collect can't get the leaves; System 2 has to write a behavior that builds up.
+// Last, because Jeeve may end up on a pillar. Persistent leaves, so none decay instead of being broken.
+const TREE = { x: 30, z: -12 }
+server.command(`fill ${TREE.x - 6} -60 ${TREE.z - 6} ${TREE.x + 6} -45 ${TREE.z + 6} air`) // the world persists between runs
+server.command('fill 17 -60 10 19 -57 12 air') // logs "collect 10 logs" left: collect would walk off to them
+server.command(`fill ${TREE.x} -60 ${TREE.z} ${TREE.x} -55 ${TREE.z} oak_log`)
+server.command(`fill ${TREE.x - 1} -54 ${TREE.z - 1} ${TREE.x + 1} -52 ${TREE.z + 1} oak_leaves[persistent=true]`)
+server.command(`tp Jeeve ${TREE.x - 3} -60 ${TREE.z}`)
+server.command(`tp Josh ${TREE.x - 6} -60 ${TREE.z + 4}`)
+await sleep(2000)
+// Logs and leaves around the tree. Logs alone can't be checked: Jeeve may pillar with the logs he collected.
+const treeLeft = (kind: 'log' | 'leaves') => {
+  const left: string[] = []
+  for (let y = -60; y <= -50; y++) for (let x = TREE.x - 2; x <= TREE.x + 2; x++) for (let z = TREE.z - 2; z <= TREE.z + 2; z++) {
+    if (josh.blockAt(new Vec3(x, y, z))?.name.endsWith(`_${kind}`)) left.push(`${x},${y},${z}`)
+  }
+  return left
+}
+check('tree built: 6 logs and 27 leaves', treeLeft('log').length === 6 && treeLeft('leaves').length === 27, `${treeLeft('log').length} logs, ${treeLeft('leaves').length} leaves`)
+// The leaves are persistent, as player-placed leaves are, and Jeeve can't see block states, so Josh says so;
+// otherwise System 2 rightly expects them to decay once the logs are gone, and waits.
+josh.whisper('Jeeve', "break that whole tree, leaves included. The leaves won't decay on their own")
+const authoredBehavior = () => [...agent.modules.modules.values()].find(m => m.kind === 'behavior')
+// Room for a few write → trial → rewrite rounds: a System 2 call takes 5–40 s and a failed trial up to its time limit.
+await until('"break the tree": System 2 writes a behavior, its trial passes and it is registered', () => !!authoredBehavior(), 480000)
+await until('"break the tree": every leaf is broken', () => treeLeft('leaves').length === 0, 180000)
+console.log(`left around the tree: leaves [${treeLeft('leaves').join(' ')}], logs [${treeLeft('log').join(' ')}]`)
+{
+  const id = authoredBehavior()?.id ?? '?'
+  const runs = traceRecords().filter(r => r.kind === 'behavior_start' && r.name === id.split('@')[0])
+  console.log(`authored behavior ${id}: ${runs.length} runs; trial ${JSON.stringify(authoredBehavior()?.trial)}`)
+  const { loaded } = new ModuleRegistry(() => {}, LIBRARY).load()
+  check('behaviors persist: a fresh registry reloads the authored behavior from the library', loaded.includes(id), loaded.join(', '))
+}
 await sleep(12000) // let System 2 answer the last instruction before the episode ends
 
 // Summary from the local mirror.

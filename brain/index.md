@@ -24,7 +24,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[system-1-infrastructure]] (done → [[system-1]]): decide what the runtime provides around System 1 vs. what System 2 decides (state encoding, questions, when to call)
 - [[seed-behaviors-and-traces]] (done → [[seed-behaviors]], [[trace-schema]]): the smallest behavior set for the first milestone, plus the span/trace schema and ingest into Judgment
 - [[system-2-and-goals]] (done → [[system-2]]): the goal-tree data model, instruction intake, success checks, how System 2 writes program changes, escalations and window summaries
-- [[runtime-authored-behaviors]] (todo): System 2 writes, trials and registers new behaviors (first case: `pillar` to reach leaves), plus the block view it needs to write them
+- [[runtime-authored-behaviors]] (done → [[behaviors-and-guards]]): System 2 writes, trials and registers new behaviors (first case: pillaring to reach leaves), on the shared block view from [[perception]]
 - [[perception-tools]] (done → [[perception]]): System 2 asks for detail (scan, reachable) instead of guessing from buckets; owns the block view; exact counts and heights in the summary
 
 ### Architecture
@@ -34,7 +34,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[seed-behaviors]]: the M1 seed set wrapping mineflayer plugins (behaviors claim channel sets, so M1 asks one joint `body` choice), guards, and the three instructions walked end to end
 - [[trace-schema]]: one session per episode, one trace per window (root ends last), span kinds and `jeeve.*` attributes, judgeval-js ingest (<1 s to queryable), virtual SQL queries System 2 runs, volume
 - [[system-2]]: the goal tree (one writer, program versions stack with goals), instruction intake by whisper and local API, success checks as code modules, escalations, program changes scoped by goal, window summaries written by code
-- [[behaviors-and-guards]]: the deterministic layer: the behavior contract, layered behaviors, safety guards, behaviors System 2 writes at runtime
+- [[behaviors-and-guards]]: the deterministic layer: the behavior contract, layered behaviors, safety guards, behaviors System 2 writes at runtime (action API, sandbox, live trials, library)
 - [[perception]]: perception as tools: `scan` and `reachable` for System 2 (traced as `perceive` spans), one read-only query layer (`src/world.ts`) shared with modules and authored behaviors, exact counts and heights in the summary, x-ray vs. line of sight
 - [[learning]]: decision: context only, no training. Live and cross-episode loops, per-minute traces linked by lineage, agentic search over past traces
 

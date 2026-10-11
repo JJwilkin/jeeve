@@ -188,7 +188,7 @@ A refusal, or a reference to a module that doesn't exist, becomes a `module_fail
 **Not yet:**
 - **Encoders and option generators** written by System 2. These change what Jev sees, so they need the replay comparison from "How programs are compared". Deferred: they stay on the roadmap (Joshua, 2026-10-11).
 - ~~**Persistence across runs.**~~ Built: see "Module library" below.
-- **Behaviors written by System 2.**
+- ~~**Behaviors written by System 2.**~~ Built 2026-10-11: same library, a different sandbox and a live trial ([[behaviors-and-guards]] → "How it's built").
 
 **Limits (reviewed 2026-10-11):** a 2 ms trial budget per call and disabling after 3 errors are starting guesses. Loosen them if they ever become the constraint.
 
@@ -215,5 +215,5 @@ The agent should get better over time and start each run from modules that have 
 - **Tail latency under load.** A 1.2 s outlier showed up with 16 calls in parallel. We still need p99 at real multi-bot load, measured from where the bots will actually run.
 - **Calibration.** Jev's confidence hasn't been checked against System 2 labels, so the 0.5 escalation threshold is a guess.
 - **One call in flight per bot or per decider.** Per bot until the numbers say aim needs a faster cadence than legs.
-- ~~**Module sandbox.**~~ Decided: `node:vm` (see "Modules System 2 writes"). Behaviors written by System 2 will need a different sandbox, because behaviors act on the bot rather than on data.
+- ~~**Module sandbox.**~~ Decided: `node:vm` (see "Modules System 2 writes"). Behaviors use `node:vm` too, with a string-only async bridge and timed entries ([[behaviors-and-guards]] → "How it's built").
 - **Rate limits.** TypeSafe says its limits "can change without notice". Multi-bot plans need a fallback model ([[decision-models]]).

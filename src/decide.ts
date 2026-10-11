@@ -97,6 +97,7 @@ export function makeDecider (ctx: DecideCtx) {
       const a = res?.answers?.[id]
       if (!a) continue
       if (q.claims.some(c => claimed.has(c))) { applied[id] = 'overridden'; continue }
+      if (q.claims.some(c => ctx.channels.slots[c]?.pinned && ctx.channels.slots[c]?.status === 'running')) { applied[id] = 'pinned'; continue } // a trial runs
       const [status, act] = plan(ctx, q, a.choice, options[id][a.choice])
       applied[id] = status
       if (act) actions.push(act)
