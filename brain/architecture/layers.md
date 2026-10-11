@@ -28,7 +28,7 @@ This is the physics-vs-strategy split from [[fast-bots]], with planning added on
 
 ## System 2: the planner
 - A reasoning model. Runs for seconds to minutes and never blocks the layers below.
-- **Owns the goal tree** ([[overview]]): expands nodes, replans on failure.
+- **Owns the goal tree** ([[overview]]): expands nodes, replans on failure. The data model, instruction intake, success checks and escalation handling are in [[system-2]].
 - **Writes System 1's context** for each directive:
   - the situation and what matters ("bridging to the red base; the void ends the game; enemies come from the left"),
   - which behaviors each channel may use right now,

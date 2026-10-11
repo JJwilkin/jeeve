@@ -42,7 +42,7 @@ There's no separate filter layer in M1:
 |---|---|
 | **Code** | Allowlist check on instructions, goal success checks, path, dig, aim, attack timing, guards |
 | **Jev** | Which option to run right now: which target, whether to fight or keep collecting, pulling back, retrying after `stuck` |
-| **System 2** | Turns an instruction into a root goal, a success check and a System 1 program (guidance, allowed behaviors, triggers); handles escalations; replies to the player |
+| **System 2** | Turns an instruction into a success check and a System 1 program (guidance, allowed behaviors, triggers); handles escalations; writes failure and clarification replies ([[system-2]]) |
 
 **Jev re-decides at least every second, not only on events.** It has to react to changes in the surroundings: a mob walking up, lava on the route. The default program ([[system-1]]) covers this:
 - a 1 s heartbeat,
@@ -54,14 +54,14 @@ System 2 can shorten the heartbeat down to the 5 calls/s cap when a situation ne
 ## The three instructions end to end
 All three start the same way:
 1. An allowed player whispers. Code checks the allowlist.
-2. A `system2` span sets the root goal and its success check, and writes a System 1 program: guidance and allowed behaviors, on top of the default.
+2. ~~A `system2` span sets the root goal and its success check~~ *Superseded by [[system-2]]:* code creates the root at once and hands Jev the raw text; a `system2` span then fills in the success check and writes a System 1 program: guidance and allowed behaviors, on top of the default.
 3. That's a new `program` version, which the next `decide` runs under.
 4. A root-goal change cuts the window, so each instruction starts a fresh trace ([[trace-schema]]).
 
 **"come here" (from Josh)**
 1. Goal: `dist(bot, Josh) ≤ 3`, checked in code. Options: `navigate:Josh(r=2)`, `stop`.
 2. Jev picks `navigate:Josh`, then `keep_current` on each heartbeat while Josh moves. If lava appears on the route, Jev sees it on a heartbeat before pathfinder stalls.
-3. `done` → the check passes → a `goal` span marks it `completed` → System 2 whispers "here".
+3. `done` → the check passes → a `goal` span marks it `completed` → ~~System 2 whispers "here"~~ code whispers a fixed "done" message ([[system-2]]).
 4. **On failure:** `stuck` → Jev retries or escalates → System 2 whispers "can't reach you".
 
 **"collect 10 logs"**

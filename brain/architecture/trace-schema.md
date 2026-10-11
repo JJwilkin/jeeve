@@ -39,13 +39,13 @@ All custom attributes use the `jeeve.*` prefix.
 
 | Span | Input / output | Attributes | Events |
 |---|---|---|---|
-| `window` | none | `jeeve.window_index`, `jeeve.prev_trace_id`, `jeeve.window.reason` (`time`, `goal_boundary`, `episode_end`), `jeeve.goal.path` | game events that aren't behavior events: `death`, `damage`, `chat`. Each carries the program version in effect. |
+| `window` | none | `jeeve.window_index`, `jeeve.prev_trace_id`, `jeeve.window.reason` (`time`, `goal_boundary`, `episode_end`), `jeeve.goal.path` (`g-4:collect 10 logs > g-5:…`, at window open) | game events that aren't behavior events: `death`, `damage`, `owner_damage` (the player an open-ended goal protects, [[system-2]]), `chat`. Each carries the program version in effect. |
 | `carry_over` | in: goal path, program version, previous window's summary, open behavior runs | `jeeve.prev_trace_id` | none |
 | `system2` | in: instruction text and sender, or the escalation · out: goal, check, program changes | `jeeve.system2.trigger` (`instruction`, `escalation:<reason>`), plus model and tokens via `recordLLMMetadata` | none |
 | `program` | in: manifest diff from the parent · out: full manifest | `jeeve.program.version`, `.parent`, `.reason`, `.cites` (trace and span ids), `.activation` (`ok`, `failed_check`, `rolled_back`) | none |
 | `decide` | in: the encoded state as Jev saw it, plus the questions with options **in the order shown** · out: choices, probabilities, confidence | `jeeve.program.version`, `jeeve.decide.trigger` (merged triggers), `.changed`, `.latency_ms`, `.state_age_ms` (how stale the state was when the answer arrived), `.deadline_missed`, `.escalate`, `.raw_state` (compact raw snapshot for replay) | none |
 | `behavior.<name>` | none | `jeeve.behavior.name`, `.version`, `.params`, `.run_id`, `.channels`, `.decided_by` (the `decide` span id), `.end_reason`, `.continued` | `progress`, `vetoed` (guard and reason), and the other behavior events |
-| `goal` | in: the node · out: the check result | `jeeve.goal.id`, `.path`, `.transition` (`pushed`, `completed`, `failed`, `popped`) | none |
+| `goal` | in: the node · out: the check result and one-line summary | `jeeve.goal.id`, `.path`, `.transition` (`pushed`, `completed`, `failed`, `abandoned`; ~~`popped`~~ dropped by [[system-2]]: a pop is the child closing) | none |
 
 **Every `decide` call keeps its full state.** The many `keep_current` calls are the evidence for telling a bad choice from a broken behavior ([[behaviors-and-guards]]). `jeeve.decide.changed` lets queries skip them.
 
@@ -128,6 +128,6 @@ GROUP BY v ORDER BY decides DESC LIMIT 20
 - **No sampling for M1.** If it's needed later, the first knobs are dropping the encoded state from `keep_current` calls (keeping a hash), then logging the raw snapshot less often.
 
 ## Open questions
-- **Who writes the previous-window summary** in `carry_over`: System 2, or a cheap summarizer at the cut?
+- ~~**Who writes the previous-window summary** in `carry_over`: System 2, or a cheap summarizer at the cut?~~ Answered in [[system-2]]: code, as a structured summary at the cut.
 - **Semantic search.** When it's ready, thousands of near-identical `keep_current` states could drown it. The likely fix is indexing only `changed = true`.
 - **Session length.** Is one session per multi-hour episode fine for session-level queries in the UI?

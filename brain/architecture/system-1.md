@@ -18,6 +18,7 @@ The starting idea held: **System 1 is a program System 2 writes, and the infrast
    - **Inner loop (live):** System 2 edits settings: guidance, examples, allowed behaviors, trigger settings. It switches between encoders and question sets that already exist.
    - **Outer loop:** this is where new encoders and question sets usually come from, because comparing them needs traces ([How programs are compared](#how-programs-are-compared)).
    - **Evidence is recorded, not required.** Every program change is versioned and carries its reasoning and any events it cites, the same rule [[learning]] sets for guidance. System 2 may write a module and activate it straight away. The only checks are the mechanical ones in [Fixed bounds](#fixed-bounds).
+   - *Refined by [[system-2]]:* this holds for structural changes (encoders, question layouts, modules). Guidance changes are scoped to the goal node that made them and revert when it closes; lessons kept past their goal must cite trace or event IDs and expire.
 
 ## Where the line is
 The infrastructure owns anything that does one of four things:
@@ -130,7 +131,7 @@ What it taught us:
 - **Channels are coupled through the view.** The pathfinder steers by looking, so `track` yields to the legs while they move. That's the first concrete cross-channel rule from [[layers]].
 
 Not yet built, and deliberately so:
-- **System 2.** Escalations are traced, not acted on. The program is fixed to the default, so module authoring, activation checks beyond `validate()`, and the watchdog arrive with System 2.
+- **System 2.** Escalations are traced, not acted on. Its design is in [[system-2]]. The program is fixed to the default, so module authoring, activation checks beyond `validate()`, and the watchdog arrive with System 2.
 - **Guards.** These are only the pathfinder's movement limits for now (max drop 3, no parkour, no digging, no towering). That's weaker than [[behaviors-and-guards]]'s filter on every motor command. The veto layer is needed before any behavior moves the bot without the pathfinder.
 - **The stance channel, `dig` and "collect 10 logs".** These are left to [[seed-behaviors-and-traces]].
 - **Judgment ingest.** Traces are JSONL until the span schema is settled.

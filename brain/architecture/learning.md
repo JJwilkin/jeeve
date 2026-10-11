@@ -45,7 +45,9 @@ System 2 doesn't just receive the latest window. It **searches its own history**
 This is what turns traces into experience: System 2 picks its own examples by searching for them, not from a fixed set. It's also a strong use of Judgment's own product, where the agent queries its own traces in order to improve.
 
 ## Guarding against poisoned beliefs
-The long-horizon failure from [[llm-plays-pokemon]]: a wrong belief ("Steve can't shoot") gets baked into guidance and keeps steering badly. So every guidance update must:
+The long-horizon failure from [[llm-plays-pokemon]]: a wrong belief ("Steve can't shoot") gets baked into guidance and keeps steering badly.
+
+*Refined by [[system-2]] → "Program changes: scoped by goal":* citing is automatic, guidance expires with the goal node that made it, and only lessons kept past their goal must cite trace or event IDs and carry an expiry. ~~So every guidance update must:~~
 - **cite evidence:** the events or trace IDs that motivated it,
 - **expire** unless later evidence keeps confirming it,
 - **be versioned,** so each decision is traceable to the guidance it ran under, and a bad version can be found and rolled back by searching traces.
@@ -53,5 +55,5 @@ The long-horizon failure from [[llm-plays-pokemon]]: a wrong belief ("Steve can'
 ## Open questions
 - ~~**How fresh the outer loop can be.**~~ Answered in [[trace-schema]]: with a flush at the cut, a window is queryable through virtual SQL 0.7–0.9 s after it closes (measured on staging).
 - ~~**What triggers a window.**~~ Answered in [[trace-schema]]: 60 s or a root-goal boundary, whichever comes first. A fight that crosses a cut is stitched back together by `run_id`.
-- **Who writes window summaries.** System 2 itself, or a cheap summarizer at the cut?
+- ~~**Who writes window summaries.**~~ Answered in [[system-2]]: code writes a structured summary at the cut, with System 2's latest goal note if any.
 - **Outcome signals.** How the outer loop knows what "went well" is roadmap stage 4 (goals and reward).

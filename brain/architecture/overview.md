@@ -59,7 +59,7 @@ beat the game                         ← always in context
 - **Goals break down from the top.** Slow thinking expands a node when it reaches it, not all at the start.
 - **History summarizes up from the bottom.** Each node keeps a log for the time it's active. When it finishes, the log becomes a one-line summary on its parent.
 - **Context** for any decision is the path from the root to the current node. Finished branches shrink to summaries, and future ones are just names.
-- **Interrupts** push a temporary node, e.g. "fight", and pop back to the task afterwards. The active path behaves like a call stack.
+- **Interrupts** push a temporary node, e.g. "fight", and pop back to the task afterwards. The active path behaves like a call stack. *Refined by [[system-2]]:* only System 2 pushes nodes; a fight Jev starts is a behavior run under the current goal.
 - **The structure is built in; what goes in it is discovered.** We never write the tree for "beat the game".
 
 ## Time in decisions
@@ -83,7 +83,7 @@ Judgment isn't bolted on. It provides the loop's experience and reward.
 
 ## Open questions
 - ~~**The primitive set.**~~ Answered in [[layers]]: one right answer → code behaviors; judgment → Jev picks behaviors per channel; plans → System 2.
-- **Outcome signals for open-ended objectives.** What does "a good house" mean? How far can judges go?
+- **Outcome signals for open-ended objectives.** What does "a good house" mean? How far can judges go? For the first milestone, [[system-2]] gives open-ended goals `escalate_if` checks and a review interval instead of a success check; judges are still stage 4.
 - ~~**What form distillation takes.**~~ Answered in [[learning]]: context (guidance and examples) and code (behaviors). No weight training.
 - **Perception.** Is data alone enough, or do images help for some judgments, like how a build looks?
 - **How much of the hierarchy is fixed.** Could the structure itself be learned?
