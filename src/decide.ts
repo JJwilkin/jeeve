@@ -50,7 +50,8 @@ export type DecideCtx = {
   directive: () => Directive | null
   events: () => string[]
   remaining: (block: string) => number // what's left of the goal's count for a block type
-  trace: (record: Record<string, unknown>) => void
+  record: (span: { attrs: Record<string, string | number | boolean | undefined>, input: unknown, output: unknown, llm?: Record<string, unknown> }) => string
+  escalate: (reason: string, detail: unknown) => void
   ask?: Ask
 }
 
@@ -81,6 +82,7 @@ export function makeDecider (ctx: DecideCtx) {
     let error: string | undefined
     try { res = await (ctx.ask ?? askJev)(state, questions) } catch (err) { error = String(err) }
     const latencyMs = Date.now() - t0
+    const deadlineMissed = error?.includes('TimeoutError') ?? false
 
     // Whole-body questions first: a whole-body start wins its channels for this call.
     const choices = Object.entries(ctx.program.questions)
@@ -88,22 +90,39 @@ export function makeDecider (ctx: DecideCtx) {
       .sort((a, b) => b[1].claims.length - a[1].claims.length)
     const claimed = new Set<Channel>()
     const applied: Record<string, string> = {}
-    let escalate = Object.keys(ctx.program.questions).some(id => res?.answers?.[id]?.noul > ctx.program.escalate_when.noul_above)
+    const actions: Array<(decidedBy: string) => void> = []
+    const jevSaysEscalate = Object.keys(ctx.program.questions).some(id => res?.answers?.[id]?.noul > ctx.program.escalate_when.noul_above)
+    const unsure = choices.filter(([id]) => res?.answers?.[id]?.confidence < ctx.program.escalate_when.confidence_below).map(([id]) => id)
     for (const [id, q] of choices) {
       const a = res?.answers?.[id]
       if (!a) continue
-      escalate ||= a.confidence < ctx.program.escalate_when.confidence_below
       if (q.claims.some(c => claimed.has(c))) { applied[id] = 'overridden'; continue }
-      applied[id] = apply(ctx, q, a.choice, options[id][a.choice])
-      if (applied[id] === 'started') q.claims.forEach(c => claimed.add(c))
+      const [status, act] = plan(ctx, q, a.choice, options[id][a.choice])
+      applied[id] = status
+      if (act) actions.push(act)
+      if (status === 'started') q.claims.forEach(c => claimed.add(c))
     }
+    const escalate = jevSaysEscalate || unsure.length > 0
 
-    ctx.trace({
-      kind: 'decide', t: t0, program: programVersion, reasons, latency_ms: latencyMs, encode_ms: encodeMs, error,
-      raw, state, option_order: optionOrder, answers: res?.answers, model: res?.model, usage: res?.usage, applied, escalate
+    // The span is recorded first, so the behaviors it starts can point back at it (decided_by).
+    const spanId = ctx.record({
+      attrs: {
+        'jeeve.program.version': programVersion,
+        'jeeve.decide.trigger': reasons.join(','),
+        'jeeve.decide.changed': actions.length > 0,
+        'jeeve.decide.latency_ms': latencyMs,
+        'jeeve.decide.state_age_ms': Date.now() - t0,
+        'jeeve.decide.encode_ms': encodeMs,
+        'jeeve.decide.deadline_missed': deadlineMissed,
+        'jeeve.decide.escalate': escalate,
+        'jeeve.decide.raw_state': JSON.stringify(raw)
+      },
+      input: { state, questions }, // criteria are in the order shown
+      output: { answers: res?.answers, applied, error },
+      llm: res?.usage ? { model: res.model, provider: 'typesafe', non_cached_input_tokens: res.usage.input_tokens, output_tokens: res.usage.output_tokens } : undefined
     })
-    // ponytail: no System 2 yet, so an escalation is only traced.
-    if (escalate) console.log('[escalate]', JSON.stringify(res?.answers))
+    for (const act of actions) act(spanId)
+    if (escalate) ctx.escalate(jevSaysEscalate ? 'jev_escalate' : 'low_confidence', { questions: unsure, answers: res?.answers, decide_span: spanId })
   }
 }
 
@@ -115,15 +134,14 @@ function running (ctx: DecideCtx, q: Choice): string | null {
   return q.claims.length === 1 || q.claims.every(c => holder.channels.includes(c)) ? holder.key : null
 }
 
-// Apply one answer, checking an entity target is still live (Jev answers ~100–300 ms late).
-function apply (ctx: DecideCtx, q: Choice, choice: string, opt: Option | undefined): string {
-  if (choice === 'keep_current') return 'kept'
-  if (choice === 'stop') { ctx.channels.stop(q.claims); return 'stopped' }
-  if (!opt?.behavior) return 'unknown_option'
-  if (opt.block) { ctx.channels.set(choice, opt.behavior, opt.block); return 'started' }
+// Plan one answer, checking an entity target is still live (Jev answers ~100–300 ms late).
+function plan (ctx: DecideCtx, q: Choice, choice: string, opt: Option | undefined): [string, ((decidedBy: string) => void)?] {
+  if (choice === 'keep_current') return ['kept']
+  if (choice === 'stop') return ['stopped', () => ctx.channels.stop(q.claims, 'stopped')]
+  if (!opt?.behavior) return ['unknown_option']
+  if (opt.block) return ['started', by => ctx.channels.set(choice, opt.behavior!, opt.block!, by)]
   const id = ctx.handles.byHandle.get(opt.handle!)
   const target = id === undefined ? undefined : ctx.bot.entities[id]
-  if (!target) return 'stale_target'
-  ctx.channels.set(choice, opt.behavior, target)
-  return 'started'
+  if (!target) return ['stale_target']
+  return ['started', by => ctx.channels.set(choice, opt.behavior!, target, by)]
 }

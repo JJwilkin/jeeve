@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { coalescing, makeDecider } from './decide.ts'
 import { direction, distanceBucket, newHandles } from './encoder.ts'
+import { compile, glob, Goals } from './goals.ts'
 import { controlVector, unsafeAt } from './guards.ts'
 import { DEFAULT_PROGRAM, optionsFor, validate, version } from './program.ts'
 
@@ -86,19 +87,22 @@ async function decideWith (answers: Record<string, any>) {
   const channels: any = {
     slots: { legs: null, aim: null, hands: null },
     describe: () => ({ legs: 'idle', aim: 'idle', hands: 'idle' }),
-    set: (key: string) => started.push(key),
+    set: (key: string, _b: string, _t: unknown, by: string) => started.push(`${key}@${by}`),
     stop: () => {}
   }
   const traces: any[] = []
+  const escalations: string[] = []
   let seen: any
   const decide = makeDecider({
-    bot, program: DEFAULT_PROGRAM, handles: newHandles(), channels, trace: r => traces.push(r),
+    bot, program: DEFAULT_PROGRAM, handles: newHandles(), channels,
+    record: r => { traces.push(r); return 'span-1' },
+    escalate: reason => escalations.push(reason),
     directive: () => ({ text: 'collect 10 logs', from: 'Josh', at: 0, inventory: {} }), events: () => [],
     remaining: () => 10,
     ask: async (state, questions) => { seen = { state, questions }; return { model: 'fake', answers } }
   })
   await decide(['test'])
-  return { started, trace: traces[0], seen }
+  return { started, trace: traces[0], seen, escalations }
 }
 
 {
@@ -109,13 +113,17 @@ async function decideWith (answers: Record<string, any>) {
     hands: { choice: 'keep_current', confidence: 0.2 }, // low confidence → escalate
     escalate: { noul: 0.1 }
   })
-  assert.deepEqual(r.started, ['navigate:E0'])
+  assert.deepEqual(r.started, ['navigate:E0@span-1']) // decided_by points at the decide span
   assert.equal(r.seen.state.directive.from, 'player Josh (E0)')
   assert.deepEqual(r.seen.state.entities, [{ id: 'E0', what: 'player Josh', where: 'close, ahead', motion: 'steady' }])
   assert.deepEqual(r.seen.state.blocks, [{ name: 'oak_log', count: 'one', nearest: 'very close, ahead' }])
   assert.deepEqual(new Set(keys(r.seen.questions.body.criteria)), new Set(['keep_current', 'collect:oak_log(10)']))
-  assert.deepEqual(r.trace.applied, { body: 'kept', legs: 'started', aim: 'unknown_option', hands: 'kept' })
-  assert.equal(r.trace.escalate, true)
+  assert.deepEqual(r.trace.output.applied, { body: 'kept', legs: 'started', aim: 'unknown_option', hands: 'kept' })
+  assert.equal(r.trace.attrs['jeeve.decide.escalate'], true)
+  assert.equal(r.trace.attrs['jeeve.decide.changed'], true)
+  assert.equal(r.trace.attrs['jeeve.decide.trigger'], 'test')
+  assert.ok(JSON.parse(r.trace.attrs['jeeve.decide.raw_state']).entities.length === 1)
+  assert.deepEqual(r.escalations, ['low_confidence'])
 }
 {
   // A whole-body start wins its channels for this call; per-channel answers are overridden.
@@ -126,9 +134,52 @@ async function decideWith (answers: Record<string, any>) {
     hands: { choice: 'keep_current', confidence: 0.9 },
     escalate: { noul: 0.1 }
   })
-  assert.deepEqual(r.started, ['collect:oak_log(10)'])
-  assert.deepEqual(r.trace.applied, { body: 'started', legs: 'overridden', aim: 'overridden', hands: 'overridden' })
-  assert.equal(r.trace.escalate, false)
+  assert.deepEqual(r.started, ['collect:oak_log(10)@span-1'])
+  assert.deepEqual(r.trace.output.applied, { body: 'started', legs: 'overridden', aim: 'overridden', hands: 'overridden' })
+  assert.equal(r.trace.attrs['jeeve.decide.escalate'], false)
+  assert.deepEqual(r.escalations, [])
+}
+
+// Goal tree: instructions replace the root, checks complete goals, escalate_if waits for for_ms,
+// programs stack with goals.
+{
+  assert.ok(glob('*_log').test('oak_log') && !glob('*_log').test('oak_planks'))
+  let inv: Record<string, number> = { oak_log: 2 }
+  const bot: any = {
+    inventory: { items: () => Object.entries(inv).map(([name, count]) => ({ name, count })) },
+    entity: { position: new Vec3(0, 0, 0) },
+    players: { Josh: { entity: { position: new Vec3(10, 0, 0) } } }
+  }
+  const completed: string[] = []
+  const escalated: string[] = []
+  const goals = new Goals({ completed: g => completed.push(g.id), escalate: (r, g) => escalated.push(`${g.id}:${r}`) })
+  const spec = (s: any) => ({ player: null, radius: null, match: null, count: null, negate: false, for_ms: null, ...s })
+
+  const a = goals.instruction('collect 3 logs', { player: 'Josh', via: 'whisper' }, bot).root
+  a.done_when = compile(spec({ module: 'inventory_delta', match: '*_log', count: 3 }), a) // counted from the 2 held
+  goals.tick(bot)
+  assert.deepEqual(goals.progress(bot), { have: 0, want: 3 })
+  inv = { oak_log: 4, birch_log: 1 }
+  goals.tick(bot)
+  assert.deepEqual(completed, [a.id])
+  assert.equal(a.status, 'completed')
+  assert.equal(goals.leaf(), null)
+
+  const b = goals.instruction('follow me', { player: 'Josh', via: 'whisper' }, bot).root
+  b.escalate_if = [compile(spec({ module: 'near_entity', player: 'Josh', radius: 5, negate: true, for_ms: 50 }), b)]
+  b.program = { ...DEFAULT_PROGRAM, guidance: 'stay close' }
+  goals.tick(bot)
+  assert.deepEqual(escalated, []) // far, but not for 50 ms yet
+  await new Promise(r => setTimeout(r, 60))
+  goals.tick(bot)
+  goals.tick(bot)
+  assert.deepEqual(escalated, [`${b.id}:escalate_if:near_entity`]) // fires once per episode of the condition
+  const child = goals.create('get away from the creeper', b.id, null, bot)
+  assert.equal(goals.program()?.guidance, 'stay close') // inherited from the parent
+  assert.equal(goals.pathText(), `${b.id}:follow me > ${child.id}:get away from the creeper`)
+  const c = goals.instruction('come here', { player: 'Josh', via: 'whisper' }, bot)
+  assert.deepEqual(c.abandoned.map(g => g.id), [child.id, b.id])
+  assert.equal(goals.program(), null) // back to the default
 }
 
 console.log('selfcheck ok')

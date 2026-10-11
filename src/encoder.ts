@@ -40,7 +40,7 @@ const IGNORED_TYPES = new Set(['object', 'orb', 'projectile', 'other', 'global']
 export const describeEntity = (e: Entity) =>
   e.type === 'player' ? `player ${e.username}` : `${e.name ?? 'unknown'}${e.type === 'hostile' ? ' (hostile)' : ''}`
 
-export type Directive = { text: string, from: string, at: number, inventory: Record<string, number> }
+export type Directive = { text: string, from: string, at: number, inventory: Record<string, number>, goal?: string | null }
 export type Encoded = {
   state: Record<string, unknown>
   entities: Array<{ id: string, desc: string }>
@@ -114,7 +114,7 @@ export function makeEgocentric (params: { entity_cap: number, radius: number, bl
     return {
       state: {
         directive: ctx.directive
-          ? { text: ctx.directive.text, from: `player ${ctx.directive.from}${speaker ? ` (${handleFor(ctx.handles, speaker.id)})` : ' (not in view)'}` }
+          ? { text: ctx.directive.text, from: `player ${ctx.directive.from}${speaker ? ` (${handleFor(ctx.handles, speaker.id)})` : ' (not in view)'}`, ...(ctx.directive.goal ? { goal: ctx.directive.goal } : {}) }
           : 'none yet: stay safe and wait',
         self: {
           health: healthBucket(bot.health),

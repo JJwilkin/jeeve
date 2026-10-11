@@ -132,38 +132,47 @@ export const STOP_DESC: Record<Channel, string> = {
   hands: 'Keep hands idle'
 }
 
-type Slot = { key: string, channels: Channel[], run: Running, status: string, emit: Emit }
+type Slot = { key: string, runId: string, behavior: string, channels: Channel[], run: Running, status: string, emit: Emit, decidedBy?: string }
+export type ChannelHooks = {
+  event: (slot: Slot, event: string) => void // every event, terminal or progress
+  start: (slot: Slot) => void
+  end: (slot: Slot, reason: string) => void // terminal event, or replaced/stopped
+}
 
 export class Channels {
   slots: Record<Channel, Slot | null> = { legs: null, aim: null, hands: null }
   bot: Bot
-  onEvent: (key: string, event: string) => void
+  hooks: ChannelHooks
+  runs = 0
 
-  constructor (bot: Bot, onEvent: (key: string, event: string) => void) {
+  constructor (bot: Bot, hooks: ChannelHooks) {
     this.bot = bot
-    this.onEvent = onEvent
+    this.hooks = hooks
   }
 
   // key is the option key, e.g. `follow:E3`. One owner per channel: holders of any claimed channel stop first.
-  set (key: string, behavior: string, target: Entity | { name: string, count: number }) {
+  set (key: string, behavior: string, target: Entity | { name: string, count: number }, decidedBy?: string) {
     const spec = BEHAVIORS[behavior]
     this.stop(spec.channels)
-    const slot: Slot = { key, channels: spec.channels, status: 'running', run: { stop () {} }, emit: () => {} }
+    const slot: Slot = { key, runId: `r-${++this.runs}`, behavior, channels: spec.channels, status: 'running', run: { stop () {} }, emit: () => {}, decidedBy }
     slot.emit = (event, terminal = true) => {
       if (slot.status !== 'running') return
       if (terminal) slot.status = event
-      this.onEvent(key, event)
+      this.hooks.event(slot, event)
+      if (terminal) this.hooks.end(slot, event.split(' ')[0])
     }
     for (const c of spec.channels) this.slots[c] = slot
+    this.hooks.start(slot)
     slot.run = spec.start(this.bot, target, slot.emit)
   }
 
   // Stop whatever holds any of these channels (a multi-channel behavior is stopped as a whole).
-  stop (channels: Channel[]) {
+  stop (channels: Channel[], reason = 'replaced') {
     for (const c of channels) {
       const holder = this.slots[c]
       if (!holder) continue
       holder.run.stop()
+      if (holder.status === 'running') { holder.status = reason; this.hooks.end(holder, reason) }
       for (const hc of holder.channels) if (this.slots[hc] === holder) this.slots[hc] = null
     }
   }
