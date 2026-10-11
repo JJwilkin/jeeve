@@ -101,6 +101,7 @@ These counts come from wrapping `bot.look`/`lookAt`, `setControlState`, `dig`, `
 
 ## Guard findings
 These touch `src/guards.ts`/`src/main.ts` as of 7a0b517.
+**Applied in 3560da7:** the repo now uses the last bullet's config plus the half-width fix, and pins Paper 26.1.2 ([[seed-behaviors]] → Guards).
 - **Plugins replace the shared `Movements`.**
   - pvp: `attack()` calls `setMovements` with its own default `Movements` (parkour on, digging on, `maxDropDown = 4`). `bot.pvp.movements = null` stops this. Verified.
   - collectblock: each `collect()` installs `bot.collectBlock.movements` and first sets `dontCreateFlow = false` and `dontMineUnderFallingBlock = false` on it. That turns off pathfinder's own "don't break blocks next to liquid" check during collect.
