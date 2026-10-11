@@ -198,6 +198,11 @@ All three are sensible with no prompt tuning.
 
 **The inner loop works.** Low-confidence escalations (30 s no-repeat per goal and program version) reach System 2 two or three times per instruction. It reads the fast model's view and tightens the guidance ("S1 was torn between collect and following Josh, so guidance now says stay on collect"). Confidence then recovers.
 
+**Reading its own traces works.** This needs the org's `public_jql` flag, which is on for joshua-test since 2026-10-11; making it the default is JUD-10931.
+- Without the schema, System 2 spent its 4 turns discovering column names and never decided.
+- Now the system prompt carries the virtual SQL schema (`discoverSchema()`, fetched once per run, so it stays cached) plus Jeeve's span names and `jeeve.*` keys. The last turn offers only `submit_decision`.
+- Asked about a past session, it answered correctly in one query.
+
 **Strict-schema limit:** a strict `submit_decision` plus any second tool failed with "compiled grammar is too large". Defining the check object once (`$defs` / `$ref`) instead of three times fixed it, and `run_sql` (one string argument) isn't strict.
 
 **Implemented as designed:**

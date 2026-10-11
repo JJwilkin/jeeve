@@ -190,6 +190,7 @@ export async function startAgent (opts: AgentOptions) {
   const system2 = useSystem2
     ? makeSystem2({
       sql: judgeval ? q => judgeval.sql(q) : undefined,
+      schema: judgeval ? await judgeval.discoverSchema().catch(() => undefined) : undefined,
       effort: trigger => trigger.includes('instruction') ? 'medium' : 'low'
     })
     : null

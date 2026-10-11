@@ -101,10 +101,22 @@ On a new instruction: set the goal's done_when (or null if open-ended), escalate
 
 Keep program changes small and concrete; they last only while the goal is active. Use your Minecraft knowledge to fill in check values (for example, any log is "*_log"). Only message the player for failures, refusals or clarifying questions. Always finish by calling submit_decision.`
 
+// Jeeve's own span vocabulary (brain/architecture/trace-schema.md), so queries don't burn turns on discovery.
+const TRACES = `Your traces (Judgment virtual SQL, project-scoped). One session per episode (session_id), one trace per window.
+Span names: window, carry_over, system2, program, decide, goal, behavior.<name> (navigate, follow, track, attack_when_ready, collect).
+Columns: span_name, session_id, trace_id, started_at, input, output, attributes (Map(String,String)), events_json.
+Keys: jeeve.window_index, jeeve.prev_trace_id, jeeve.goal.path, jeeve.goal.id, jeeve.goal.transition, jeeve.program.version,
+jeeve.program.because, jeeve.decide.trigger, jeeve.decide.changed, jeeve.decide.escalate, jeeve.decide.latency_ms, jeeve.decide.raw_state,
+jeeve.behavior.name, jeeve.behavior.params, jeeve.behavior.run_id, jeeve.behavior.end_reason (done, stuck, none_found, target_dead,
+target_lost, vetoed, replaced, stopped, cut, goal_closed, death), jeeve.behavior.decided_by, jeeve.system2.trigger.
+Window events (events_json on window spans): death, damage, owner_damage, vetoed, chat.`
+
 export type System2Result = { decision: Decision | null, model: string, usage: Anthropic.Beta.BetaUsage | null, turns: number, sql: string[], refusal: boolean }
 
-export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, effort: (trigger: string) => 'low' | 'medium' | 'high' }) {
+export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, schema?: string, effort: (trigger: string) => 'low' | 'medium' | 'high' }) {
   const client = new Anthropic()
+  // Stable for the whole run, so it stays in the cached prefix.
+  const system = opts.sql ? `${SYSTEM}\n\n${TRACES}\n\n${opts.schema ?? ''}` : SYSTEM
   return async function call (trigger: string, context: Record<string, unknown>): Promise<System2Result> {
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: JSON.stringify({ trigger, ...context }) }]
     const sqls: string[] = []
@@ -117,8 +129,9 @@ export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, effo
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
         output_config: { effort: opts.effort(trigger) },
-        system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
-        tools: opts.sql ? TOOLS : TOOLS.slice(0, 1),
+        system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+        // The last turn offers only submit_decision, so a call always ends in a decision.
+        tools: opts.sql && turn < MAX_TURNS ? TOOLS : TOOLS.slice(0, 1),
         messages
       } as Anthropic.Beta.MessageCreateParamsNonStreaming)
       usage = res.usage
