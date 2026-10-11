@@ -26,22 +26,22 @@ General machinery that holds no Minecraft strategy:
 | **Plans:** how to break an objective down | Reasoning at the time it's needed | Search |
 | **Skills:** reusable routines that worked | Writing code, keeping what succeeded | Learning |
 | **World knowledge:** where things are, what failed | Writing its own memory | Learning |
-| **Fast reactions** | Distilling slow decisions into a fast model | Learning |
+| **Fast reactions** | System 2 rewriting the fast model's guidance, with examples it retrieves from past traces | Learning (in context) |
 
 ## The discovery loop
 ```
       ┌──────────────────────────────────────────────┐
       ▼                                              │
      act ──► record ──► evaluate ──► distill ────────┘
-             (traces)   (outcomes,   (skills, memory,
-                         judges)      fast reactions)
+             (traces)   (outcomes,   (guidance, examples,
+                         judges)      behaviors, memory)
 ```
-The agent is a loop that improves itself, not a fixed pipeline. Every episode produces experience. Outcomes say which experience was good. Distillation turns good experience into something reusable.
+The agent is a loop that improves itself, not a fixed pipeline. Every episode produces experience. Outcomes say which experience was good. Distillation turns good experience into something reusable: guidance and examples in context, and behaviors in code. No model weights are trained ([[learning]]).
 
 ## Fast and slow
 - **Slow thinking (System 2)** is a reasoning model. It's general and capable, but takes seconds or more per decision. This is **search**.
-- **Fast thinking (System 1)** is a small model that decides several times a second. It's the **learned** shortcut: trained on System 2's good decisions until they become instinct.
-- **The two loops feed each other**, the same way AlphaZero works: search finds better moves, the network learns from them, and a better network makes the search stronger.
+- **Fast thinking (System 1)** is a decision model (Jev) that decides several times a second. It isn't trained. It improves because System 2 keeps rewriting its context: guidance, plus examples of good decisions retrieved from traces ([[learning]]).
+- **The two loops feed each other**, in the spirit of AlphaZero, but through context rather than weights: search finds better decisions, those decisions become the fast layer's examples, and a better fast layer frees search for harder problems.
 - **Escalation:** fast thinking hands back to slow thinking when it's unsure, when it's done, or when something unexpected happens.
 - **Below both** is plain code that runs every tick (e.g. keep aiming at a target). Neither model is fast enough for that.
 

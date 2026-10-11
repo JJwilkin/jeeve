@@ -10,7 +10,7 @@ How Jeeve's layers split the work and talk to each other. Refines the fast and s
 ```
 System 2  goals · writes Jev's guidance (live + across episodes) · writes new behaviors
    │ guidance + allowed behaviors          ▲ escalations, events, traces
-System 1  Jev: picks a behavior per channel + parameters, ~2–10 Hz, triggered by events
+System 1  Jev: picks a behavior per channel + parameters, woken by mechanisms whose policy System 2 sets
    │ channel settings                      ▲ behavior events (done, stuck, blocked, vetoed)
 Behaviors deterministic, layered, added at runtime: navigate, track, aim, bridge, ride_boat…
    │
@@ -46,7 +46,14 @@ This is the physics-vs-strategy split from [[fast-bots]], with planning added on
   { "legs": "navigate:red_base", "aim": "track:Steve", "hands": "attack_when_ready:Steve", "stance": "sprint" }
   ```
 - **Steers a local path, not single steps.** `navigate(target)` is one choice. Crossing terrain, swimming, bridging and pillaring happen in code underneath.
-- **Calls are triggered by events** (behavior done, stuck, damage taken, new entity in range), not a fixed timer. There's a timeout so it never goes quiet for too long.
+- **When Jev decides is System 2's call, not a fixed rule.** The infrastructure provides the *mechanisms* for waking Jev:
+  - behavior events (done, stuck, blocked, vetoed),
+  - subscriptions to changes in game state,
+  - watch conditions,
+  - timers.
+
+  System 2 sets the *policy*: what to react to, when to be proactive, and how often to re-decide in this situation. Shipped defaults are scaffolding, not design. The open design is in [[system-1-infrastructure]].
+- **The latest state wins.** At most one call is in flight per bot. If the state changes during a call, the next call uses the newest state; stale states aren't queued.
 - **Escalates** on low confidence, on an explicit yes to "escalate?", or when a typed escalation event arrives from code ([[realtime-game-agents]]: done or failed, budget exceeded, stuck, expected ≠ observed).
 - **Always has a small fixed base context** (survive: fight, flee, eat) on top of System 2's guidance. When something unexpected happens, it acts sensibly during the 2–5 s before System 2 rewrites its guidance.
 
@@ -63,9 +70,15 @@ The motor layer is a few channels, like a person's hands on WASD, mouse and clic
 - **Behaviors keep running between Jev calls.** A 300 ms call only delays a *change*: the bot keeps strafing and tracking while it waits. This is action chunking from the real-time research.
 - **Each channel has one owner,** so behaviors don't fight. Code enforces game rules between channels, e.g. using an item slows you, so sprint is adjusted.
 
-## First experiment: the arena
-A flat arena, against a zombie and then a mineflayer-pvp bot:
-- Jev drives the channels at about 5 Hz with fixed guidance (no live updates).
-- Compare the win rate with mineflayer-pvp on its own.
+## First milestone: a client that takes instructions
+Jeeve is a client, not a simulator harness. It joins a server like a player, and takes instructions from outside.
+- **Start local.** A local Minecraft server on this machine, in offline mode. Later the same agent can join a server we run on GCP, or any other server. Mineflayer auto-detects the version (1.8 → 26.1); online-mode servers need a Microsoft account for the bot.
+- **Instructions come from outside.** An external channel sets System 2's root goal and reports status back: in-game whispers from allowed players, and a small local API. The root of the goal tree is whatever the latest instruction says.
+- **Assume no server privileges.** No op, RCON, `/tick`, world resets or `/give`. Nothing in the agent may depend on them; they're only for evaluation on our own server.
+- **Unknown worlds and modes are part of the state.** Plugins, menus (inventory windows), scoreboards and chat all count. A mode like Bed Wars is something the agent discovers on the server, not something we code in.
 
-If it wins or ties, the layering holds. If it loses, the traces should show whether to blame the guidance, the state encoding, or the call speed.
+**First run:** join the local server and follow external instructions such as "come here", "collect 10 logs" and "follow me and defend me". That exercises the whole stack end to end: connection, perception, seed behaviors, guards, the Jev loop, System 2's root goal, and traces.
+
+**Evaluation is separate.** Our own Paper server, with RCON, gives reproducible scenarios: resets, slowed time with `/tick`, and the benchmarks in [[benchmarks]]. The PvP arena (Jev vs. mineflayer-pvp, win rate) is one of those scenarios, not the shape of the product. The agent code is identical in both places.
+
+**Later, not now:** behaving like a legitimate client on public servers. That means vanilla movement and attack timing so anti-cheat isn't tripped, x-ray off ([[fast-bots]]: fairness is a setting), and only joining servers that allow bots.

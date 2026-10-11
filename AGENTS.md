@@ -17,6 +17,7 @@ This repo is also an Obsidian vault and the project's shared memory. Work from i
 Write back anything a future agent shouldn't have to rediscover:
 - **A finding from outside** (paper, project, model): add a note to `brain/research/` with sources.
 - **A change to how the agent works:** update `brain/architecture/`. If an idea gets replaced, mark the old note `superseded` and link the new one.
+- **Working from a `brain/tasks/` brief:** set its `progress` (`doing`, then `done`), and put the outcome in `brain/architecture/`, not in the task note.
 
 Follow the conventions in `brain/index.md` (frontmatter, `[[wikilinks]]`, add to the index). Skip anything the code or git history already makes obvious.
 

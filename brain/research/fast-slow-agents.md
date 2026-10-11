@@ -37,4 +37,4 @@ AlphaZero is the template for how fast and slow should relate under the [[bitter
 - the network (fast) is trained to imitate them,
 - and a better network makes the search stronger.
 
-Machine learning calls this *expert iteration*. In Jeeve, slow thinking plays the search role and fast thinking is the network being trained.
+Machine learning calls this *expert iteration*. Jeeve keeps the shape but not the training ([[learning]]): slow thinking plays the search role, and its good decisions improve fast thinking by becoming its examples and guidance, not its weights.

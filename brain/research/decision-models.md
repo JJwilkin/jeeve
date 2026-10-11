@@ -33,7 +33,7 @@ Low confidence makes a natural signal to hand back to slow thinking.
 - Run with llama.cpp, vLLM or Ollama.
 - You get the same choice-with-probabilities answer by reading token probabilities over the option labels instead of generating text.
 - A ~300-token prompt with ~10 output tokens should run in roughly 50–150 ms on a GPU or Apple Silicon (rough estimate).
-- These are the only option here that can be fine-tuned on our own experience, which is the [[bitter-lesson]] path.
+- They're also the only option here that could be fine-tuned. Jeeve doesn't train models ([[learning]]), so this matters only as a fallback if hosted models are unavailable.
 
 ## Caveats
 - **Stateless:** each call sees one state, so time has to be encoded in it ([[perception]]).

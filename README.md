@@ -9,10 +9,10 @@ The design follows [the bitter lesson](brain/research/bitter-lesson.md): build i
 - **The agent discovers** plans (search), skills, world knowledge and fast reactions (learning).
 
 ```
-act ──► record (traces) ──► evaluate (outcomes, judges) ──► distill (skills, memory, fast reactions) ──► act better
+act ──► record (traces) ──► evaluate (outcomes, judges) ──► distill (guidance, examples, behaviors, memory) ──► act better
 ```
 
-Slow thinking (a reasoning model) searches. Fast thinking (a small decision model) learns to imitate slow thinking's good decisions. Every decision is traced with [Judgment](https://judgmentlabs.ai). Traces are the agent's experience, and judges are its reward signal.
+Slow thinking (a reasoning model) plans and searches. Fast thinking (a decision model) reacts several times a second, guided by context that slow thinking keeps rewriting from experience. No model weights are trained. Every decision is traced with [Judgment](https://judgmentlabs.ai). Traces are the agent's experience, and judges are its reward signal.
 
 ## Where to read
 The repo is an Obsidian vault; open the root folder as a vault.
@@ -20,4 +20,4 @@ The repo is an Obsidian vault; open the root folder as a vault.
 - [Brain index](brain/index.md): every research and architecture note
 
 ## Status
-Research and high-level architecture. No code yet.
+Architecture mostly settled; no code yet. First milestone: join any server and follow instructions given from outside. See the [roadmap](brain/roadmap.md).

@@ -208,6 +208,8 @@ Related: [[fast-slow-agents]] covers Minecraft and robotics planner/controller p
 - panic.
 
 ## Takeaways for Jeeve
+> **Note:** [[learning]] decided Jeeve trains no models. Training-based takeaways below are evidence of what works elsewhere, not the plan. Jeeve's equivalent is context: states where Jev disagrees with System 2 become examples and escalation conditions in Jev's guidance, not training data.
+
 Taken together, this points to a concrete split. It's a proposal for [[overview]], not yet a decision.
 
 **System 2: owns commitments and time.**

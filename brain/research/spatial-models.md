@@ -48,18 +48,12 @@ These learn how the world changes over time, and several run in real time.
 | **C. Pixels into a vision-language-action model** | Rendered frames | Slow, needs a GPU | Big | Only for visual judgments, e.g. how a build looks |
 
 ## Takeaways for Jeeve
-- **B is the likely destination, and A is the way there.** This fits [[overview]]'s discovery loop:
-  1. Run A, with System 2 possibly in slowed time.
-  2. Trace each `decide()` call along with the raw structured state (entity list + voxel block).
-  3. Train B to imitate the good decisions, then improve it with self-play (PillagerBench-style matches, [[benchmarks]]).
-  4. Swap B in behind the same `decide()` interface.
-
-  [[peam]] is a Minecraft precedent for this kind of distillation.
-- **The least certain part is B's input design.** These choices decide whether it learns at all:
-  - How big the voxel block is.
-  - Whether it's centered on the bot or aligned to the world grid.
-  - Whether time comes from stacked frames or recurrence.
-
-  RTS and robotics work suggests entity tokens carry most of the signal for combat, and voxels matter more for movement and building.
+- **A is the path. B and C are evidence of what others do.** Jeeve trains no models ([[learning]]), so a trained spatial policy (B) is out.
+- **Borrow B's input design, as text for A.** The AlphaStar recipe tells us what spatial information matters. We encode the same information for Jev instead of training on it:
+  - **Entity tokens** → a structured entity list: type, relative position, velocity, facing, health.
+  - **A local voxel grid** → ASCII or height maps centered on the bot, plus GITM-style ray casts ([[gitm]]) for line of sight.
+  - **A recurrent core** → the event window and running summaries ([[perception]]).
+- **C stays for visual judgments only,** e.g. scoring how a build looks.
+- **The least certain part is encoding quality.** How big the map is, whether it's egocentric, and how many entities to include decide whether Jev can use it. Traces will show which encodings lead to good decisions.
 
 Sources: [Genie 3 / world models overview](https://en.wikipedia.org/wiki/World_model_(artificial_intelligence)), [Matrix-Game 3.0](https://arxiv.org/pdf/2604.08995), [V-JEPA 2](https://ai.meta.com/blog/v-jepa-2-world-model-benchmarks/), [V-JEPA 2.1 (Turing Post)](https://www.turingpost.com/p/jepa), [MineAnyBuild](https://arxiv.org/html/2505.20148v3), [Game-TARS](https://arxiv.org/abs/2510.23691), [PillagerBench](https://arxiv.org/abs/2509.06235)

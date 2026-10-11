@@ -83,6 +83,8 @@ Out of distribution, each trained with RL (Table 2): CrossHA 49.1 vs RawHA 42.4,
 - **Follow-up:** DeepHA (ICML 2026, [poster](https://icml.cc/virtual/2026/poster/66241)) extends this with deeper action chains and a KV-cache memory that cuts context ~75%. We read only the abstract.
 
 ## Takeaways for Jeeve
+> **Note:** [[learning]] decided Jeeve trains no models. Training-based takeaways below are evidence of what works elsewhere, not the plan. Jeeve's equivalent is context: which action level pays off where is learned from traced outcomes and written into Jev's guidance.
+
 - **Direct evidence for the [[bitter-lesson]] answer to the primitive-set question.**
   - Don't pick one level by hand. Expose a few and let learning decide per step.
   - A cost term breaks ties toward the higher level: fewer decisions, less latency.

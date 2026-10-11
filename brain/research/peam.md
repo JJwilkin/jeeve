@@ -55,6 +55,8 @@ Per category (summed from the appendix): craft 80% vs Voyager 60%, gather 75% vs
 - **Inconsistencies:** the appendices disagree on serving hardware (1 vs 8 A100s). The text says PEAM "matches or exceeds" Voyager on 10 of 11 tasks, while its own table shows all 11.
 
 ## Takeaways for Jeeve
+> **Note:** [[learning]] decided Jeeve trains no models. Training-based takeaways below are evidence of what works elsewhere, not the plan. Jeeve's equivalent is context: verified successes and corrections become examples and guidance that System 2 writes for Jev, not LoRA updates.
+
 - **The distillation loop works at small scale over Mineflayer.** A frontier model generates, a verifier or judge filters, and a small model is trained on the result. Cost per task fell ~7x in tokens. That is evidence for the "fine-tuned weights" branch of [[overview]]'s open question on what form distillation takes.
 - **Train on corrections, not just successes.** The failure → fix contrastive pairs are cheap to get from traces. In Jeeve they come from Judgment spans where slow thinking overrode or repaired a fast decision.
 - **Isolate what's learned by category** to avoid forgetting. One shared adapter forgot a third. For Jeeve's fast model this argues for per-domain adapters (combat vs building vs gathering), or at least replay.

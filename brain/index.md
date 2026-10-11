@@ -9,6 +9,7 @@ We're in the research and architecture stage: no code yet. Plans, decisions and 
 |---|---|
 | `brain/architecture/` | How Jeeve works at a high level: principles and structure, not implementation |
 | `brain/research/` | What we learned from outside: papers, other projects, models. Facts and sources, not prescriptions. |
+| `brain/tasks/` | Self-contained briefs for open work items. Each one can start a fresh chat. Frontmatter adds `progress: todo \| doing \| done`. |
 
 ## Conventions
 - One idea per note. Frontmatter: `date`, `tags`, `status` (`active` | `superseded`).
@@ -19,9 +20,13 @@ We're in the research and architecture stage: no code yet. Plans, decisions and 
 ## Index
 - [[roadmap]]: the four stages before code: research, architecture (primitives, System 1, System 2, their interface), tracing, goals and reward
 
+### Tasks
+- [[system-1-infrastructure]]: decide what the runtime provides around System 1 vs. what System 2 decides (state encoding, questions, when to call)
+- [[seed-behaviors-and-traces]]: the smallest behavior set for the first milestone, plus the span/trace schema and ingest into Judgment
+
 ### Architecture
 - [[overview]]: what we build vs. what the agent discovers, the discovery loop, fast and slow thinking, goals and time as one hierarchy, open questions
-- [[layers]]: System 2 / Jev / behaviors / guards; the one-right-answer vs. judgment vs. plan rule; concurrent channels; the arena experiment
+- [[layers]]: System 2 / Jev / behaviors / guards; the one-right-answer vs. judgment vs. plan rule; concurrent channels; System 2 sets when Jev decides; first milestone: a local client that takes instructions
 - [[behaviors-and-guards]]: the deterministic layer: the behavior contract, layered behaviors, safety guards, behaviors System 2 writes at runtime
 - [[learning]]: decision: context only, no training. Live and cross-episode loops, per-minute traces linked by lineage, agentic search over past traces
 
