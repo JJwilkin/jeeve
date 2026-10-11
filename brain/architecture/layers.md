@@ -70,7 +70,7 @@ The motor layer is a few channels, like a person's hands on WASD, mouse and clic
 | **Stance** | `sprint`, `sneak`, `jump_when_blocked` |
 
 - **Behaviors keep running between Jev calls.** A 300 ms call only delays a *change*: the bot keeps strafing and tracking while it waits. This is action chunking from the real-time research.
-- **Each channel has one owner,** so behaviors don't fight. A behavior can claim several channels: the M1 seed behaviors wrap mineflayer plugins and claim legs, aim and hands ([[seed-behaviors]]). Code enforces game rules between channels, e.g. using an item slows you, so sprint is adjusted.
+- **Each channel has one owner,** so behaviors don't fight. A behavior can claim several channels: `collect` wraps collectblock and claims legs, aim and hands, while fighting uses single-channel `track` and `attack_when_ready` ([[seed-behaviors]]). Code enforces game rules between channels, e.g. using an item slows you, so sprint is adjusted.
 
 ## First milestone: a client that takes instructions
 Jeeve is a client, not a simulator harness. It joins a server like a player, and takes instructions from outside.

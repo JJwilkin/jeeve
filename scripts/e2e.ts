@@ -1,4 +1,4 @@
-// End to end on the local server: a scripted player "Josh" whispers the first-milestone instructions
+// End to end on the local server: a scripted player "Josh" whispers the three first-milestone instructions
 // and checks the outcome. Uses the real Jev. Run: MINECRAFT_EULA=true npm run e2e (EULA only needed once).
 import { readFileSync } from 'node:fs'
 import mineflayer from 'mineflayer'
@@ -31,7 +31,9 @@ server.command('gamerule doMobSpawning false') // scenario control: only mobs we
 server.command('kill @e[type=!player]') // the world persists between runs
 server.command('time set day')
 server.command('gamemode creative Josh') // so mobs go for Jeeve, not the instructor
+server.command('clear Jeeve')
 server.command('give Jeeve diamond_sword')
+server.command('give Jeeve iron_axe')
 server.command('tp Jeeve 0 -60 0')
 server.command('tp Josh 14 -60 6')
 await sleep(2000)
@@ -40,6 +42,13 @@ const results: boolean[] = []
 
 josh.whisper('Jeeve', 'come here')
 results.push(await until('"come here": Jeeve within 3.5 blocks of Josh', () => gap() < 3.5, 30000))
+
+// Three 4-high oak log columns near Josh: 12 logs.
+for (const [x, z] of [[17, 10], [19, 10], [17, 12]]) server.command(`fill ${x} -60 ${z} ${x} -57 ${z} oak_log`)
+await sleep(1000)
+const logs = () => agent.bot.inventory.items().filter(i => i.name === 'oak_log').reduce((n, i) => n + i.count, 0)
+josh.whisper('Jeeve', 'collect 10 logs')
+results.push(await until('"collect 10 logs": 10 oak logs in inventory', () => logs() >= 10, 120000))
 
 josh.whisper('Jeeve', 'follow me and defend me')
 await sleep(1500)

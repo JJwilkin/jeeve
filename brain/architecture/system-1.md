@@ -101,7 +101,7 @@ The smallest scaffold that should work before System 2 tunes anything. It's the 
 
   Distances and directions are named buckets computed in code. Jev's vendor lists numbers as a weak spot ([[jev-measurements]]). **There's deliberately no terrain map:** `navigate` handles terrain, and whether System 2 adds a map when bridging fails is a direct test of this design.
 - **Questions:**
-  - one Choice per channel, with options = allowed behaviors × encoded targets, plus `keep_current` to stop churn. In M1 every seed behavior claims legs, aim and hands, so the M1 default asks one joint `body` Choice instead ([[seed-behaviors]]). Option order is shuffled per call, and the order is traced, because the order changes answers ([[jev-measurements]]);
+  - one Choice per channel for single-channel behaviors, plus one joint `body` Choice for whole-body ones (`collect`), with options = allowed behaviors × encoded targets, plus `keep_current` to stop churn. Body answers are applied first, and a body start wins its channels for that call ([[seed-behaviors]]). Option order is shuffled per call, and the order is traced, because the order changes answers ([[jev-measurements]]);
   - one `escalate` Noul.
 - **Triggers:** behavior events (`done`, `stuck`, `blocked`, `vetoed`, `target_lost`), damage taken, a hostile entity within 6 blocks, a new directive, and a 1 s heartbeat.
 - **Escalation:** confidence below 0.5 on any question, `escalate` above 0.5, or a typed escalation event from code.
@@ -124,17 +124,38 @@ These are tools System 2 can use and a record to search later, not gates. Outcom
 **Replay needs raw state in the trace.** Each `decide()` span logs a compact raw snapshot (entities, inventory, the bot's own status, events, a 16³ block cube) besides the encoded text. The estimate is ~15 KB raw, or ~2–4 KB compressed, per decision. That's ~10–25 MB/h compressed per bot at 1–3 decisions/s, about 1–5× the encoded text we log anyway. To save more, log the block cube only when it changes. The span schema is in [[trace-schema]].
 
 ## First implementation (2026-10-10)
-A first slice runs in `src/`: the default program, `decide()` against Jev, three channels (legs, aim, hands) with seed behaviors (`navigate`, `follow`, `track`, `attack_when_ready`), whispers as the instruction channel, and JSONL traces with raw snapshots. `npm run e2e` starts a local Paper 1.21.4 server, the agent and a scripted player. "Come here" (~3 s), "follow me" (~4 s) and "defend me" against a summoned zombie (~5 s, no damage taken) all pass, at p50 ~105 ms per decision, ~1.1k input tokens and ~3 KB of trace per decision.
+A first slice runs in `src/`. It has:
+- the default program, and `decide()` against Jev;
+- three channels (legs, aim, hands), with the merged seed set from [[seed-behaviors]]: `navigate`, `follow`, `track`, `attack_when_ready`, and whole-body `collect`;
+- both guard layers;
+- whispers as the instruction channel;
+- JSONL traces with raw snapshots.
+
+`npm run e2e` starts a local Paper 1.21.4 server, the agent and a scripted player. All three milestone instructions pass, and two runs in a row gave the same results:
+
+| Instruction | Time |
+|---|---|
+| "come here" | ~3 s |
+| "collect 10 logs" | ~18–20 s |
+| "follow me" | ~3 s |
+| "defend me", against a summoned zombie | ~4–5 s, no damage taken |
+
+Per decision: p50 ~110 ms, ~1.1k input tokens, ≤10 ms to encode (the budget is 20 ms), and ~3 KB of trace.
 
 What it taught us:
 - **Options must not overlap.** On an idle channel, `keep_current` and `stop` mean the same thing, and Jev split ~50/50 between them. A running `navigate:E0` offered beside `keep_current` split 0.56/0.44. Confidence is spread across options, so duplicates faked low confidence and caused 9 false escalations in 13 decisions. With duplicates removed by the option generator (`stop` only while something runs; the running option only as `keep_current`), that fell to 2 in 19. This is now a rule for every option generator, authored or built in.
 - **Channels are coupled through the view.** The pathfinder steers by looking, so `track` yields to the legs while they move. That's the first concrete cross-channel rule from [[layers]].
+- **Wrapped plugins have hidden state.**
+  - `pathfinder.stop()` takes effect later, and the next `setGoal()` runs it immediately, wiping the new goal. collectblock's cancel leaves exactly such a stop behind, so a `follow` started right after `collect` silently never moved. Behaviors now flush a pending stop before setting a goal.
+  - collectblock also skips any target the pathfinder's `Movements` says can't be broken, so with digging off it "succeeded" without collecting anything. Only its copy of the guarded config may dig, and a collect pass that collects nothing now reports `stuck` instead of looping.
+- **Escalations on close calls.** About 17% of calls still escalate, mostly `keep_current` against a close alternative on aim. Whether 0.5 is the right threshold is a calibration question (Open questions).
 
 Not yet built, and deliberately so:
 - **System 2.** Escalations are traced, not acted on. Its design is in [[system-2]]. The program is fixed to the default, so module authoring, activation checks beyond `validate()`, and the watchdog arrive with System 2.
-- **Guards.** These are only the pathfinder's movement limits for now (max drop 3, no parkour, no digging, no towering). That's weaker than [[behaviors-and-guards]]'s filter on every motor command. The veto layer is needed before any behavior moves the bot without the pathfinder.
-- **The stance channel, `dig` and "collect 10 logs".** These are left to [[seed-behaviors-and-traces]].
-- **Judgment ingest.** Traces are JSONL until the span schema is settled.
+- **The goal count.** Until System 2 sets goals, the count for `collect` is the first number in the directive, counted from when it was given. This is a marked stand-in.
+- **Guard vetoes in a live run.** The guard wrapper is unit-tested, but no e2e scenario has made it fire yet. The pathfinder avoids lava and drops first.
+- **The stance channel.**
+- **Judgment ingest.** Traces are JSONL; the span schema is in [[trace-schema]].
 
 ## Open questions
 - **Order bias.** Is reversed-order averaging enough, or do programs need a full shuffle-and-average? It costs nothing in latency, since extra questions are free ([[jev-measurements]]).

@@ -2,6 +2,7 @@
 // Distances, directions and motion are named buckets computed here, because Jev is weak with numbers.
 import type { Bot } from 'mineflayer'
 import type { Entity } from 'prismarine-entity'
+import { Vec3 } from 'vec3'
 
 export type Handles = { byId: Map<number, string>, byHandle: Map<string, number>, next: number }
 export const newHandles = (): Handles => ({ byId: new Map(), byHandle: new Map(), next: 0 })
@@ -39,10 +40,53 @@ const IGNORED_TYPES = new Set(['object', 'orb', 'projectile', 'other', 'global']
 export const describeEntity = (e: Entity) =>
   e.type === 'player' ? `player ${e.username}` : `${e.name ?? 'unknown'}${e.type === 'hostile' ? ' (hostile)' : ''}`
 
-export type Directive = { text: string, from: string, at: number }
-export type Encoded = { state: Record<string, unknown>, entities: Array<{ id: string, desc: string }> }
+export type Directive = { text: string, from: string, at: number, inventory: Record<string, number> }
+export type Encoded = {
+  state: Record<string, unknown>
+  entities: Array<{ id: string, desc: string }>
+  blocks: Array<{ name: string, desc: string }>
+}
 
-export function makeEgocentric (params: { entity_cap: number, radius: number }) {
+export const inventoryCounts = (bot: Bot) => {
+  const counts: Record<string, number> = {}
+  for (const i of bot.inventory.items()) counts[i.name] = (counts[i.name] ?? 0) + i.count
+  return counts
+}
+
+const countBucket = (n: number) => n === 1 ? 'one' : n <= 5 ? 'a few' : 'many'
+const NOTHING = new Set(['air', 'cave_air', 'void_air'])
+
+// Notable blocks: types that are rare in the cube around the bot (≤ rare_max), so terrain drops out
+// without a hand-written list. Each with a count bucket and where the nearest one is.
+function notableBlocks (bot: Bot, radius: number, rareMax: number, cap: number) {
+  const me = bot.entity.position.floored()
+  const seen = new Map<string, { n: number, nearest: Vec3, d: number }>()
+  const p = new Vec3(0, 0, 0)
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        const b = bot.blockAt(p.set(me.x + dx, me.y + dy, me.z + dz))
+        if (!b || NOTHING.has(b.name)) continue
+        const d = Math.abs(dx) + Math.abs(dy) + Math.abs(dz)
+        const s = seen.get(b.name)
+        if (!s) seen.set(b.name, { n: 1, nearest: b.position.clone(), d })
+        else { s.n++; if (d < s.d) { s.d = d; s.nearest = b.position.clone() } }
+      }
+    }
+  }
+  const pos = bot.entity.position
+  return [...seen.entries()]
+    .filter(([, s]) => s.n <= rareMax)
+    .sort((a, b) => a[1].d - b[1].d)
+    .slice(0, cap)
+    .map(([name, s]) => ({
+      name,
+      count: countBucket(s.n),
+      nearest: `${distanceBucket(s.nearest.offset(0.5, 0, 0.5).distanceTo(pos))}, ${direction(s.nearest.x + 0.5 - pos.x, s.nearest.z + 0.5 - pos.z, bot.entity.yaw)}`
+    }))
+}
+
+export function makeEgocentric (params: { entity_cap: number, radius: number, block_radius: number, block_cap: number, rare_max: number }) {
   const lastDistance = new Map<number, { d: number, t: number }>()
   return function encode (bot: Bot, ctx: { handles: Handles, directive: Directive | null, channels: Record<string, string>, events: string[] }): Encoded {
     const me = bot.entity
@@ -65,18 +109,26 @@ export function makeEgocentric (params: { entity_cap: number, radius: number }) 
         ...(held ? { held } : {})
       }
     })
+    const blocks = notableBlocks(bot, params.block_radius, params.rare_max, params.block_cap)
     const speaker = ctx.directive && Object.values(bot.entities).find(e => e.username === ctx.directive!.from)
     return {
       state: {
         directive: ctx.directive
           ? { text: ctx.directive.text, from: `player ${ctx.directive.from}${speaker ? ` (${handleFor(ctx.handles, speaker.id)})` : ' (not in view)'}` }
           : 'none yet: stay safe and wait',
-        self: { health: healthBucket(bot.health), food: healthBucket(bot.food), held: bot.heldItem?.name ?? 'empty hand' },
+        self: {
+          health: healthBucket(bot.health),
+          food: healthBucket(bot.food),
+          held: bot.heldItem?.name ?? 'empty hand',
+          inventory: Object.entries(inventoryCounts(bot)).map(([name, n]) => `${name} (${countBucket(n)})`)
+        },
         channels: ctx.channels,
         entities,
+        blocks,
         recent_events: ctx.events
       },
-      entities: entities.map(e => ({ id: e.id, desc: `${e.what}, ${e.where}` }))
+      entities: entities.map(e => ({ id: e.id, desc: `${e.what}, ${e.where}` })),
+      blocks: blocks.map(b => ({ name: b.name, desc: `${b.count}, nearest ${b.nearest}` }))
     }
   }
 }

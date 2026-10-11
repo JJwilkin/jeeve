@@ -43,6 +43,6 @@ The library isn't fixed. When System 2 finds a missing capability ("I need to ri
 5. **Version:** every behavior is versioned, so a trace shows which version ran.
 
 ## Open questions
-- ~~**How much to write up front.**~~ Answered in [[seed-behaviors]]: `navigate`, `follow`, `collect`, `fight`, `stop`, all wrapping mineflayer plugins.
+- ~~**How much to write up front.**~~ Answered in [[seed-behaviors]]: `navigate`, `follow`, `track`, `attack_when_ready` and `collect` (whole-body, wraps collectblock).
 - **Telling a broken behavior from a bad choice.** Did the new behavior fail, or did Jev pick it at the wrong time? Traces need to tell these apart. [[trace-schema]] keeps the full state on every `decide` and links each behavior run to the call that chose it (`decided_by`).
 - **Retiring behaviors.** What happens to ones that stop working or get replaced?

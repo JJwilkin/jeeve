@@ -12,7 +12,7 @@ How Jeeve's experience gets into Judgment and how System 2 reads it back. This i
 - **One window is one trace.** A window closes on whichever comes first:
   - 60 s, or
   - a root-goal boundary: a new instruction, or the goal completed or failed.
-- **Interrupts don't cut windows.** A `fight` pushed under a goal stays in the current window.
+- **Interrupts don't cut windows.** A fight (behavior runs under a goal) stays in the current window.
 
 **The root span must end last.** Judgment treats a trace as finalized when its root span ends (judgeval-server `modules/otel/client.ts`), and post-processing runs once per finalized trace. So closing a window means:
 1. End every open behavior span with `end_reason = cut`.
@@ -82,7 +82,7 @@ ORDER BY started_at DESC LIMIT 50
 ```sql
 -- the last fight with Steve; then read the decide spans in that trace where jeeve.decide.changed = 'true'
 SELECT trace_id, started_at, ended_at FROM telemetry.spans
-WHERE span_name = 'behavior.fight' AND attributes['jeeve.behavior.params'] ILIKE '%Steve%'
+WHERE span_name = 'behavior.attack_when_ready' AND attributes['jeeve.behavior.params'] ILIKE '%Steve%'
 ORDER BY started_at DESC LIMIT 1
 ```
 ```sql

@@ -3,9 +3,11 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import mineflayer from 'mineflayer'
 import pf from 'mineflayer-pathfinder'
-import { Channels } from './behaviors.ts'
+import collectblock from 'mineflayer-collectblock'
+import { CHANNELS, Channels } from './behaviors.ts'
 import { coalescing, makeDecider, type Ask } from './decide.ts'
-import { newHandles, type Directive } from './encoder.ts'
+import { inventoryCounts, newHandles, type Directive } from './encoder.ts'
+import { guardedMovements, installGuards } from './guards.ts'
 import { DEFAULT_PROGRAM, LIMITS, validate, version, type Program } from './program.ts'
 
 export type AgentOptions = {
@@ -22,6 +24,7 @@ export function startAgent (opts: AgentOptions) {
   validate(program)
   const bot = mineflayer.createBot({ host: opts.host ?? 'localhost', port: opts.port ?? 25565, username: opts.username ?? 'Jeeve', auth: 'offline' })
   bot.loadPlugin(pf.pathfinder)
+  bot.loadPlugin(collectblock.plugin)
 
   mkdirSync('traces', { recursive: true })
   const traceFile = `traces/${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`
@@ -38,24 +41,27 @@ export function startAgent (opts: AgentOptions) {
 
   const handles = newHandles()
   let wake = (_reason: string) => {}
-  const fires = (event: string) => program.triggers.events.includes(event)
+  const fires = (event: string) => program.triggers.events.includes(event.split(' ')[0])
 
-  const channels = new Channels(bot, (channel, key, event) => {
-    note(`${channel} ${key} ${event}`)
-    if (fires(event)) wake(`${channel}:${event}`)
+  const channels = new Channels(bot, (key, event) => {
+    note(`${key} ${event}`)
+    if (fires(event)) wake(`${key}:${event.split(' ')[0]}`)
   })
 
-  bot.once('spawn', () => {
-    // Guards, for now: the pathfinder's movement limits.
-    // ponytail: a veto layer on raw control states once behaviors move the bot without the pathfinder.
-    const moves = new pf.Movements(bot)
-    moves.maxDropDown = 3
-    moves.allowParkour = false
-    moves.canDig = false
-    moves.allow1by1towers = false
-    bot.pathfinder.setMovements(moves)
+  // ponytail: stand-in for System 2's goal. The count is the first number in the directive (default 1),
+  // counted from the moment it was given. System 2 replaces this with a real goal and success check.
+  const remaining = (block: string) => {
+    if (!directive) return 0
+    const want = Number(directive.text.match(/\d+/)?.[0] ?? 1)
+    return Math.max(0, want - ((inventoryCounts(bot)[block] ?? 0) - (directive.inventory[block] ?? 0)))
+  }
 
-    const decide = makeDecider({ bot, program, handles, channels, directive: () => directive, events: recent, trace, ask: opts.ask })
+  bot.once('spawn', () => {
+    bot.pathfinder.setMovements(guardedMovements(bot, false))
+    bot.collectBlock.movements = guardedMovements(bot, true)
+    installGuards(bot, (channel, reason) => channels.veto(channel, reason))
+
+    const decide = makeDecider({ bot, program, handles, channels, directive: () => directive, events: recent, remaining, trace, ask: opts.ask })
     wake = coalescing(decide, LIMITS.minIntervalMs)
     trace({ kind: 'program', t: Date.now(), program: version(program), manifest: program })
     console.log(`[jeeve] spawned as ${bot.username}; program ${version(program)}; trace ${traceFile}`)
@@ -80,14 +86,14 @@ export function startAgent (opts: AgentOptions) {
   // Instruction channel: whispers from allowed players set the directive.
   bot.on('whisper', (from, message) => {
     if (!opts.allowed.includes(from)) return
-    directive = { text: message, from, at: Date.now() }
+    directive = { text: message, from, at: Date.now(), inventory: inventoryCounts(bot) }
     note(`new directive from ${from}: ${message}`)
     trace({ kind: 'directive', t: Date.now(), from, text: message })
     bot.whisper(from, `on it: ${message}`)
     if (fires('new_directive')) wake('new_directive')
   })
 
-  bot.on('death', () => { note('died'); channels.stopAll() })
+  bot.on('death', () => { note('died'); channels.stop(CHANNELS) })
   bot.on('kicked', reason => console.error('[jeeve] kicked', reason))
   bot.on('error', err => console.error('[jeeve] error', err))
   return { bot, channels, traceFile }

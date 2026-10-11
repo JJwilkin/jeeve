@@ -31,7 +31,7 @@ summary: "..."           # one line, written on close
   A budget running out or an `escalate_if` firing doesn't change status: it escalates, and System 2 decides.
 - **Expansion is lazy** ([[overview]]). System 2 adds children when it reaches a node, not all at the start. The three M1 instructions are one-node trees: `collect`, `navigate` and `follow` cover them without breaking them down.
 - **Interrupts push and pop.** System 2 pushes a child, and the parent becomes `suspended`. When the child closes, the parent resumes. **Program versions stack with the goals:** each node carries the program pushed with it, and closing a node restores its parent's program.
-- **When Jev picks `fight`, that's a behavior run, not a node.** It shows up as a `behavior.fight` span under the active goal. Interrupt nodes are for what needs its own check or plan, e.g. "get away from the creeper" or "eat". Those come from System 2 when it handles an escalation. This refines [[overview]]'s "⚡ fight" example.
+- **When Jev picks a fight (`track` + `attack_when_ready`, [[seed-behaviors]]), that's behavior runs, not a node.** They show up as `behavior.*` spans under the active goal. Interrupt nodes are for what needs its own check or plan, e.g. "get away from the creeper" or "eat". Those come from System 2 when it handles an escalation. This refines [[overview]]'s "⚡ fight" example.
 - **Summaries roll up.** When a node closes, its one-line summary goes into its parent's log. A closed root's summary goes into the episode's list of past instructions. System 2's context is the active path with its logs, plus that list, plus the latest window summaries. That keeps it far below the ~100k tokens where long-context agents start looping ([[llm-plays-pokemon]]).
 
 ## Success checks are code; choosing them is System 2's job
@@ -146,9 +146,9 @@ It's factual, needs no model call at the cut, and can't be poisoned. In the Pok�
 2. System 2 sets:
    - `done_when: inventory_delta(*_log, 10)`, counted from what's held now,
    - a 5 min budget,
-   - a program allowing `collect`, `navigate`, `fight` and `stop`, with guidance "fight only what threatens you".
+   - a program allowing `collect`, `navigate`, `track`, `attack_when_ready` and `stop`, with guidance "fight only what threatens you".
 3. Jev's state shows the goal at 6/10. The option generator offers `collect:oak_log(4)` from the check's progress.
-4. A zombie comes within 6 blocks, so Jev picks `fight`. That's a behavior run under `g-2`. On `target_dead`, Jev picks `collect:oak_log(4)` again.
+4. A zombie comes within 6 blocks, so Jev picks `attack_when_ready` and `track` on it. Those are behavior runs under `g-2`. On `target_dead`, Jev picks `collect:oak_log(4)` again.
 5. The check reaches 10 → `completed` → Josh hears "done: 10/10".
 6. **If no logs are found:** two `none_found` events escalate. System 2 rewrites the guidance for this goal, e.g. "head north; window X saw a forest there", or fails the goal.
 
@@ -156,7 +156,7 @@ It's factual, needs no model call at the cut, and can't be poisoned. In the Pok�
 1. Root `g-3`, with `done_when: null`.
 2. `escalate_if`: Josh more than 12 blocks away for 10 s; Josh not alive.
 3. A 5 min review interval.
-4. The loop runs as in [[seed-behaviors]]: follow → `fight:Skeleton#7` → `target_dead` → follow. Here fighting is the task itself, and it's still a behavior run.
+4. The loop runs as in [[seed-behaviors]]: follow, with `attack_when_ready:E7` + `track:E7` → `target_dead` → `track:Josh`. Here fighting is the task itself, and it's still a behavior run.
 5. **At review,** System 2 reads `g-3`'s log (fights, `owner_damage`, time out of range) and renews the goal or tightens the program, e.g. adds a watch condition for chasing.
 6. The goal crosses 60 s cuts. Each `carry_over` carries `g-3`'s path and the code-written summary. A new instruction marks it `abandoned`.
 

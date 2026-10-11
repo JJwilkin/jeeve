@@ -47,4 +47,4 @@ See [[layers]].
 
 Evaluation scenarios, including the PvP arena, run on our own server. Behaving like a legitimate client on public servers (anti-cheat, fairness) comes later.
 
-**Started 2026-10-10:** System 1 runtime slice in `src/` ([[system-1]] → "First implementation"). "Come here" and "follow me and defend me" pass end to end. Still to do: "collect 10 logs" (dig), System 2 (designed in [[system-2]]), Judgment ingest, and a real guard layer.
+**Started 2026-10-10:** System 1 runtime slice in `src/` ([[system-1]] → "First implementation"). All three instructions ("come here", "collect 10 logs", "follow me and defend me") pass end to end, with the merged seed set and both guard layers. Still to do: System 2 (designed in [[system-2]]) and Judgment ingest ([[trace-schema]]).
