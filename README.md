@@ -45,6 +45,8 @@ JEEVE_ALLOWED=YourName npm run agent   # the agent; whisper it instructions in g
 ```
 The first server start needs `MINECRAFT_EULA=true` to accept the [Minecraft EULA](https://aka.ms/MinecraftEULA).
 
+**Modules System 2 writes** persist in `modules/library.json`. Runs update it and never commit it; review the diff and commit the modules worth keeping.
+
 **Instructions from outside the game** go to the agent's local API, bound to 127.0.0.1:
 ```bash
 curl -s localhost:7777/instructions -d '{"from":"operator","text":"come here"}'

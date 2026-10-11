@@ -175,7 +175,7 @@ Both are JavaScript function expressions, `(s) => boolean`, over the raw snapsho
 
 A refusal, or a reference to a module that doesn't exist, becomes a `module_failed` escalation. That's the evidence for System 2's next attempt. A live module is disabled after 3 runtime errors, which escalates as `module_disabled`.
 
-**Sandbox decision (for review):** `node:vm`. Each module gets a fresh realm with no `require`, `process` or network, string eval off, a 20 ms hard timeout per call, and a JSON-only input, so the module never holds a reference to our objects.
+**Sandbox decision (reviewed and accepted 2026-10-11):** `node:vm`. Each module gets a fresh realm with no `require`, `process` or network, string eval off, a 20 ms hard timeout per call, and a JSON-only input, so the module never holds a reference to our objects.
 - SES lockdown would freeze built-ins for the whole process, which risks Mineflayer.
 - A worker thread would make every hot-path call asynchronous.
 - **`node:vm` is not a security boundary.** That's fine while the only author is our own System 2 on a local machine. Revisit it (a worker or an SES compartment) before Jeeve runs anywhere else.
@@ -185,9 +185,28 @@ A refusal, or a reference to a module that doesn't exist, becomes a `module_fail
 - For "follow me and defend me", it wrote a `hostile_near_josh` watch of its own accord. The watch fired once and woke Jev.
 
 **Not yet:**
-- **Encoders and option generators** written by System 2. These change what Jev sees, so they need the replay comparison from "How programs are compared".
-- **Persistence across runs.** The registry lives in memory; the source of every module is in its `module` span, so a new run could reload them from traces.
+- **Encoders and option generators** written by System 2. These change what Jev sees, so they need the replay comparison from "How programs are compared". Deferred: they stay on the roadmap (Joshua, 2026-10-11).
+- ~~**Persistence across runs.**~~ Built: see "Module library" below.
 - **Behaviors written by System 2.**
+
+**Limits (reviewed 2026-10-11):** a 2 ms trial budget per call and disabling after 3 errors are starting guesses. Loosen them if they ever become the constraint.
+
+### Module library
+The agent should get better over time and start each run from modules that have already been hillclimbed. So registered modules persist in **`modules/library.json`**, which holds the latest version of each module:
+- its kind, name, description, code and version;
+- its **origin**: the session, and the goal it was written for;
+- its trial result;
+- a `disabled` reason, if it broke at runtime.
+
+**How it's used:**
+- **At startup** the agent loads the library and records a `module` span (`activation: loaded`) for each module. Modules are compiled again but not re-trialled; the runtime disables any that fail. Disabled modules stay off.
+- **System 2 sees the loaded modules** in its context and reuses them by name.
+- **The agent rewrites the file** whenever a module is registered or disabled.
+- **Curation is git.** Runs never commit. Review the diff and commit the modules worth keeping, so the committed file is the hillclimbed starting set and its history shows how it got there.
+- **The e2e uses a scratch library** (`traces/e2e-module-library.json`), so test runs don't rewrite the real one. It checks that a fresh registry reloads the check System 2 wrote during the run.
+- **Override the path** with `JEEVE_MODULE_LIBRARY` or `moduleLibrary`.
+
+**Not yet:** an outer-loop step that promotes or retires modules based on outcomes. For now, curation is a person reading the diff.
 
 ## Open questions
 - **Order bias.** Is reversed-order averaging enough, or do programs need a full shuffle-and-average? It costs nothing in latency, since extra questions are free ([[jev-measurements]]).
