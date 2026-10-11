@@ -8,9 +8,14 @@ status: active
 The smallest behavior set for the first milestone ([[layers]]): a local server, with instructions given from outside. The three instructions are "come here", "collect 10 logs" and "follow me and defend me". Every behavior here is scaffolding under the [[bitter-lesson]]. The contract and guards are in [[behaviors-and-guards]]. What the traces record is in [[trace-schema]].
 
 ## Wrap, don't write
-The seed set wraps `mineflayer-pathfinder` (2.4.5) and `mineflayer-collectblock` (1.6.0, which uses `mineflayer-tool`). Both are old but are what Mindcraft runs on ([[mindcraft-and-voyager]]). The local server is pinned to Paper 1.21.4, which Mineflayer tests against. Fighting doesn't wrap `mineflayer-pvp`; see the merge below.
+The seed set wraps `mineflayer-pathfinder` (2.4.5) and `mineflayer-collectblock` (1.6.0, which uses `mineflayer-tool`). Both are old but are what Mindcraft runs on ([[mindcraft-and-voyager]]). **Server pin: Paper 26.1.2, plus one physics line** (`bot.physics.playerHalfWidth = Math.fround(0.6) / 2`). Without that line, 1.21.11+ servers reject the bot's moves next to blocks and `collect` stalls. **Paper 1.21.10 is the newest version that needs no patch.** `scripts/server.ts` still runs 1.21.4, which also works. Measured in [[mineflayer-plugin-compat]]. Fighting doesn't wrap `mineflayer-pvp`; see the merge below.
 
-**Wrapped plugins don't stay on one channel.** collectblock paths, equips a tool and digs, so it uses legs, aim and hands. So a behavior **claims a set of channels**, and starting it replaces whatever holds any of them ([[behaviors-and-guards]]). A single-channel behavior is just a set of one.
+**Wrapped plugins don't stay on one channel.** collectblock paths, equips a tool and digs, so it uses legs, aim and hands. The pathfinder alone also reaches past the legs ([[mineflayer-plugin-compat]]):
+- it calls `bot.look` every tick while walking (aim);
+- it digs and equips when a path breaks a block (hands);
+- it places blocks when scaffolding is allowed (hands).
+
+So a behavior **claims a set of channels**, and starting it replaces whatever holds any of them ([[behaviors-and-guards]]). A single-channel behavior is just a set of one.
 
 **Merged design (2026-10-10, replaces the all-whole-body set first written here).** The first runtime ([[system-1]] → "First implementation") showed native single-channel behaviors already work, so they're used for fighting now instead of pvp's `fight`:
 - **Fighting** is `track` (aim) plus `attack_when_ready` (hands), with `follow` or `navigate` on the legs. That takes strategy out of pvp's constants and gives it to Jev, which is what this note planned to do eventually.
@@ -41,6 +46,11 @@ There's no separate filter layer in M1:
    - **Place:** refuses a block in the bot's own body.
 
    It clears the input and emits `vetoed` on the behavior holding that channel.
+
+**Gaps in guard 1, measured in [[mineflayer-plugin-compat]]:**
+- collectblock installs its copy on the pathfinder and nothing switches it back, so `navigate` and `follow` after a `collect` can dig.
+- collectblock also sets `dontCreateFlow = false` on that copy.
+- The most reliable setup was one shared config whose `blocksCantBreak` holds everything except `*_log` and `*_leaves`, with `bot.collectBlock.movements = null`.
 
 ## Who does what
 | | Job |
@@ -99,4 +109,4 @@ All three start the same way:
 
 ## Open questions
 - **Dithering.** Can a heartbeat flip between targets? `keep_current` and guidance are the first fix. Add a hold time only if traces show churn: a choice reversed within a second ([[system-1]]).
-- **Plugin versions.** Do the plugins hold up on the newest server versions? That decides which version the local server pins.
+- ~~**Plugin versions.**~~ Answered in [[mineflayer-plugin-compat]]: Paper 26.1.2 with the half-width fix, or 1.21.10 without it.
