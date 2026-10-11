@@ -48,3 +48,5 @@ See [[layers]].
 - System 1 runs on Jev (we have access).
 
 Evaluation scenarios, including the PvP arena, run on our own server. Behaving like a legitimate client on public servers (anti-cheat, fairness) comes later.
+
+**Started 2026-10-10:** System 1 runtime slice in `src/` ([[system-1]] → "First implementation"). "Come here" and "follow me and defend me" pass end to end. Still to do: "collect 10 logs" (dig), System 2, Judgment ingest, and a real guard layer.

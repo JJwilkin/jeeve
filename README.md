@@ -20,4 +20,15 @@ The repo is an Obsidian vault; open the root folder as a vault.
 - [Brain index](brain/index.md): every research and architecture note
 
 ## Status
-Architecture mostly settled; no code yet. First milestone: join any server and follow instructions given from outside. See the [roadmap](brain/roadmap.md).
+Architecture mostly settled. A first runtime slice runs: System 1 on Jev, seed behaviors on channels, instructions by whisper, decisions traced to `traces/*.jsonl`. No System 2 or Judgment ingest yet. See the [roadmap](brain/roadmap.md).
+
+## Run it
+Needs Node ≥ 22.18, Java 21 (`brew install openjdk@21`), the Paper 1.21.4 jar in `.server/`, and `TYPESAFE_API_KEY` in `../judgment/.env.typesafe`.
+```bash
+npm install
+npm run check        # offline self-check
+npm run e2e          # local server + agent + a scripted player: "come here", "follow me and defend me"
+npm run server       # just the server (type console commands into it)
+JEEVE_ALLOWED=YourName npm run agent   # the agent; whisper it instructions in game
+```
+The first server start needs `MINECRAFT_EULA=true` to accept the [Minecraft EULA](https://aka.ms/MinecraftEULA).

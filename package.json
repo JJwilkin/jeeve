@@ -1,0 +1,24 @@
+{
+  "name": "jeeve",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "server": "node scripts/server.ts",
+    "agent": "node --env-file=../judgment/.env.typesafe src/main.ts",
+    "check": "node src/selfcheck.ts",
+    "e2e": "node --env-file=../judgment/.env.typesafe scripts/e2e.ts",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "mineflayer": "^4.39.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "vec3": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

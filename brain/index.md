@@ -2,7 +2,7 @@
 
 The project's knowledge store. The whole repo is an Obsidian vault: open the repo root with "Open folder as vault". It holds the *why* and the *how it fits together*. Code facts belong in the code.
 
-We're in the research and architecture stage: no code yet. Plans, decisions and per-module notes will get folders when building starts.
+The architecture is mostly settled and a first runtime slice exists (`src/`, see [[system-1]] → "First implementation"). Code facts live in the code; this vault keeps the why.
 
 ## Layout
 | Where | What |
