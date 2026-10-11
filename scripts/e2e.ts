@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import mineflayer from 'mineflayer'
 import { Judgeval } from 'judgeval'
 import { startAgent } from '../src/main.ts'
+import { judgmentOrg } from '../src/trace.ts'
 import { startServer } from './server.ts'
 
 const API = 7790
@@ -110,19 +111,23 @@ await server.stop()
 
 // The episode in Judgment: one session, windows with carry-over lineage, every span kind.
 if (agent.recorder.exporting) {
-  const client = await Judgeval.create({ projectName: process.env.JEEVE_PROJECT ?? 'jeeve-dev' })
-  const q = `SELECT span_name, count() AS n FROM telemetry.spans WHERE session_id = '${session}' AND started_at > now() - INTERVAL 1 HOUR GROUP BY span_name ORDER BY n DESC`
-  let names: Record<string, number> = {}
-  for (let i = 0; i < 10 && !names.system2; i++) {
-    await sleep(2000)
-    const res = await client.sql(q)
-    names = Object.fromEntries(res.rows.map((r: any) => [r.span_name, Number(r.n)]))
+  try {
+    const client = await Judgeval.create({ projectName: process.env.JEEVE_PROJECT ?? 'jeeve-dev', organizationId: judgmentOrg() })
+    const q = `SELECT span_name, count() AS n FROM telemetry.spans WHERE session_id = '${session}' AND started_at > now() - INTERVAL 1 HOUR GROUP BY span_name ORDER BY n DESC`
+    let names: Record<string, number> = {}
+    for (let i = 0; i < 10 && !names.system2; i++) {
+      await sleep(2000)
+      const res = await client.sql(q)
+      names = Object.fromEntries(res.rows.map((r: any) => [r.span_name, Number(r.n)]))
+    }
+    console.log('judgment spans by name:', JSON.stringify(names))
+    const want = ['window', 'carry_over', 'decide', 'system2', 'program', 'goal', 'behavior.collect', 'behavior.follow', 'behavior.attack_when_ready']
+    check('Judgment has every span kind for this session', want.every(n => (names[n] ?? 0) > 0), want.filter(n => !names[n]).join(', ') || 'all present')
+    const lineage = await client.sql(`SELECT count() AS n FROM telemetry.spans WHERE session_id = '${session}' AND span_name = 'window' AND attributes['jeeve.prev_trace_id'] != ''`)
+    check('windows are linked by prev_trace_id', Number((lineage.rows[0] as any).n) > 0, `${(lineage.rows[0] as any).n} linked windows`)
+  } catch (err) {
+    check('Judgment read-back by SQL', false, String((err as Error).message ?? err))
   }
-  console.log('judgment spans by name:', JSON.stringify(names))
-  const want = ['window', 'carry_over', 'decide', 'system2', 'program', 'goal', 'behavior.collect', 'behavior.follow', 'behavior.attack_when_ready']
-  check('Judgment has every span kind for this session', want.every(n => (names[n] ?? 0) > 0), want.filter(n => !names[n]).join(', ') || 'all present')
-  const lineage = await client.sql(`SELECT count() AS n FROM telemetry.spans WHERE session_id = '${session}' AND span_name = 'window' AND attributes['jeeve.prev_trace_id'] != ''`)
-  check('windows are linked by prev_trace_id', Number((lineage.rows[0] as any).n) > 0, `${(lineage.rows[0] as any).n} linked windows`)
 } else console.log('SKIP Judgment checks: export is off (no credentials or project)')
 
 const failed = results.filter(([, ok]) => !ok).map(([w]) => w)

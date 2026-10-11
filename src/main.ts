@@ -13,7 +13,7 @@ import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal } from './go
 import { guardedMovements, installGuards } from './guards.ts'
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
 import { makeSystem2, type Decision } from './system2.ts'
-import { Recorder } from './trace.ts'
+import { judgmentOrg, Recorder } from './trace.ts'
 
 export type AgentOptions = {
   host?: string
@@ -34,7 +34,7 @@ export async function startAgent (opts: AgentOptions) {
   const project = opts.project ?? process.env.JEEVE_PROJECT ?? 'jeeve-dev'
   const session = `jeeve-${new Date().toISOString().replace(/[:.]/g, '-')}`
   const recorder = await Recorder.init(project, session)
-  const judgeval = recorder.exporting ? await Judgeval.create({ projectName: project }).catch(() => null) : null
+  const judgeval = recorder.exporting ? await Judgeval.create({ projectName: project, organizationId: judgmentOrg() }).catch(() => null) : null
 
   const bot = mineflayer.createBot({ host: opts.host ?? 'localhost', port: opts.port ?? 25565, username: opts.username ?? 'Jeeve', auth: 'offline' })
   bot.loadPlugin(pf.pathfinder)

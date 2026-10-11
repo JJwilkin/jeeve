@@ -17,6 +17,9 @@ const emptyStats = () => ({
   note: '' as string
 })
 
+// judgeval reads JUDGMENT_ORG_ID; also accept JUDGMENT_ORGANIZATION_ID, the name used elsewhere in our env files.
+export const judgmentOrg = () => process.env.JUDGMENT_ORG_ID ?? process.env.JUDGMENT_ORGANIZATION_ID
+
 const clean = (a: Attrs): Attributes => Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined)) as Attributes
 const json = (v: unknown) => typeof v === 'string' ? v : JSON.stringify(v)
 
@@ -43,7 +46,7 @@ export class Recorder {
     mkdirSync(dir, { recursive: true })
     const r = new Recorder(session, `${dir}/${session}.jsonl`)
     if (process.env.JUDGMENT_API_KEY) {
-      const tracer = await Tracer.init({ projectName: project, environment: 'dev' })
+      const tracer = await Tracer.init({ projectName: project, environment: 'dev', organizationId: judgmentOrg() })
       r.exporting = tracer.projectId != null
     }
     return r
