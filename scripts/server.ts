@@ -1,10 +1,14 @@
 // Local Paper server for development and evaluation: offline mode, superflat.
 // The agent must not depend on anything here (no op, no RCON): this is only our own test server.
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const DIR = '.server'
+const ROOT = '.server' // the jar and its extracted libraries, shared by every run (worktrees symlink it)
+export const PORT = Number(process.env.JEEVE_PORT ?? 25565)
+// Any other port runs in its own dir (world, logs, session.lock, configs), so runs on different ports don't collide.
+const DIR = PORT === 25565 ? ROOT : `${ROOT}/runs/${PORT}`
 const JAR = 'paper-26.1.2-74.jar' // newest Mineflayer-supported version (brain/research/mineflayer-plugin-compat.md); needs Java 25
 const JAVA = process.env.JAVA ?? '/opt/homebrew/opt/openjdk@25/bin/java'
 
@@ -16,21 +20,24 @@ spawn-protection=0
 difficulty=easy
 view-distance=6
 simulation-distance=6
-server-port=25565
+server-port=${PORT}
 motd=jeeve dev
 `
 
 export function startServer (onLine?: (line: string) => void) {
-  const eula = `${DIR}/eula.txt`
+  const eula = `${ROOT}/eula.txt`
   if (!existsSync(eula) || !readFileSync(eula, 'utf8').includes('eula=true')) {
     if (process.env.MINECRAFT_EULA !== 'true') {
       throw new Error('Paper needs the Minecraft EULA (https://aka.ms/MinecraftEULA) accepted. Re-run with MINECRAFT_EULA=true to accept it.')
     }
     writeFileSync(eula, 'eula=true\n')
   }
+  mkdirSync(DIR, { recursive: true })
+  writeFileSync(`${DIR}/eula.txt`, 'eula=true\n')
   if (!existsSync(`${DIR}/server.properties`)) writeFileSync(`${DIR}/server.properties`, PROPERTIES)
 
-  const child = spawn(JAVA, ['-Xms1G', '-Xmx2G', '-jar', JAR, '--nogui'], { cwd: DIR, stdio: ['pipe', 'pipe', 'inherit'] })
+  // bundlerRepoDir: Paperclip reads the extracted server and libraries from ROOT instead of re-extracting into DIR.
+  const child = spawn(JAVA, ['-Xms1G', '-Xmx2G', `-DbundlerRepoDir=${resolve(ROOT)}`, '-jar', resolve(ROOT, JAR), '--nogui'], { cwd: DIR, stdio: ['pipe', 'pipe', 'inherit'] })
   const command = (cmd: string) => child.stdin.write(cmd + '\n')
   const ready = new Promise<void>((resolve, reject) => {
     let buf = ''

@@ -1,15 +1,17 @@
 // End to end on the local server: a scripted player "Josh" gives the three first-milestone instructions and
 // checks the outcomes, a live guard veto, the local API, and that the episode landed in Judgment.
 // Uses the real Jev, Claude (System 2) and Judgment staging. Run: MINECRAFT_EULA=true npm run e2e (EULA once).
+// Parallel runs (e.g. one per worktree): give each its own port, JEEVE_PORT=25566 npm run e2e. The server then runs
+// in .server/runs/<port>/ (own world and logs, shared jar) and the API listens on 7790 + (port - 25565).
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import mineflayer from 'mineflayer'
 import { Judgeval } from 'judgeval'
 import { startAgent } from '../src/main.ts'
 import { ModuleRegistry } from '../src/modules.ts'
 import { judgmentOrg } from '../src/trace.ts'
-import { startServer } from './server.ts'
+import { PORT, startServer } from './server.ts'
 
-const API = 7790
+const API = 7790 + PORT - 25565
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const results: Array<[string, boolean]> = []
 async function until (what: string, cond: () => boolean, ms: number) {
@@ -27,10 +29,10 @@ const check = (what: string, ok: boolean, detail = '') => { console.log(`${ok ? 
 const server = startServer(line => { if (/ERROR|joined the game|left the game|Done \(|[Gg]ame ?rule|feature|Unknown|Incorrect/.test(line) && !/No key layers/.test(line)) console.log('[server]', line) })
 await server.ready
 
-const LIBRARY = 'traces/e2e-module-library.json' // a scratch library, so test runs don't rewrite modules/library.json
+const LIBRARY = `traces/e2e-module-library-${PORT}.json` // a scratch library, so test runs don't rewrite modules/library.json
 if (existsSync(LIBRARY)) rmSync(LIBRARY)
-const agent = await startAgent({ allowed: ['Josh'], apiPort: API, moduleLibrary: LIBRARY })
-const josh = mineflayer.createBot({ username: 'Josh', auth: 'offline', host: 'localhost' })
+const agent = await startAgent({ port: PORT, allowed: ['Josh'], apiPort: API, moduleLibrary: LIBRARY })
+const josh = mineflayer.createBot({ username: 'Josh', auth: 'offline', host: 'localhost', port: PORT })
 await Promise.all([new Promise<void>(r => agent.bot.once('spawn', () => r())), new Promise<void>(r => josh.once('spawn', () => r()))])
 const whispers: string[] = []
 josh.on('whisper', (from, msg) => { console.log(`[josh] ${from} whispers: ${msg}`); whispers.push(msg) })
