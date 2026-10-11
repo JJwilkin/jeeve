@@ -155,11 +155,39 @@ Not yet built, and deliberately so:
   - **Activation check:** `validate()`, plus an encoder dry run against 5× the encode budget.
   - **Watchdog:** 3 failed Jev calls among the first 10 after an activation roll the program back.
   - **Program versions:** the activation cause goes on the `program` span, so the default program has a stable hash.
-- **Module authoring.** System 2 changes settings (guidance, allowed behaviors, heartbeat) but can't write encoders, checks or watch conditions yet. That needs a sandbox decision first.
+- ~~**Module authoring.**~~ Checks and watch conditions are built; encoders and option generators aren't. See "Modules System 2 writes" below.
 - **The goal count in the gap.** System 2 sets the real check in ~5–9 s. Until it lands, `collect` counts the first number in the instruction. This is a marked stand-in.
 - ~~**Guard vetoes in a live run.**~~ The e2e now makes one fire: a raw `forward` off a 5-block pillar is vetoed and the bot stays put.
 - **The stance channel.**
 - ~~**Judgment ingest.**~~ Built ([[trace-schema]] → "Implementation").
+
+## Modules System 2 writes (2026-10-11)
+Built in `src/modules.ts` for two module kinds:
+- **checks:** goal success checks and `escalate_if` conditions ([[system-2]]);
+- **watch conditions:** they wake Jev with the trigger `watch:<name>` when they turn true.
+
+Both are JavaScript function expressions, `(s) => boolean`, over the raw snapshot. That snapshot is the module API: it holds the bot's own state, entities, inventory, world time and weather, and the block underfoot. The same snapshot is logged on every `decide` span, so a module can be replayed on old states.
+
+**Pipeline:** System 2 puts modules in `new_modules` in its decision, and they're registered before the rest of the decision is applied.
+1. **Compile** in a fresh sandbox.
+2. **Trial** on the last ~30 real snapshots. The module must return a boolean every time, within 2 ms.
+3. **Register** as `name@version`, recording a `module` span with the source and the trial result.
+
+A refusal, or a reference to a module that doesn't exist, becomes a `module_failed` escalation. That's the evidence for System 2's next attempt. A live module is disabled after 3 runtime errors, which escalates as `module_disabled`.
+
+**Sandbox decision (for review):** `node:vm`. Each module gets a fresh realm with no `require`, `process` or network, string eval off, a 20 ms hard timeout per call, and a JSON-only input, so the module never holds a reference to our objects.
+- SES lockdown would freeze built-ins for the whole process, which risks Mineflayer.
+- A worker thread would make every hot-path call asynchronous.
+- **`node:vm` is not a security boundary.** That's fine while the only author is our own System 2 on a local machine. Revisit it (a worker or an SES compartment) before Jeeve runs anywhere else.
+
+**First results** (e2e, 2026-10-11):
+- For "wait here until it gets dark", System 2 wrote `is_dark`: `time_of_day` between 13000 and 23000. It trialled on 31 states at 0.1 ms, and the goal completed when night fell.
+- For "follow me and defend me", it wrote a `hostile_near_josh` watch of its own accord. The watch fired once and woke Jev.
+
+**Not yet:**
+- **Encoders and option generators** written by System 2. These change what Jev sees, so they need the replay comparison from "How programs are compared".
+- **Persistence across runs.** The registry lives in memory; the source of every module is in its `module` span, so a new run could reload them from traces.
+- **Behaviors written by System 2.**
 
 ## Open questions
 - **Order bias.** Is reversed-order averaging enough, or do programs need a full shuffle-and-average? It costs nothing in latency, since extra questions are free ([[jev-measurements]]).
@@ -167,5 +195,5 @@ Not yet built, and deliberately so:
 - **Tail latency under load.** A 1.2 s outlier showed up with 16 calls in parallel. We still need p99 at real multi-bot load, measured from where the bots will actually run.
 - **Calibration.** Jev's confidence hasn't been checked against System 2 labels, so the 0.5 escalation threshold is a guess.
 - **One call in flight per bot or per decider.** Per bot until the numbers say aim needs a faster cadence than legs.
-- **Module sandbox.** Is it the same restricted environment as behaviors? What CPU budget per tick is realistic in Node?
+- ~~**Module sandbox.**~~ Decided: `node:vm` (see "Modules System 2 writes"). Behaviors written by System 2 will need a different sandbox, because behaviors act on the bot rather than on data.
 - **Rate limits.** TypeSafe says its limits "can change without notice". Multi-bot plans need a fallback model ([[decision-models]]).

@@ -216,7 +216,7 @@ All three are sensible with no prompt tuning.
 
 **Not built:**
 - **Lessons kept past their goal.** Only the code-written summary and System 2's last note carry forward.
-- **Modules written by System 2.**
+- ~~**Modules written by System 2.**~~ Checks and watch conditions are built ([[system-1]] → "Modules System 2 writes"). Encoders aren't yet.
 - **Several players.** The latest instruction wins.
 
 ## Open questions

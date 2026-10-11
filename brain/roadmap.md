@@ -57,7 +57,7 @@ Evaluation scenarios, including the PvP arena, run on our own server. Behaving l
 All three instructions pass, and so do a live guard veto and the local API. System 2 sets each goal's check, code reports "done", and the episode is verified in Judgment by SQL.
 
 **Next:**
-- System 2 writing modules (encoders, checks, watch conditions);
+- System 2 writing encoders and option generators (checks and watch conditions are done, [[system-1]] → "Modules System 2 writes");
 - lessons that outlive their goal;
 - judges and the outer loop (stage 4);
 - the PvP arena and benchmarks ([[benchmarks]]).
