@@ -2,7 +2,7 @@
 date: 2026-10-10
 tags: [task, behaviors, tracing, judgment]
 status: active
-progress: todo
+progress: done
 ---
 # Task: seed behaviors, and the trace schema and ingest
 

@@ -37,7 +37,7 @@ Following carry-over spans backwards walks the episode's history, and each one i
 - Guidance updates: what changed, and the events cited as evidence.
 
 ## Agentic search over traces
-System 2 doesn't just receive the latest window. It **searches its own history** like any other data, using Judgment's query tools (JQL and semantic search over span, trace and session summaries):
+System 2 doesn't just receive the latest window. It **searches its own history** like any other data, using Judgment's virtual SQL over its own spans and traces ([[trace-schema]]). Semantic search can be added once it's ready.
 - "Every window where `navigate` reported stuck near water in the last 2 hours." Pull those traces, find what got it unstuck, and turn that into guidance or an example.
 - "The last time we fought Steve." Read that window's choices and outcomes before this fight starts.
 - "The guidance version that preceded the most deaths." Diff it against the current one.
@@ -51,7 +51,7 @@ The long-horizon failure from [[llm-plays-pokemon]]: a wrong belief ("Steve can'
 - **be versioned,** so each decision is traceable to the guidance it ran under, and a bad version can be found and rolled back by searching traces.
 
 ## Open questions
-- **How fresh the outer loop can be.** It depends on how quickly traces become queryable after a window closes, which sets how "live" agentic search can be.
-- **What triggers a window.** A fixed minute, goal-node boundaries, or both? Is a fight split across two traces a problem?
-- **Who writes window summaries.** System 2 itself, a cheap summarizer, or Judgment's trace summaries?
+- ~~**How fresh the outer loop can be.**~~ Answered in [[trace-schema]]: with a flush at the cut, a window is queryable through virtual SQL 0.7–0.9 s after it closes (measured on staging).
+- ~~**What triggers a window.**~~ Answered in [[trace-schema]]: 60 s or a root-goal boundary, whichever comes first. A fight that crosses a cut is stitched back together by `run_id`.
+- **Who writes window summaries.** System 2 itself, or a cheap summarizer at the cut?
 - **Outcome signals.** How the outer loop knows what "went well" is roadmap stage 4 (goals and reward).

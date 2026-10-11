@@ -8,10 +8,10 @@ status: active
 The deterministic layer under Jev ([[layers]]). It runs like control-system code: no model is involved, it handles precision and physics, and it's fast.
 
 ## Behaviors
-A behavior is a small controller that runs on one channel until it finishes, times out, or is replaced.
+A behavior is a small controller that runs on its channels until it finishes, times out, or is replaced.
 
 **The contract every behavior follows:**
-- **Channel:** legs, aim, hands or stance.
+- **Channels:** the set it claims, from legs, aim, hands and stance. Starting it replaces whatever holds any of them. Wrapped mineflayer plugins claim several channels at once ([[seed-behaviors]]).
 - **Parameters:** e.g. `navigate(target, avoid)`.
 - **Lifecycle:** start, every tick, stop. It must stop cleanly when replaced.
 - **Events it emits:** `done`, `stuck`, `blocked`, `target_lost`, `vetoed`, and so on. These trigger the next Jev call ([[layers]]) and go into the trace ([[learning]]).
@@ -43,6 +43,6 @@ The library isn't fixed. When System 2 finds a missing capability ("I need to ri
 5. **Version:** every behavior is versioned, so a trace shows which version ran.
 
 ## Open questions
-- **How much to write up front.** The seed library (navigate, track, aim, attack, use, place, eat) is scaffolding. How small can it be?
-- **Telling a broken behavior from a bad choice.** Did the new behavior fail, or did Jev pick it at the wrong time? Traces need to tell these apart.
+- ~~**How much to write up front.**~~ Answered in [[seed-behaviors]]: `navigate`, `follow`, `collect`, `fight`, `stop`, all wrapping mineflayer plugins.
+- **Telling a broken behavior from a bad choice.** Did the new behavior fail, or did Jev pick it at the wrong time? Traces need to tell these apart. [[trace-schema]] keeps the full state on every `decide` and links each behavior run to the call that chose it (`decided_by`).
 - **Retiring behaviors.** What happens to ones that stop working or get replaced?

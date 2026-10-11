@@ -22,12 +22,14 @@ We're in the research and architecture stage: no code yet. Plans, decisions and 
 
 ### Tasks
 - [[system-1-infrastructure]] (done → [[system-1]]): decide what the runtime provides around System 1 vs. what System 2 decides (state encoding, questions, when to call)
-- [[seed-behaviors-and-traces]]: the smallest behavior set for the first milestone, plus the span/trace schema and ingest into Judgment
+- [[seed-behaviors-and-traces]] (done → [[seed-behaviors]], [[trace-schema]]): the smallest behavior set for the first milestone, plus the span/trace schema and ingest into Judgment
 
 ### Architecture
 - [[overview]]: what we build vs. what the agent discovers, the discovery loop, fast and slow thinking, goals and time as one hierarchy, open questions
 - [[layers]]: System 2 / Jev / behaviors / guards; the one-right-answer vs. judgment vs. plan rule; concurrent channels; System 2 sets when Jev decides; first milestone: a local client that takes instructions
 - [[system-1]]: System 1 is a program System 2 writes (manifest + modules); the runtime owns channels, `decide()`, bounds, tracing and a pinned fallback; the default program; how programs are compared
+- [[seed-behaviors]]: the M1 seed set wrapping mineflayer plugins (behaviors claim channel sets, so M1 asks one joint `body` choice), guards, and the three instructions walked end to end
+- [[trace-schema]]: one session per episode, one trace per window (root ends last), span kinds and `jeeve.*` attributes, judgeval-js ingest (<1 s to queryable), virtual SQL queries System 2 runs, volume
 - [[behaviors-and-guards]]: the deterministic layer: the behavior contract, layered behaviors, safety guards, behaviors System 2 writes at runtime
 - [[learning]]: decision: context only, no training. Live and cross-episode loops, per-minute traces linked by lineage, agentic search over past traces
 

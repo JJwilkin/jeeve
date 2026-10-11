@@ -100,7 +100,7 @@ The smallest scaffold that should work before System 2 tunes anything. It's the 
 
   Distances and directions are named buckets computed in code. Jev's vendor lists numbers as a weak spot ([[jev-measurements]]). **There's deliberately no terrain map:** `navigate` handles terrain, and whether System 2 adds a map when bridging fails is a direct test of this design.
 - **Questions:**
-  - one Choice per channel, with options = allowed behaviors × encoded targets, plus `keep_current` to stop churn. Option order is shuffled per call, and the order is traced, because the order changes answers ([[jev-measurements]]);
+  - one Choice per channel, with options = allowed behaviors × encoded targets, plus `keep_current` to stop churn. In M1 every seed behavior claims legs, aim and hands, so the M1 default asks one joint `body` Choice instead ([[seed-behaviors]]). Option order is shuffled per call, and the order is traced, because the order changes answers ([[jev-measurements]]);
   - one `escalate` Noul.
 - **Triggers:** behavior events (`done`, `stuck`, `blocked`, `vetoed`, `target_lost`), damage taken, a hostile entity within 6 blocks, a new directive, and a 1 s heartbeat.
 - **Escalation:** confidence below 0.5 on any question, `escalate` above 0.5, or a typed escalation event from code.
@@ -109,7 +109,7 @@ The smallest scaffold that should work before System 2 tunes anything. It's the 
 From cheapest to most realistic:
 1. **Replay.** Run a program's encoder and questions on recorded raw states, and score how often Jev agrees with System 2's own careful choice on the same state. Those labels come from a paused world on the eval server. This is search labelling the fast policy, as in AlphaZero, done through context instead of weights ([[fast-slow-agents]]).
 2. **Scenario A/B on the eval server.** RCON resets, the same scenario, N runs per program.
-3. **Live windows by program version,** with JQL grouped by `program_version` and directive type. Signals:
+3. **Live windows by program version,** with virtual SQL grouped by `jeeve.program.version` and directive type ([[trace-schema]]). Signals:
    - directive completed, and how fast,
    - deaths and damage taken,
    - vetoes, `stuck` events, escalation rate,
@@ -120,7 +120,7 @@ From cheapest to most realistic:
 
 These are tools System 2 can use and a record to search later, not gates. Outcome signals for open-ended objectives are still roadmap stage 4.
 
-**Replay needs raw state in the trace.** Each `decide()` span logs a compact raw snapshot (entities, inventory, the bot's own status, events, a 16³ block cube) besides the encoded text. The estimate is ~15 KB raw, or ~2–4 KB compressed, per decision. That's ~10–25 MB/h compressed per bot at 1–3 decisions/s, about 1–5× the encoded text we log anyway. To save more, log the block cube only when it changes. The span schema belongs to [[seed-behaviors-and-traces]].
+**Replay needs raw state in the trace.** Each `decide()` span logs a compact raw snapshot (entities, inventory, the bot's own status, events, a 16³ block cube) besides the encoded text. The estimate is ~15 KB raw, or ~2–4 KB compressed, per decision. That's ~10–25 MB/h compressed per bot at 1–3 decisions/s, about 1–5× the encoded text we log anyway. To save more, log the block cube only when it changes. The span schema is in [[trace-schema]].
 
 ## Open questions
 - **Order bias.** Is reversed-order averaging enough, or do programs need a full shuffle-and-average? It costs nothing in latency, since extra questions are free ([[jev-measurements]]).

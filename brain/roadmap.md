@@ -19,19 +19,19 @@ Done. Notes are in `brain/research/` (see the index). The main conclusions:
 - [[behaviors-and-guards]]: the deterministic layer.
 - [[learning]]: context only, no training.
 - [[system-1]]: System 1 is a program System 2 writes; the runtime, its fixed bounds and the default program ([[jev-measurements]] for Jev's real limits).
+- [[seed-behaviors]]: `navigate`, `follow`, `collect`, `fight`, `stop`, wrapping mineflayer plugins; the three first-milestone instructions walked through end to end.
 
 **Remaining:**
 - **System 2 details:** the goal-tree data model, taking instructions from outside, and how guidance updates are written and expire.
-- [[seed-behaviors-and-traces]] (task), part 1: the seed behavior set for the first milestone.
 
-## 3. Tracing with Judgment (partly done)
-**Decided in [[learning]]:** one trace per window, carry-over spans linked by lineage, and agentic search over past traces.
+## 3. Tracing with Judgment ✓
+Done. The design is in [[learning]] and [[trace-schema]]:
+- **Sessions and windows:** one session per episode; one trace per window, cut at 60 s or a root-goal boundary. The root span ends last, and behaviors that cross a cut are stitched together by `run_id`.
+- **Spans:** seven span kinds with `jeeve.*` attributes. `decide` spans carry the encoded state, the option order and a raw snapshot for replay.
+- **Ingest:** judgeval-js, with `forceFlush` at every cut. A window is queryable 0.7–0.9 s after it closes (measured on staging).
+- **Read path:** System 2 queries its own traces with virtual SQL. JQL and semantic search aren't used yet.
 
-**Remaining:** [[seed-behaviors-and-traces]] (task), part 2:
-- the span schema,
-- the ingest into Judgment,
-- how quickly traces become searchable after a window closes,
-- what triggers a window.
+**Open:** who writes the previous-window summary, and semantic search once it's ready ([[trace-schema]]).
 
 Traces feed System 2 as evidence and examples, not as training data.
 
