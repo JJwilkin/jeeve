@@ -13,8 +13,9 @@ import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal } from './go
 import { guardedMovements, installGuards } from './guards.ts'
 import { ModuleRegistry, type Snapshot } from './modules.ts'
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
-import { makeSystem2, type Decision } from './system2.ts'
+import { makeSystem2, type Decision, type Perceive } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
+import { reachable, scan, type Pos } from './world.ts'
 
 export type AgentOptions = {
   host?: string
@@ -202,9 +203,28 @@ export async function startAgent (opts: AgentOptions) {
   }
 
   // ---- System 2: one call in flight, escalations merged, no repeats within 30 s ----
+  // Its perception calls are traced as `perceive` spans under the open system2 span.
+  let system2Span: ReturnType<Recorder['open']> | undefined
+  const perceive: Perceive = async (tool, input) => {
+    const t0 = performance.now()
+    let out: unknown
+    try {
+      out = tool === 'scan' ? scan(bot, input as Parameters<typeof scan>[1]) : tool === 'reachable' ? await reachable(bot, input.position as Pos) : { error: `unknown tool ${tool}` }
+    } catch (err) { out = { error: String(err) } }
+    recorder.record('perceive', {
+      parent: system2Span,
+      attrs: {
+        'jeeve.perceive.tool': tool, 'jeeve.perceive.query': JSON.stringify(input), 'jeeve.perceive.mode': tool === 'scan' ? (input.los ? 'los' : 'xray') : undefined,
+        'jeeve.perceive.latency_ms': +(performance.now() - t0).toFixed(1), 'jeeve.perceive.result_bytes': JSON.stringify(out).length
+      },
+      input, output: out
+    })
+    return out
+  }
   const useSystem2 = opts.system2 ?? !!process.env.ANTHROPIC_API_KEY
   const system2 = useSystem2
     ? makeSystem2({
+      perceive,
       sql: judgeval ? q => judgeval.sql(q) : undefined,
       schema: judgeval ? await judgeval.discoverSchema().catch(() => undefined) : undefined,
       effort: trigger => trigger.includes('instruction') ? 'medium' : 'low'
@@ -247,20 +267,21 @@ export async function startAgent (opts: AgentOptions) {
       window: { session_id: session, previous_trace_id: recorder.prevTraceId, summary_so_far: recorder.summary() }
     }
     const t0 = Date.now()
+    const span = system2Span = recorder.open('system2', { 'jeeve.system2.trigger': trigger })
     let result
     try { result = await system2(trigger, context) } catch (err) {
-      recorder.record('system2', { attrs: { 'jeeve.system2.trigger': trigger }, input: context, output: { error: String(err) }, kind: 'llm' })
+      recorder.finish(span, 'system2', { input: context, output: { error: String(err) }, kind: 'llm' })
       console.error('[system2]', err)
       return
-    }
-    if (stopped) return
+    } finally { system2Span = undefined }
     const d = result.decision
     const u = result.usage
-    const spanId = recorder.record('system2', {
+    const spanId = recorder.finish(span, 'system2', {
       attrs: { 'jeeve.system2.trigger': trigger, 'jeeve.system2.latency_ms': Date.now() - t0, 'jeeve.system2.turns': result.turns, 'jeeve.system2.refusal': result.refusal },
       input: context, output: { decision: d, sql: result.sql }, kind: 'llm',
       llm: u ? { model: result.model, provider: 'anthropic', non_cached_input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_read_input_tokens: u.cache_read_input_tokens ?? 0, cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0 } : undefined
     })
+    if (stopped) return
     recorder.stats.system2.push(`${trigger} → ${d ? d.note : result.refusal ? 'refused' : 'no decision'}`)
     console.log(`[system2] ${trigger} (${Date.now() - t0} ms): ${d?.note ?? 'no decision'}`)
     if (d) applyDecision(d, goal, spanId)

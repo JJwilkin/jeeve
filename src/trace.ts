@@ -6,6 +6,7 @@ import { Tracer } from 'judgeval'
 
 type Attrs = Record<string, string | number | boolean | undefined>
 type Run = { name: string, attrs: Attrs, span: Span }
+type Finish = { attrs?: Attrs, input?: unknown, output?: unknown, kind?: string, llm?: Record<string, unknown> }
 
 // What the code-written window summary counts ([[system-2]] → "Window summaries: written by code").
 const emptyStats = () => ({
@@ -106,9 +107,16 @@ export class Recorder {
     this.openWindow({ ...carry, goal_path: this.goalPath, program: this.program, previous_window: summary })
   }
 
-  // A child span of the window that starts and ends now. Returns its span id.
-  record (name: string, o: { attrs?: Attrs, input?: unknown, output?: unknown, kind?: string, llm?: Record<string, unknown> }): string {
-    const span = this.start(name, o.attrs ?? {}, this.window)
+  // A span that starts and ends now, a child of the window unless a parent is given. Returns its span id.
+  record (name: string, o: Finish & { parent?: Span }): string {
+    return this.finish(this.start(name, o.attrs ?? {}, o.parent ?? this.window), name, o)
+  }
+
+  // A span left open while work happens under it (a System 2 call); end it with finish().
+  open (name: string, attrs: Attrs = {}) { return this.start(name, attrs, this.window) }
+
+  finish (span: Span, name: string, o: Finish): string {
+    if (o.attrs) span.setAttributes(clean(o.attrs))
     if (o.kind) Tracer.setSpanKind(o.kind, span)
     if (o.input !== undefined) span.setAttribute('judgment.input', json(o.input))
     if (o.output !== undefined) span.setAttribute('judgment.output', json(o.output))

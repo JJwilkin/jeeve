@@ -24,7 +24,7 @@ async function until (what: string, cond: () => boolean, ms: number) {
 }
 const check = (what: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${what}${detail ? ` (${detail})` : ''}`); results.push([what, ok]) }
 
-const server = startServer(line => { if (/ERROR|joined the game|left the game|Done \(/.test(line) && !/No key layers/.test(line)) console.log('[server]', line) })
+const server = startServer(line => { if (/ERROR|joined the game|left the game|Done \(|[Gg]ame ?rule|feature|Unknown|Incorrect/.test(line) && !/No key layers/.test(line)) console.log('[server]', line) })
 await server.ready
 
 const LIBRARY = 'traces/e2e-module-library.json' // a scratch library, so test runs don't rewrite modules/library.json
@@ -77,9 +77,51 @@ await until('"collect 10 logs": System 2 sets inventory_delta(*_log, 10)', () =>
 await until('"collect 10 logs": 10 logs in inventory', () => logs() >= 10, 120000)
 await until('"collect 10 logs": Josh hears "done"', () => whispers.some(w => w.startsWith('done: collect 10 logs')), 20000)
 
+// Perception: a real oak. System 2 has to look (scan) to set the true log count, and to see the leaves are
+// out of reach before trying. Leaves don't decay during the test (random ticks off), and the area is cleared
+// first, so nothing from earlier runs or the log columns is counted.
+const traceRecords = () => readFileSync(agent.traceFile, 'utf8').trim().split('\n').map(l => JSON.parse(l))
+const looksSince = (n: number) => traceRecords().filter(r => r.kind === 'perceive').slice(n)
+const treeBlocks = (re: RegExp) => josh.findBlocks({ matching: b => re.test(b.name), maxDistance: 16, count: 500 }).length
+server.command('gamerule random_tick_speed 0')
+server.command('fill 4 -60 6 20 -50 20 air')
+server.command('tp Jeeve 15 -60 9') // outside the canopy (x 8–12, z 10–14), or the tree grows into him
+server.command('tp Josh 15 -60 7')
+server.command('place feature minecraft:oak 10 -60 12')
+await sleep(1500)
+const treeLogs = treeBlocks(/_log$/)
+check('an oak is placed', treeLogs >= 4, `${treeLogs} logs, ${treeBlocks(/_leaves$/)} leaves`)
+let looked = looksSince(0).length
+josh.whisper('Jeeve', 'break this tree')
+const tree = () => agent.goals.nodes.find(g => g.text === 'break this tree')
+await until('"break this tree": System 2 sets a check', () => !!tree()?.done_when, 45000)
+check('"break this tree": the check counts the real logs', tree()?.done_when?.spec.module === 'inventory_delta' && tree()?.done_when?.spec.count === treeLogs,
+  `${tree()?.done_when?.desc}, tree has ${treeLogs}`)
+const treeLooks = looksSince(looked)
+check('"break this tree": System 2 looked first', treeLooks.some(r => r.attrs['jeeve.perceive.tool'] === 'scan'), treeLooks.map(r => `${r.attrs['jeeve.perceive.tool']} ${r.attrs['jeeve.perceive.query']}`).join('; '))
+await until('"break this tree": every log is collected', () => treeBlocks(/_log$/) === 0, 120000)
+await until('"break this tree": Josh hears "done"', () => whispers.some(w => w.startsWith('done: break this tree')), 20000)
+
+// Outcome-based: an oak's leaves are mostly within reach once the trunk is gone, but collect measures
+// progress by items and leaves drop none. Pass if System 2 looks, then reports a limit up front or breaks leaves.
+looked = looksSince(0).length
+const heard = whispers.length
+const asked = Date.now()
+const leavesBefore = treeBlocks(/_leaves$/)
+let reportedAt = 0
+const reported = () => reportedAt > 0 || (whispers.slice(heard).some(w => !/^(on it|done):/.test(w)) && (reportedAt = Date.now()) > 0)
+josh.whisper('Jeeve', 'break the leaves too')
+await until('"break the leaves too": Jeeve reports a limit up front or breaks leaves', () => reported() || treeBlocks(/_leaves$/) < leavesBefore - 5, 60000)
+const leafLooks = looksSince(looked)
+check('"break the leaves too": System 2 looked at the leaves', leafLooks.some(r => /leaves/.test(r.attrs['jeeve.perceive.query']) || r.attrs['jeeve.perceive.tool'] === 'reachable'),
+  leafLooks.map(r => `${r.attrs['jeeve.perceive.tool']} ${r.attrs['jeeve.perceive.query']}`).join('; '))
+if (reported()) check('"break the leaves too": the report came before any stuck', !traceRecords().some(r => r.kind === 'behavior_end' && r.reason === 'stuck' && r.t > asked && r.t < reportedAt))
+else console.log(`INFO "break the leaves too": leaves ${leavesBefore} → ${treeBlocks(/_leaves$/)}`)
+server.command('gamerule random_tick_speed 3')
+
 // A goal no built-in check covers: System 2 has to write a check module, which code then evaluates.
 josh.whisper('Jeeve', 'wait here until it gets dark')
-await until('"until dark": System 2 writes and registers a check module', () => leaf()?.done_when?.spec.module === 'authored', 45000)
+await until('"until dark": System 2 writes and registers a check module', () => !!leaf()?.text.startsWith('wait here') && leaf()?.done_when?.spec.module === 'authored', 45000)
 const authored = agent.goals.leaf()?.done_when?.desc ?? ''
 check('"until dark": the authored check is false in daylight', !whispers.some(w => w.startsWith('done: wait here')), authored)
 server.command('time set 14000')
@@ -114,12 +156,14 @@ check('"follow me and defend me" was abandoned, not failed', status.goals.past.s
 await sleep(12000) // let System 2 answer the last instruction before the episode ends
 
 // Summary from the local mirror.
-const records = readFileSync(agent.traceFile, 'utf8').trim().split('\n').map(l => JSON.parse(l))
+const records = traceRecords()
 const decisions = records.filter(r => r.kind === 'decide')
 const lat = decisions.map(d => d.attrs['jeeve.decide.latency_ms']).sort((a, b) => a - b)
 const s2 = records.filter(r => r.kind === 'system2')
 console.log(`\ndecisions=${decisions.length} escalating=${decisions.filter(d => d.attrs['jeeve.decide.escalate']).length} jev p50=${lat[lat.length >> 1]} ms`)
-console.log(`system2 calls=${s2.length}: ${s2.map(r => `${r.attrs['jeeve.system2.trigger']} ${r.attrs['jeeve.system2.latency_ms']} ms`).join('; ')}`)
+console.log(`system2 calls=${s2.length}: ${s2.map(r => `${r.attrs['jeeve.system2.trigger']} ${r.attrs['jeeve.system2.latency_ms']} ms/${r.attrs['jeeve.system2.turns']} turns`).join('; ')}`)
+const looks = records.filter(r => r.kind === 'perceive')
+console.log(`perceive calls=${looks.length}: ${looks.map(r => `${r.attrs['jeeve.perceive.tool']} ${r.attrs['jeeve.perceive.latency_ms']} ms ${r.attrs['jeeve.perceive.result_bytes']} B`).join('; ')}`)
 console.log(`suppressed escalations=${records.filter(r => r.kind === 'escalation_suppressed').length}, windows=${records.filter(r => r.kind === 'window_open').length}`)
 
 const session = agent.session
@@ -139,8 +183,11 @@ if (agent.recorder.exporting) {
       names = Object.fromEntries(res.rows.map((r: any) => [r.span_name, Number(r.n)]))
     }
     console.log('judgment spans by name:', JSON.stringify(names))
-    const want = ['window', 'carry_over', 'decide', 'system2', 'program', 'goal', 'module', 'behavior.collect', 'behavior.follow', 'behavior.attack_when_ready']
+    const want = ['window', 'carry_over', 'decide', 'system2', 'perceive', 'program', 'goal', 'module', 'behavior.collect', 'behavior.follow', 'behavior.attack_when_ready']
     check('Judgment has every span kind for this session', want.every(n => (names[n] ?? 0) > 0), want.filter(n => !names[n]).join(', ') || 'all present')
+    const looks = await client.sql(`SELECT count() AS n, countIf(p.span_name = 'system2') AS under FROM telemetry.spans s LEFT JOIN telemetry.spans p ON p.span_id = s.parent_span_id AND p.trace_id = s.trace_id WHERE s.session_id = '${session}' AND s.span_name = 'perceive' AND s.input != '' AND s.output != ''`)
+    const lk = looks.rows[0] as any
+    check('perceive spans in Judgment carry query and result, under system2', Number(lk.n) > 0 && Number(lk.under) === Number(lk.n), `${lk.under}/${lk.n} under system2`)
     const lineage = await client.sql(`SELECT count() AS n FROM telemetry.spans WHERE session_id = '${session}' AND span_name = 'window' AND attributes['jeeve.prev_trace_id'] != ''`)
     check('windows are linked by prev_trace_id', Number((lineage.rows[0] as any).n) > 0, `${(lineage.rows[0] as any).n} linked windows`)
   } catch (err) {

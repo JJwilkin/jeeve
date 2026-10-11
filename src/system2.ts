@@ -105,6 +105,32 @@ const TOOLS: Anthropic.Tool[] = [
   }
 ]
 
+// Perception tools (brain/architecture/perception.md): read-only world queries over src/world.ts. Not strict either.
+const PERCEPTION: Anthropic.Tool[] = [
+  {
+    name: 'scan',
+    description: 'Find blocks whose name matches a glob (e.g. "*_log", "oak_leaves", "*_ore") within a radius, grouped into connected clusters, nearest first. Each cluster gives its exact count, block names, nearest block, bounds (absolute [x, y, z]), its position relative to your feet (rel [dx, dy, dz]) and its height range relative to your feet (y_rel [min, max]). Use it for how many, where and how high.',
+    input_schema: {
+      type: 'object', additionalProperties: false, required: ['match'],
+      properties: {
+        match: { type: 'string' },
+        radius: { type: 'integer', description: 'Blocks, 1-32. Default 16.' },
+        los: { type: 'boolean', description: 'Only blocks in your line of sight. Default false: you see through walls.' }
+      }
+    }
+  },
+  {
+    name: 'reachable',
+    description: 'Can you walk to where a block is within arm\'s reach (about 4.5 blocks from your eyes), using the same pathfinder as collect: no placing blocks, and no breaking anything but logs and leaves? Judged on the world as it is now: a block behind others of the same tree may become reachable once those are broken. status timeout means no path was found within a second. Absolute position.',
+    input_schema: {
+      type: 'object', additionalProperties: false, required: ['position'],
+      properties: { position: { type: 'array', items: { type: 'integer' }, minItems: 3, maxItems: 3 } }
+    }
+  }
+]
+
+const PERCEIVE = `You can look at the world with scan and reachable. Your context only has a coarse summary of nearby blocks (fast_model_view.blocks), so look before you set a count or a check that depends on blocks, or before you judge whether something can be reached. Each tool call costs a turn of a few seconds, so make every look you need in the same turn (several tool calls at once), then decide.`
+
 const SYSTEM = `You are System 2 of Jeeve, a Minecraft bot that joins servers as a normal player and takes instructions from players.
 
 You are the slow planner. A fast decision model (System 1, "Jev") picks a behavior per channel several times a second under a program you shape: guidance text, the allowed behaviors and how often it re-decides. Deterministic code runs the behaviors and safety guards. You are called when an instruction arrives or something escalates. The bot never waits for you: it keeps acting on the current program while you think.
@@ -112,11 +138,11 @@ You are the slow planner. A fast decision model (System 1, "Jev") picks a behavi
 Behaviors System 1 can choose from:
 ${Object.entries(BEHAVIORS).map(([n, b]) => `- ${n} (${b.channels.join('+')}): ${b.describe('<target>')}`).join('\n')}
 
-Success checks are code you parameterize: near_entity(player, radius), inventory_delta(match glob, count), entity_alive(player). Code evaluates them every tick, marks a goal completed when its done_when passes, and tells the player. You never need to say "done".
+Success checks are code you parameterize: near_entity(player, radius), inventory_delta(match glob, count), entity_alive(player). The fast model is offered collect only for block types the active goal's inventory_delta check still needs, with the count still missing. So for a goal that gathers blocks, use inventory_delta with the exact count; an authored check offers no collect option. Code evaluates them every tick, marks a goal completed when its done_when passes, and tells the player. You never need to say "done".
 
 When no built-in check can express a goal, write one. Put a module in new_modules and reference it as {"module": "authored", "name": ...} in done_when or escalate_if. You can also write watch modules: list their names in program.watch, and the fast model is woken each time one turns true. A module is a JavaScript function expression \`(s) => boolean\` over a plain-data snapshot:
-s = { t, self: { pos: [x, y, z], yaw, health, food, held, below }, entities: [{ id, name, type, username, pos, vel }], inventory: { item_name: count }, world: { time_of_day /* 0-24000 ticks; night is about 13000-23000 */, is_day, raining } }
-Helpers: dist(a, b) for positions, count(s, "*_log") for inventory globs. Modules are pure: no I/O, no state between calls, no eval. They must finish in under ${MODULE_LIMITS.budgetMs} ms, and they run several times a second. Before registering, a module is trialled on recent real snapshots and refused if it throws or returns a non-boolean. A refusal comes back to you as an escalation. Modules you registered earlier are listed in your context, so reuse them by name.
+s = { t, self: { pos: [x, y, z], yaw, health, food, held, below }, entities: [{ id, name, type, username, pos, vel }], inventory: { item_name: count }, blocks: { block_name: [[x, y, z], ...nearest 8] /* only types that are rare (64 or fewer) within 8 blocks of the bot's feet in every direction */ }, world: { time_of_day /* 0-24000 ticks; night is about 13000-23000 */, is_day, raining } }
+A type missing from s.blocks may just be out of that view (the bot walked off, or the canopy is more than 8 up), so a "none left" check must also require the bot to be within a few blocks of the place. Helpers: dist(a, b) for positions, count(s, "*_log") for inventory globs. Modules are pure: no I/O, no state between calls, no eval. They must finish in under ${MODULE_LIMITS.budgetMs} ms, and they run several times a second. Before registering, a module is trialled on recent real snapshots and refused if it throws or returns a non-boolean. A refusal comes back to you as an escalation. Modules you registered earlier are listed in your context, so reuse them by name.
 
 On a new instruction: set the goal's done_when (or null if open-ended), escalate_if conditions, and a budget (closed goals) or review interval (open-ended goals). Adjust the program only if the default guidance is not enough. On an escalation: read what happened and decide whether to change the program, fail the goal (with a message saying why), push a sub-goal, or carry on (goal_action "none", everything else null).
 
@@ -124,20 +150,23 @@ Keep program changes small and concrete; they last only while the goal is active
 
 // Jeeve's own span vocabulary (brain/architecture/trace-schema.md), so queries don't burn turns on discovery.
 const TRACES = `Your traces (Judgment virtual SQL, project-scoped). One session per episode (session_id), one trace per window.
-Span names: window, carry_over, system2, program, decide, goal, behavior.<name> (navigate, follow, track, attack_when_ready, collect).
+Span names: window, carry_over, system2, perceive (your scan/reachable calls, children of the system2 span), program, decide, goal, module, behavior.<name> (navigate, follow, track, attack_when_ready, collect).
 Columns: span_name, session_id, trace_id, started_at, input, output, attributes (Map(String,String)), events_json.
 Keys: jeeve.window_index, jeeve.prev_trace_id, jeeve.goal.path, jeeve.goal.id, jeeve.goal.transition, jeeve.program.version,
 jeeve.program.because, jeeve.decide.trigger, jeeve.decide.changed, jeeve.decide.escalate, jeeve.decide.latency_ms, jeeve.decide.raw_state,
 jeeve.behavior.name, jeeve.behavior.params, jeeve.behavior.run_id, jeeve.behavior.end_reason (done, stuck, none_found, target_dead,
-target_lost, vetoed, replaced, stopped, cut, goal_closed, death), jeeve.behavior.decided_by, jeeve.system2.trigger.
+target_lost, vetoed, replaced, stopped, cut, goal_closed, death), jeeve.behavior.decided_by, jeeve.system2.trigger, jeeve.perceive.tool, jeeve.perceive.query, jeeve.perceive.mode (xray, los).
 Window events (events_json on window spans): death, damage, owner_damage, vetoed, chat.`
 
 export type System2Result = { decision: Decision | null, model: string, usage: Anthropic.Beta.BetaUsage | null, turns: number, sql: string[], refusal: boolean }
 
-export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, schema?: string, effort: (trigger: string) => 'low' | 'medium' | 'high' }) {
+export type Perceive = (tool: string, input: Record<string, unknown>) => Promise<unknown>
+
+export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, schema?: string, perceive?: Perceive, effort: (trigger: string) => 'low' | 'medium' | 'high' }) {
   const client = new Anthropic()
+  const tools = [TOOLS[0], ...(opts.sql ? [TOOLS[1]] : []), ...(opts.perceive ? PERCEPTION : [])]
   // Stable for the whole run, so it stays in the cached prefix.
-  const system = opts.sql ? `${SYSTEM}\n\n${TRACES}\n\n${opts.schema ?? ''}` : SYSTEM
+  const system = [SYSTEM, opts.perceive ? PERCEIVE : '', opts.sql ? `${TRACES}\n\n${opts.schema ?? ''}` : ''].filter(Boolean).join('\n\n')
   return async function call (trigger: string, context: Record<string, unknown>): Promise<System2Result> {
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: JSON.stringify({ trigger, ...context }) }]
     const sqls: string[] = []
@@ -152,7 +181,7 @@ export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, sche
         output_config: { effort: opts.effort(trigger) },
         system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
         // The last turn offers only submit_decision, so a call always ends in a decision.
-        tools: opts.sql && turn < MAX_TURNS ? TOOLS : TOOLS.slice(0, 1),
+        tools: turn < MAX_TURNS ? tools : TOOLS.slice(0, 1),
         messages
       } as Anthropic.Beta.MessageCreateParamsNonStreaming)
       usage = res.usage
@@ -163,17 +192,21 @@ export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, sche
       if (submit) return { decision: submit.input as Decision, model, usage, turns: turn, sql: sqls, refusal: false }
       if (!calls.length) break
       messages.push({ role: 'assistant', content: res.content })
-      const results: Anthropic.Beta.BetaToolResultBlockParam[] = []
-      for (const c of calls) {
-        const q = (c.input as { query: string }).query
-        sqls.push(q)
+      // Tool calls in one turn run in parallel: a turn costs seconds, a look costs milliseconds.
+      const results = await Promise.all(calls.map(async (c): Promise<Anthropic.Beta.BetaToolResultBlockParam> => {
         try {
-          const out = JSON.stringify(await opts.sql!(q))
-          results.push({ type: 'tool_result', tool_use_id: c.id, content: out.length > 20000 ? out.slice(0, 20000) + '…(truncated)' : out })
+          let out: unknown
+          if (c.name === 'run_sql') {
+            const q = (c.input as { query: string }).query
+            sqls.push(q)
+            out = await opts.sql!(q)
+          } else out = await opts.perceive!(c.name, c.input as Record<string, unknown>)
+          const text = JSON.stringify(out)
+          return { type: 'tool_result', tool_use_id: c.id, content: text.length > 20000 ? text.slice(0, 20000) + '…(truncated)' : text }
         } catch (err) {
-          results.push({ type: 'tool_result', tool_use_id: c.id, content: String(err), is_error: true })
+          return { type: 'tool_result', tool_use_id: c.id, content: String(err), is_error: true }
         }
-      }
+      }))
       messages.push({ role: 'user', content: results })
     }
     return { decision: null, model, usage, turns: MAX_TURNS, sql: sqls, refusal: false }

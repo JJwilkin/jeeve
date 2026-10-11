@@ -67,11 +67,13 @@ export function scan (bot: Bot, q: { match: string, radius?: number, los?: boole
 }
 
 // Can the guarded pathfinder get to where the block is within arm's reach (the goal collectblock uses),
-// without placing blocks or breaking anything but logs and leaves? Async: A* yields between chunks.
+// without placing blocks or breaking anything but logs and leaves? Async: A* yields between chunks. It judges
+// the world as it is now: a log hidden behind other logs is unreachable until they're gone, though collect
+// gets there by digging in order. `timeout`: no path found within the time limit.
 export async function reachable (bot: Bot, p: Pos, timeoutMs = 1000) {
   const goal = new pf.goals.GoalLookAtBlock(new Vec3(p[0], p[1], p[2]), bot.world)
   let r: { status: string, cost: number, path: unknown[] } | undefined
-  for (const step of bot.pathfinder.getPathFromTo(bot.pathfinder.movements, bot.entity.position, goal, { timeout: timeoutMs })) {
+  for (const step of bot.pathfinder.getPathFromTo(bot.pathfinder.movements, bot.entity.position, goal, { timeout: timeoutMs, searchRadius: SCAN_LIMITS.radius })) {
     r = (step as { result: typeof r }).result
     if (r!.status !== 'partial') break
     await new Promise(resolve => setImmediate(resolve))
@@ -81,13 +83,21 @@ export async function reachable (bot: Bot, p: Pos, timeoutMs = 1000) {
 
 // Notable blocks: types that are rare in the cube around the bot (≤ rareMax), so terrain drops out without
 // a hand-written list. Exact count and positions nearest first. Feeds Jev's summary and the raw snapshot.
-// ponytail: memoized for 50 ms per position, since one decide reads it twice (snapshot + encoder).
-let memo: { key: string, t: number, v: Notable[] } | null = null
+// Memoized until the bot moves to another block or any block changes, since one decide reads it twice
+// (snapshot + encoder) and watch modules read it every 250 ms.
+const changes = new WeakMap<Bot, { n: number }>()
+let memo: { key: string, v: Notable[] } | null = null
 export type Notable = { name: string, count: number, positions: Pos[] }
 export function notableBlocks (bot: Bot, radius = 8, rareMax = 64): Notable[] {
+  let c = changes.get(bot)
+  if (!c) {
+    const counter = c = { n: 0 }
+    changes.set(bot, c)
+    bot.on?.('blockUpdate', () => { counter.n++ })
+  }
   const me = feet(bot)
-  const key = `${bot.username}|${me}|${radius}|${rareMax}`
-  if (memo && memo.key === key && Date.now() - memo.t < 50) return memo.v
+  const key = `${bot.username}|${me}|${radius}|${rareMax}|${c.n}`
+  if (memo?.key === key) return memo.v
   const seen = new Map<string, Pos[]>()
   const p = new Vec3(0, 0, 0)
   for (let dx = -radius; dx <= radius; dx++) {
@@ -106,6 +116,6 @@ export function notableBlocks (bot: Bot, radius = 8, rareMax = 64): Notable[] {
     .filter(([, ps]) => ps.length <= rareMax)
     .map(([name, ps]) => ({ name, count: ps.length, positions: ps.sort((a, c) => m1(a) - m1(c)) }))
     .sort((a, c) => m1(a.positions[0]) - m1(c.positions[0]))
-  memo = { key, t: Date.now(), v }
+  memo = { key, v }
   return v
 }
