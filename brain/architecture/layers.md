@@ -40,8 +40,10 @@ This is the physics-vs-strategy split from [[fast-bots]], with planning added on
 - **Writes new behaviors at runtime** when the library is missing one ([[behaviors-and-guards]]).
 
 ## System 1: Jev
+What Jev sees, what it's asked and when it's called is a **program System 2 writes**, running on a fixed runtime. The split, the program format, the fixed bounds and the default program are in [[system-1]]. The bullets below describe the default program and the runtime.
+
 - A decision model ([[decision-models]]). Each call takes a state and typed questions, and returns choices with calibrated probabilities. Context only, no training.
-- **One call is one choice question per channel**, plus "escalate?" as a yes/no. Jev evaluates the questions in parallel.
+- **In the default program, one call is one choice question per channel**, plus "escalate?" as a yes/no. Jev evaluates the questions in parallel, and extra questions add almost no latency ([[jev-measurements]]). Other programs can lay questions out differently ([[system-1]]).
   ```json
   { "legs": "navigate:red_base", "aim": "track:Steve", "hands": "attack_when_ready:Steve", "stance": "sprint" }
   ```
@@ -52,10 +54,10 @@ This is the physics-vs-strategy split from [[fast-bots]], with planning added on
   - watch conditions,
   - timers.
 
-  System 2 sets the *policy*: what to react to, when to be proactive, and how often to re-decide in this situation. Shipped defaults are scaffolding, not design. The open design is in [[system-1-infrastructure]].
+  System 2 sets the *policy*: what to react to, when to be proactive, and how often to re-decide in this situation. Shipped defaults are scaffolding, not design ([[system-1]]).
 - **The latest state wins.** At most one call is in flight per bot. If the state changes during a call, the next call uses the newest state; stale states aren't queued.
 - **Escalates** on low confidence, on an explicit yes to "escalate?", or when a typed escalation event arrives from code ([[realtime-game-agents]]: done or failed, budget exceeded, stuck, expected ≠ observed).
-- **Always has a small fixed base context** (survive: fight, flee, eat) on top of System 2's guidance. When something unexpected happens, it acts sensibly during the 2–5 s before System 2 rewrites its guidance.
+- ~~**Always has a small fixed base context**~~ *Superseded by the pinned fallback program in [[system-1]]:* the default program runs whenever System 2's program fails its check, the watchdog trips, or System 2 is unavailable, so the bot acts sensibly during the 2–5 s before System 2 rewrites its program.
 
 ## Channels: why it runs live
 The motor layer is a few channels, like a person's hands on WASD, mouse and clicks. Each runs one behavior at a time, concurrently:

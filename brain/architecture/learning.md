@@ -24,14 +24,14 @@ Both write the same things: Jev's guidance, its examples, and behaviors.
 
 **Traces are linked by lineage.** The first span of each trace is a **carry-over span** that hands context forward:
 - the active goal path (root → current node),
-- the guidance version Jev is running,
+- the System 1 program version Jev is running (it includes the guidance; [[system-1]]),
 - a summary of the previous window,
 - a link to the previous trace (an OpenTelemetry span link, plus `jeeve.prev_trace_id` and `jeeve.window_index` attributes).
 
 Following carry-over spans backwards walks the episode's history, and each one is a natural summary to skim before drilling in.
 
 **What a window trace holds:**
-- Jev calls: the state it saw, its questions, choices, probabilities, and the guidance version.
+- Jev calls: the state it saw (encoded, plus a compact raw snapshot for replay), its questions, the option order, choices, probabilities, and the program version.
 - Behavior runs: start, end, events, vetoes.
 - Escalations, and the System 2 calls they triggered.
 - Guidance updates: what changed, and the events cited as evidence.

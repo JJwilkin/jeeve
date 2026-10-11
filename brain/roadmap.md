@@ -18,9 +18,9 @@ Done. Notes are in `brain/research/` (see the index). The main conclusions:
 - [[layers]]: System 2 / Jev / behaviors / guards, channels, what triggers Jev, first milestone.
 - [[behaviors-and-guards]]: the deterministic layer.
 - [[learning]]: context only, no training.
+- [[system-1]]: System 1 is a program System 2 writes; the runtime, its fixed bounds and the default program ([[jev-measurements]] for Jev's real limits).
 
 **Remaining:**
-- [[system-1-infrastructure]] (task): what the runtime provides around System 1 vs. what System 2 decides. This replaces designing a fixed "System 1 contract".
 - **System 2 details:** the goal-tree data model, taking instructions from outside, and how guidance updates are written and expire.
 - [[seed-behaviors-and-traces]] (task), part 1: the seed behavior set for the first milestone.
 

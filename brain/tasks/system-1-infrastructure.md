@@ -2,9 +2,11 @@
 date: 2026-10-10
 tags: [task, system-1, architecture, bitter-lesson]
 status: active
-progress: todo
+progress: done
 ---
 # Task: System 1 as infrastructure, not a fixed design
+
+**Outcome:** [[system-1]], with measurements in [[jev-measurements]].
 
 **Start a chat with:** "Read `AGENTS.md` and follow it, then work on `brain/tasks/system-1-infrastructure.md`."
 

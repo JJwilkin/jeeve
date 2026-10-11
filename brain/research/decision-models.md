@@ -21,6 +21,7 @@ Low confidence makes a natural signal to hand back to slow thinking.
 **TypeSafe Jev**
 - Released 2026-09-15, in early access. Hosted, not local; available through OpenRouter and Cloudflare.
 - Question types: Choice (up to 255 options), Score (against a rubric), and yes/no. Answers include the chosen option, probabilities and a confidence. Questions in one call are evaluated in parallel.
+- **Measured by us** ([[jev-measurements]]): ~160–300 ms p50 from a Mac, flat across 1–32 questions, with real position bias on close calls.
 - Vendor-reported: 70–500 ms end to end; $0.042 per million input tokens, output free. On TypeSafe's own benchmark it's level with mid-tier frontier models and behind the top ones. Not independently verified.
 - Sources: [docs](https://docs.typesafe.ai/introduction), [OpenRouter explainer](https://openrouter.ai/blog/insights/what-is-jev/), [Requesty explainer](https://www.requesty.ai/blog/typesafe-jev-explained)
 

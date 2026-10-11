@@ -34,7 +34,8 @@ Pin down what the first milestone ([[layers]]: a local server, instructions from
 - **Attributes:**
   - for each span kind, what's recorded (state as Jev saw it, questions, choices, probabilities, guidance version, behavior version, System 1 program version);
   - naming (`jeeve.*`);
-  - which fields need to be searchable.
+  - which fields need to be searchable;
+  - a compact raw state snapshot on each `decide()` span, plus the option order shown, so programs can be replayed ([[system-1]]).
 - **Sessions and windows:** one session per episode, one trace per window. Decide what triggers a window: time, goal-node boundaries, or both.
 - **Ingest:**
   - judgeval-js setup in a Node process;

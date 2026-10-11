@@ -21,12 +21,13 @@ We're in the research and architecture stage: no code yet. Plans, decisions and 
 - [[roadmap]]: the four stages before code: research, architecture (primitives, System 1, System 2, their interface), tracing, goals and reward
 
 ### Tasks
-- [[system-1-infrastructure]]: decide what the runtime provides around System 1 vs. what System 2 decides (state encoding, questions, when to call)
+- [[system-1-infrastructure]] (done → [[system-1]]): decide what the runtime provides around System 1 vs. what System 2 decides (state encoding, questions, when to call)
 - [[seed-behaviors-and-traces]]: the smallest behavior set for the first milestone, plus the span/trace schema and ingest into Judgment
 
 ### Architecture
 - [[overview]]: what we build vs. what the agent discovers, the discovery loop, fast and slow thinking, goals and time as one hierarchy, open questions
 - [[layers]]: System 2 / Jev / behaviors / guards; the one-right-answer vs. judgment vs. plan rule; concurrent channels; System 2 sets when Jev decides; first milestone: a local client that takes instructions
+- [[system-1]]: System 1 is a program System 2 writes (manifest + modules); the runtime owns channels, `decide()`, bounds, tracing and a pinned fallback; the default program; how programs are compared
 - [[behaviors-and-guards]]: the deterministic layer: the behavior contract, layered behaviors, safety guards, behaviors System 2 writes at runtime
 - [[learning]]: decision: context only, no training. Live and cross-episode loops, per-minute traces linked by lineage, agentic search over past traces
 
@@ -36,6 +37,7 @@ We're in the research and architecture stage: no code yet. Plans, decisions and 
 - [[gitm]]: GITM's LLM goal tree + structured actions + knowledge + memory, the ablation showing what carried it, and what transfers to Jeeve
 - [[perception]]: how bots see Minecraft (data, not pixels), where the view gets narrow, encoding time
 - [[decision-models]]: Jev, Microsoft-Decision-1 and local small LLMs as fast decision-makers
+- [[jev-measurements]]: our own Jev measurements: ~160–300 ms, questions nearly free, position bias on close calls, vendor limits
 - [[spatial-models]]: generative world models vs. fast spatial policies, the AlphaStar entity-token recipe, and three ways to give System 1 spatial context
 - [[fast-slow-agents]]: prior art for fast/slow agents in Minecraft and robotics, and AlphaZero-style expert iteration
 - [[realtime-landscape]]: fast, smart, general: pick two. Scripted bots vs. pixel policies vs. LLM agents, why nobody has combined them, and the gap Jeeve targets
