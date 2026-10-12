@@ -19,7 +19,7 @@ import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type ModuleSource, type
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
 import { makeSystem2, type Decision, type RequestDraft } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
-import { blockAt, observe, reachable, scan, type Pos } from './world.ts'
+import { blockAt, observe, reachable, scan, seenMap, type Pos } from './world.ts'
 
 export type AgentOptions = {
   host?: string
@@ -198,9 +198,14 @@ export async function startAgent (opts: AgentOptions) {
       const p = check.progress!(bot)
       return glob(check.spec.match ?? '*').test(block) ? p.want - p.have : 0
     }
-    // An authored check (e.g. "no leaves left") has no count: offer what's in view (the encoder's block radius).
+    // An authored check (e.g. "no leaves left") has no count: offer what's in view (the encoder's block radius), and
+    // only the block types its code names ("oak_leaves", "*_log"). Otherwise Jev was offered the dirt a pillar left.
     // A wider count sends collect after far blocks and away from the goal's place.
-    if (check?.spec.module === 'authored') return bot.findBlocks({ matching: bot.registry.blocksByName[block]?.id, maxDistance: program.encoder.params.block_radius, count: 64 }).length
+    if (check?.spec.module === 'authored') {
+      const code = lookup(check.spec.name ?? '')?.code ?? ''
+      if (!code.includes(block) && !code.includes(`_${block.split('_').at(-1)}`)) return 0
+      return bot.findBlocks({ matching: bot.registry.blocksByName[block]?.id, maxDistance: program.encoder.params.block_radius, count: 64 }).length
+    }
     if (check) return 0
     const want = Number(directive.text.match(/\d+/)?.[0] ?? 1)
     return Math.max(0, want - ((inventoryCounts(bot)[block] ?? 0) - (directive.inventory[block] ?? 0)))
@@ -352,6 +357,7 @@ export async function startAgent (opts: AgentOptions) {
       goals: goals.status(bot),
       program: { version: version(program), guidance: program.guidance, allowed_behaviors: program.allowed_behaviors, heartbeat_ms: program.triggers.heartbeat_ms },
       fast_model_view: lastView,
+      seen_map: seenMap(bot), // everything the bot has seen around it, so the scene doesn't hinge on this turn's scans
       modules: modules.list(),
       requests: requests.map(r => ({ id: r.id, goal: r.goal.id, need: r.need, status: windowAsk?.req === r ? 'waiting_for_trial_window' : trial?.ask?.req === r ? 'trialling' : r.status })),
       recent_events: recentFor(30_000),

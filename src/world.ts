@@ -28,11 +28,15 @@ export function scan (bot: Bot, q: { match: string, radius?: number }) {
   const found = ids.length ? bot.findBlocks({ matching: ids, maxDistance: radius, count: SCAN_LIMITS.blocks }) : []
   const truncated = found.length >= SCAN_LIMITS.blocks
   const blocks = found.map(p => bot.blockAt(p)!).filter(b => b && bot.canSeeBlock(b))
+  return { match: q.match, radius, total: blocks.length, truncated, clusters: clusters(bot, blocks).slice(0, SCAN_LIMITS.clusters) }
+}
 
+// 26-connected clusters of blocks, nearest first: exact counts, names, bounds, heights relative to the feet.
+function clusters (bot: Bot, blocks: Array<{ name: string, position: Vec3 }>) {
   const key = (p: Vec3) => `${p.x},${p.y},${p.z}`
   const left = new Map(blocks.map(b => [key(b.position), b]))
   const me = feet(bot)
-  const clusters = []
+  const out = []
   for (const b of blocks) {
     if (!left.has(key(b.position))) continue
     left.delete(key(b.position))
@@ -49,7 +53,7 @@ export function scan (bot: Bot, q: { match: string, radius?: number }) {
     const names: Record<string, number> = {}
     for (const m of members) names[m.name] = (names[m.name] ?? 0) + 1
     const axis = (i: number, f: (...n: number[]) => number) => f(...ps.map(p => p[i]))
-    clusters.push({
+    out.push({
       count: members.length,
       names,
       nearest: ps[0],
@@ -61,8 +65,7 @@ export function scan (bot: Bot, q: { match: string, radius?: number }) {
       positions: ps.slice(0, SCAN_LIMITS.positions)
     })
   }
-  clusters.sort((a, c) => a.dist - c.dist)
-  return { match: q.match, radius, total: blocks.length, truncated, clusters: clusters.slice(0, SCAN_LIMITS.clusters) }
+  return out.sort((a, c) => a.dist - c.dist)
 }
 
 // Can the guarded pathfinder get to where the block is within arm's reach (the goal collectblock uses),
@@ -142,6 +145,16 @@ export function seenTypes (bot: Bot, radius: number): Map<string, Pos[]> {
   const m1 = (a: Pos) => Math.abs(a[0] - me.x) + Math.abs(a[1] - me.y) + Math.abs(a[2] - me.z)
   for (const list of out.values()) list.sort((a, c) => m1(a) - m1(c))
   return out
+}
+
+// The map System 2 gets with every call: what the bot has seen within radius, as clusters (a tree is one cluster of
+// logs and leaves), terrain left out (types with more than MAP_LIMITS.common there). Positions are dropped; bounds,
+// counts and heights stay.
+export const MAP_LIMITS = { radius: 32, common: 512, clusters: 12 }
+export function seenMap (bot: Bot, radius = MAP_LIMITS.radius) {
+  const blocks = [...seenTypes(bot, radius).entries()].filter(([, ps]) => ps.length <= MAP_LIMITS.common)
+    .flatMap(([name, ps]) => ps.map(p => ({ name, position: new Vec3(p[0], p[1], p[2]) })))
+  return clusters(bot, blocks).slice(0, MAP_LIMITS.clusters).map(({ positions: _, ...c }) => c)
 }
 
 // Notable blocks: remembered types that are rare in the cube around the bot (≤ rareMax), so terrain drops out

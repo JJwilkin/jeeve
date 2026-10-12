@@ -135,7 +135,7 @@ const PERCEPTION: Anthropic.Tool[] = [
   }
 ]
 
-const PERCEIVE = `You can look at the world with scan and reachable. Your context only has a coarse summary of nearby blocks (fast_model_view.blocks), so look before you set a count or a check that depends on blocks, or before you judge whether something can be reached. Each tool call costs a turn of a few seconds, so make every look you need in the same turn (several tool calls at once), then decide.`
+const PERCEIVE = `You can look at the world with scan and reachable. Your context has seen_map: everything the bot has seen within 32 blocks, as clusters (a tree is one cluster of logs and leaves) with exact counts, names, bounds and heights; terrain is left out. It's what the bot remembers seeing, line of sight only, so it can be out of date for places it hasn't looked at lately. Use it to keep the whole scene in mind (which trees are left, what's half done). Look with scan before you set a count or a check that depends on blocks it doesn't show, or before you judge whether something can be reached. Each tool call costs a turn of a few seconds, so make every look you need in the same turn (several tool calls at once), then decide.`
 
 // Its own tool, not a submit_decision field: one more strict object makes the grammar too large for the API.
 const REQUEST_CAPABILITY: Anthropic.Tool = {
@@ -170,7 +170,7 @@ You are the slow planner. A fast decision model (System 1, "Jev") picks a behavi
 Behaviors System 1 can choose from:
 ${Object.entries(BEHAVIORS).map(([n, b]) => `- ${n} (${b.channels.join('+')}): ${b.describe('<target>')}`).join('\n')}
 
-Success checks are code you parameterize: near_entity(player, radius), inventory_delta(match glob, count), entity_alive(player). Under an inventory_delta check, the fast model is offered collect only for block types the check still needs, with the count still missing, so for a goal that gathers blocks use inventory_delta with the exact count. Under an authored check, it is offered the block types in view, with how many are within 8 blocks. Code evaluates them every tick, marks a goal completed when its done_when passes, and tells the player. You never need to say "done".
+Success checks are code you parameterize: near_entity(player, radius), inventory_delta(match glob, count), entity_alive(player). Under an inventory_delta check, the fast model is offered collect only for block types the check still needs, with the count still missing, so for a goal that gathers blocks use inventory_delta with the exact count. Under an authored check, it is offered the block types in view that the check's code names (e.g. "oak_leaves", "*_log"), with how many are within 8 blocks. Code evaluates them every tick, marks a goal completed when its done_when passes, and tells the player. You never need to say "done".
 
 The fast model only sees targets near the bot. If a goal happens at a place (a tree to break, a spot to guard or build at), set goal.place to a block there, e.g. one scan found. The fast model is told either "you are at the goal's place" (within 3 blocks) or "you are not at the goal's place yet", and in the second case it is offered navigate to the place, so it can walk back after wandering off or out of view. Write guidance about the place in those words, not in blocks or distances (e.g. "if you are not at the goal's place yet, walk back to it"): it is weak with numbers, and stood still short of the place when told "within ~3 blocks" or "close". Setting goal again replaces the place too, so repeat it.
 
