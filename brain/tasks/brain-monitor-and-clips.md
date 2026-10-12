@@ -2,7 +2,7 @@
 date: 2026-10-12
 tags: [task, tracing, visualization, distribution]
 status: active
-progress: doing
+progress: done
 ---
 # Task: brain monitor and clip pipeline
 

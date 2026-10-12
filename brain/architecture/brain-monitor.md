@@ -63,6 +63,11 @@ Everything visual lives in `viz/`, its own package, so the agent's runtime takes
 
 `--no-record` skips OBS and renders the panels over a "no footage" box. In the render, the footage is cut into the same segments as the speed-up map: each segment is an `OffthreadVideo` with its own `trimBefore` and `playbackRate`, so the game and the panels stay frame-synced through every speed-up.
 
+## First clips (2026-10-12)
+- **Without footage** (`--no-record`): `clips/canopy-2026-10-12T05-13-52-548Z/`. 2B's first trial got `stuck`, its second passed. The 210 s run renders to 104 s.
+- **Recorded from Joshua's client** (OBS 32.2, window capture, `JEEVE_CAMERA=JoshBGosh321`): `clips/canopy-2026-10-12T05-33-04-716Z/`. 2B's `fell_whole_tree@1` failed its first trial (`none_found`) and passed its second, and the goal completed after 168 s. The panels and footage stay in sync through the speed-ups; the 173 s run renders to 86 s.
+- **Lesson: OBS window capture goes black when the window is left.** About 20 s of that footage is black, from switching apps mid-run. For takes: Minecraft fullscreen (F11) with an OBS **Display Capture** source (no window title bar or letterbox), F1 to hide the HUD, and don't switch away until the script says the goal closed. Recordings land in `~/Movies` and are remuxed into the clip directory.
+
 ## Open questions
 - **The spectator camera may be visible to Jeeve.** Mineflayer can list a spectating player as an entity, so Jev's state may mention it. It hasn't mattered for the canopy. If it does, the encoder could drop spectators.
 - **More scenes.** Only the canopy is in `scripts/scenes.ts`. The chest, the craft and the slime fight move there when a clip needs them.
