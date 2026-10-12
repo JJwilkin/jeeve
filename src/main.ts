@@ -212,10 +212,14 @@ export async function startAgent (opts: AgentOptions) {
 
   // ---- channels: behavior runs become behavior spans; events wake Jev or escalate ----
   const channels = new Channels(bot, {
-    start: slot => recorder.startBehavior(slot.runId, slot.behavior, {
-      'jeeve.behavior.params': slot.key, 'jeeve.behavior.channels': slot.channels.join('+'),
-      'jeeve.behavior.decided_by': slot.decidedBy, 'jeeve.behavior.version': slot.version
-    }),
+    start: slot => {
+      const used = modules.get(slot.behavior) // an authored behavior's run is a use, for curating the library
+      if (used) used.usedAt = Date.now()
+      recorder.startBehavior(slot.runId, slot.behavior, {
+        'jeeve.behavior.params': slot.key, 'jeeve.behavior.channels': slot.channels.join('+'),
+        'jeeve.behavior.decided_by': slot.decidedBy, 'jeeve.behavior.version': slot.version
+      })
+    },
     end: (slot, reason) => {
       recorder.endBehavior(slot.runId, reason, slot.run.detail?.())
       if ((reason === 'none_found' || reason === 'stuck') && !slot.pinned) failedAt.set(optionTarget(slot.key), Date.now())
@@ -909,6 +913,7 @@ export async function startAgent (opts: AgentOptions) {
     if (heartbeat) clearInterval(heartbeat)
     api?.close()
     channels.stop(CHANNELS, 'episode_end')
+    modules.save() // with when each module was last used
     await recorder.shutdown()
     bot.quit()
   }

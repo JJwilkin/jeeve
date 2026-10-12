@@ -18,12 +18,26 @@ if (flags.includes('--fresh') && existsSync(SHARED)) rmSync(SHARED)
 const portLibrary = (port: number) => `traces/clip-module-library-${port}.json`
 type Stored = { kind: string, name: string, version: number, origin?: { created_at?: string } }
 const modulesIn = (file: string): Stored[] => existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).modules : []
-// The shared library keeps the newest version of each module by name.
-function merge (files: string[]) {
-  const by = new Map(modulesIn(SHARED).map(m => [`${m.kind}:${m.name}`, m]))
-  for (const f of files) for (const m of modulesIn(f)) { const k = `${m.kind}:${m.name}`; const old = by.get(k); if (!old || (m.origin?.created_at ?? '') > (old.origin?.created_at ?? '')) by.set(k, m) }
+// The shared library keeps the newest version of each module by name, and is curated: a check or watch module unused
+// for RETIRE_AFTER rounds in a row is retired (they pile up tied to one layout: birch_tree_43_cleared). Skills stay.
+const RETIRE_AFTER = 2
+type Shared = Stored & { used_at?: string, idle_rounds?: number }
+function merge (files: string[], roundStart: string) {
+  const by = new Map<string, Shared>(modulesIn(SHARED).map(m => [`${m.kind}:${m.name}`, m]))
+  const used = new Set<string>()
+  for (const f of files) for (const m of modulesIn(f) as Shared[]) {
+    const k = `${m.kind}:${m.name}`
+    if ((m.used_at ?? '') >= roundStart) used.add(k)
+    const old = by.get(k)
+    if (!old || (m.origin?.created_at ?? '') > (old.origin?.created_at ?? '')) by.set(k, { ...m, idle_rounds: old?.idle_rounds })
+  }
+  const retired: string[] = []
+  for (const [k, m] of by) {
+    m.idle_rounds = used.has(k) ? 0 : (m.idle_rounds ?? 0) + 1
+    if (m.kind !== 'behavior' && m.idle_rounds >= RETIRE_AFTER) { by.delete(k); retired.push(m.name) }
+  }
   writeFileSync(SHARED, JSON.stringify({ modules: [...by.values()] }, null, 2) + '\n')
-  return by.size
+  return `${by.size} modules${retired.length ? `, retired ${retired.join(', ')}` : ''}`
 }
 const BASE_PORT = 25571 // 25570 is for runs Joshua watches
 mkdirSync('bench/logs', { recursive: true })
@@ -49,8 +63,9 @@ const run = (scenario: string, port: number, round: number) => new Promise<void>
 const before = readFileSync('bench/results.jsonl', { flag: 'a+' }).toString().split('\n').filter(Boolean).length
 for (let r = 1; r <= rounds; r++) {
   console.log(`[bench] round ${r}/${rounds}: ${scenarios.join(', ')}`)
+  const roundStart = new Date().toISOString()
   await Promise.all(scenarios.map((s, i) => run(s, BASE_PORT + i, r)))
-  console.log(`[bench] round ${r}: the shared library has ${merge(scenarios.map((_, i) => portLibrary(BASE_PORT + i)))} modules`)
+  console.log(`[bench] round ${r}: the shared library has ${merge(scenarios.map((_, i) => portLibrary(BASE_PORT + i)), roundStart)}`)
 }
 const rows = readFileSync('bench/results.jsonl', 'utf8').split('\n').filter(Boolean).slice(before).map(l => JSON.parse(l))
 for (const s of scenarios) {

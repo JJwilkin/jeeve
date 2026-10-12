@@ -242,6 +242,24 @@
         "errors": 0,
         "maxMs": 0.168
       }
+    },
+    {
+      "kind": "check",
+      "name": "fourth_tree_pending",
+      "description": "Placeholder: never passes. Keeps the 'break 4 trees' goal open until the orchestrator finds and plans the fourth tree (then replaces done_when).",
+      "code": "(s) => false",
+      "version": 1,
+      "origin": {
+        "session": "jeeve-2026-10-12T09-40-59-824Z",
+        "goal": "g-5: now break the other 4 trees the same way, leaves included",
+        "created_at": "2026-10-12T09:43:32.494Z"
+      },
+      "trial": {
+        "states": 31,
+        "trues": 0,
+        "errors": 0,
+        "maxMs": 0.09
+      }
     }
   ]
 }

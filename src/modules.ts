@@ -17,9 +17,10 @@ export type Snapshot = Record<string, unknown>
 export type Stats = { calls: number, errors: number, totalMs: number, maxMs: number, lastError?: string }
 export type Origin = { session: string, goal: string, created_at: string }
 // run is the predicate; a behavior module never runs as one (it starts through src/behaviors.ts).
-export type Module = ModuleSource & { version: number, id: string, run: (s: Snapshot) => boolean, stats: Stats, disabled?: string, origin?: Origin, trial?: Trial | BehaviorTrial }
+// usedAt: when it last ran (a check evaluated, a behavior started), for curating the library across episodes.
+export type Module = ModuleSource & { version: number, id: string, run: (s: Snapshot) => boolean, stats: Stats, disabled?: string, origin?: Origin, trial?: Trial | BehaviorTrial, usedAt?: number }
 // One library entry: the latest version of a module, as written to the library file.
-type Stored = ModuleSource & { version: number, origin?: Origin, trial?: Trial | BehaviorTrial, disabled?: string }
+type Stored = ModuleSource & { version: number, origin?: Origin, trial?: Trial | BehaviorTrial, disabled?: string, used_at?: string }
 export type Trial = { states: number, trues: number, errors: number, maxMs: number, error?: string }
 export type BehaviorTrial = { target: unknown, end: string, ms: number, error?: string }
 
@@ -65,6 +66,7 @@ export function compileModule (src: ModuleSource, version: number, onDisable: (m
         return false
       } finally {
         const ms = performance.now() - t0
+        m.usedAt = Date.now()
         stats.calls++
         stats.totalMs += ms
         stats.maxMs = Math.max(stats.maxMs, ms)
@@ -95,7 +97,7 @@ export class ModuleRegistry {
       if (s.disabled) { skipped.push(`${s.name}@${s.version}: disabled (${s.disabled})`); continue }
       try {
         const m = s.kind === 'behavior' ? behaviorModule(s, s.version) : compileModule(s, s.version, this.onDisable)
-        Object.assign(m, { origin: s.origin, trial: s.trial })
+        Object.assign(m, { origin: s.origin, trial: s.trial, usedAt: s.used_at ? Date.parse(s.used_at) : undefined })
         this.modules.set(s.name, m)
         loaded.push(m.id)
       } catch (err) { skipped.push(`${s.name}@${s.version}: ${String(err)}`) }
@@ -108,7 +110,8 @@ export class ModuleRegistry {
     const modules: Stored[] = [...this.modules.values()].sort((a, b) => a.name.localeCompare(b.name)).map(m => ({
       kind: m.kind, name: m.name, description: m.description, code: m.code, version: m.version,
       ...(m.kind === 'behavior' ? { channels: m.channels, targets: m.targets, timeout_s: m.timeout_s } : {}),
-      ...(m.origin ? { origin: m.origin } : {}), ...(m.trial ? { trial: m.trial } : {}), ...(m.disabled ? { disabled: m.disabled } : {})
+      ...(m.origin ? { origin: m.origin } : {}), ...(m.trial ? { trial: m.trial } : {}), ...(m.disabled ? { disabled: m.disabled } : {}),
+      ...(m.usedAt ? { used_at: new Date(m.usedAt).toISOString() } : {})
     }))
     writeFileSync(`${this.file}.tmp`, JSON.stringify({ modules }, null, 2) + '\n')
     renameSync(`${this.file}.tmp`, this.file)
