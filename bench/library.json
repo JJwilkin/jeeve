@@ -152,6 +152,96 @@
         "errors": 0,
         "maxMs": 0.156
       }
+    },
+    {
+      "kind": "check",
+      "name": "birch_tree_26_cleared",
+      "description": "No birch_log/birch_leaves seen within 3 blocks horizontally of the trunk column x=26,z=-11 (y -61..-47), with the bot within 8 blocks of the trunk base",
+      "code": "(s) => { const tx=26,tz=-11,by=-60; if (dist(s.self.pos,[tx,by,tz])>8) return false; for (const n of [\"birch_log\",\"birch_leaves\"]) { if ((s.crowded||[]).includes(n)) return false; for (const p of (s.blocks[n]||[])) { if (Math.abs(p[0]-tx)<=3 && Math.abs(p[2]-tz)<=3 && p[1]>=-61 && p[1]<=-47) return false; } } return true; }",
+      "version": 1,
+      "origin": {
+        "session": "jeeve-2026-10-12T09-12-54-247Z",
+        "goal": "g-2: now break the other 3 trees the same way, leaves included",
+        "created_at": "2026-10-12T09:14:20.281Z"
+      },
+      "trial": {
+        "states": 31,
+        "trues": 0,
+        "errors": 0,
+        "maxMs": 0.278
+      }
+    },
+    {
+      "kind": "check",
+      "name": "birch_tree_30_cleared",
+      "description": "No birch_log/birch_leaves seen within 3 blocks horizontally of the trunk column x=30,z=-5 (y -61..-47), with the bot within 8 blocks of the trunk base",
+      "code": "(s) => { const base=[30,-60,-5]; if (dist(s.self.pos, base) > 8) return false; const cr = s.crowded || []; if (cr.indexOf('birch_log') >= 0 || cr.indexOf('birch_leaves') >= 0) return false; const names=['birch_log','birch_leaves']; for (let i=0;i<names.length;i++) { const arr = (s.blocks && s.blocks[names[i]]) || []; for (let j=0;j<arr.length;j++) { const p=arr[j]; const dx=p[0]-30, dz=p[2]+5; if (dx*dx+dz*dz<=9 && p[1]>=-61 && p[1]<=-47) return false; } } return true; }",
+      "version": 1,
+      "origin": {
+        "session": "jeeve-2026-10-12T09-12-54-247Z",
+        "goal": "g-1: break the tree closest to you, leaves included. The leaves won't decay on their own",
+        "created_at": "2026-10-12T09:13:20.999Z"
+      },
+      "trial": {
+        "states": 27,
+        "trues": 2,
+        "errors": 0,
+        "maxMs": 0.166
+      }
+    },
+    {
+      "kind": "check",
+      "name": "birch_tree_44_cleared",
+      "description": "No birch_log/birch_leaves seen within 3 blocks horizontally of the trunk column x=44,z=-3 (y -61..-47), with the bot within 8 blocks of the trunk base",
+      "code": "(s) => { const tx=44,tz=-3,by=-60; if (dist(s.self.pos,[tx,by,tz])>8) return false; for (const n of [\"birch_log\",\"birch_leaves\"]) { if ((s.crowded||[]).includes(n)) return false; for (const p of (s.blocks[n]||[])) { if (Math.abs(p[0]-tx)<=3 && Math.abs(p[2]-tz)<=3 && p[1]>=-61 && p[1]<=-47) return false; } } return true; }",
+      "version": 1,
+      "origin": {
+        "session": "jeeve-2026-10-12T09-12-54-247Z",
+        "goal": "g-2: now break the other 3 trees the same way, leaves included",
+        "created_at": "2026-10-12T09:14:20.289Z"
+      },
+      "trial": {
+        "states": 31,
+        "trues": 0,
+        "errors": 0,
+        "maxMs": 0.147
+      }
+    },
+    {
+      "kind": "check",
+      "name": "oak_tree_36_cleared",
+      "description": "No oak_log/oak_leaves seen within 3 blocks horizontally of the trunk column x=36,z=-14 (y -61..-47), with the bot within 8 blocks of the trunk base",
+      "code": "(s) => { const tx=36,tz=-14,by=-60; if (dist(s.self.pos,[tx,by,tz])>8) return false; for (const n of [\"oak_log\",\"oak_leaves\"]) { if ((s.crowded||[]).includes(n)) return false; for (const p of (s.blocks[n]||[])) { if (Math.abs(p[0]-tx)<=3 && Math.abs(p[2]-tz)<=3 && p[1]>=-61 && p[1]<=-47) return false; } } return true; }",
+      "version": 1,
+      "origin": {
+        "session": "jeeve-2026-10-12T09-12-54-247Z",
+        "goal": "g-2: now break the other 3 trees the same way, leaves included",
+        "created_at": "2026-10-12T09:14:20.285Z"
+      },
+      "trial": {
+        "states": 31,
+        "trues": 0,
+        "errors": 0,
+        "maxMs": 0.14
+      }
+    },
+    {
+      "kind": "watch",
+      "name": "hostile_near_josh_or_bot",
+      "description": "A hostile mob is within 10 blocks of Josh or of the bot",
+      "code": "(s) => { const H = ['zombie','zombie_villager','husk','drowned','skeleton','stray','wither_skeleton','spider','cave_spider','creeper','witch','pillager','vindicator','evoker','ravager','vex','slime','magma_cube','phantom','silverfish','endermite','blaze','ghast','hoglin','zoglin','piglin_brute','guardian','elder_guardian','warden','bogged','breeze']; const josh = s.entities.find(e => e.username === 'Josh'); for (const e of s.entities) { if (e.type === 'player') continue; if (!(e.type === 'hostile' || H.includes(e.name))) continue; if (dist(e.pos, s.self.pos) <= 10) return true; if (josh && dist(e.pos, josh.pos) <= 10) return true; } return false; }",
+      "version": 1,
+      "origin": {
+        "session": "jeeve-2026-10-12T09-12-54-474Z",
+        "goal": "g-1: follow me and keep me safe",
+        "created_at": "2026-10-12T09:13:14.467Z"
+      },
+      "trial": {
+        "states": 29,
+        "trues": 17,
+        "errors": 0,
+        "maxMs": 0.168
+      }
     }
   ]
 }

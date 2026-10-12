@@ -49,6 +49,8 @@ const CONFIRM_FRESH_MS = 3_000
 const PLACE_RADIUS = 3
 // While a plan runs, each step is reviewed by 2A this often (review_due), with the seen map and the plan's progress.
 const STEP_REVIEW_MS = 30_000
+// A goal with nothing running on the body this long escalates as idle (forage: 520 s idle with 2A never called).
+const IDLE_MS = 30_000
 // Trace rows stay small: long outputs (a scan, an event's data) are cut.
 const short = (v: unknown, max = 500) => { const s = JSON.stringify(v); return s && s.length > max ? s.slice(0, max) + '…' : v }
 
@@ -133,6 +135,8 @@ export async function startAgent (opts: AgentOptions) {
     const step = plan.steps[plan.next]
     if (!step) {
       if (!root.done_when && root.status === 'active') { goals.close(root, 'completed', `all ${plan.steps.length} steps done`); completed(root) }
+      // Every step done but the goal isn't met (a forage plan's trees gave 10 of 16 logs): 2A plans more, or searches.
+      else if (root.status === 'active') escalate('plan_done', { steps: plan.steps.length, progress: root.done_when?.progress?.(bot) ?? null }, root)
       return
     }
     plan.next++
@@ -831,6 +835,7 @@ export async function startAgent (opts: AgentOptions) {
 
     let hostileNear = false
     let ticks = 0
+    let lastBusy = Date.now()
     const watching = new Map<string, boolean>()
     bot.on('physicsTick', () => {
       const near = Object.values(bot.entities).some(e => (e.type === 'hostile' || attacking(attackers, e.id)) && e.position.distanceTo(bot.entity.position) <= program.triggers.hostile_within)
@@ -838,6 +843,9 @@ export async function startAgent (opts: AgentOptions) {
       hostileNear = near
       if (++ticks % 5 !== 0) return
       observe(bot, ticks % 40 === 0) // the seen memory first, so checks judge what's in sight now; a far look every 2 s
+      if (CHANNELS.some(c => channels.slots[c]?.status === 'running') || system2Span) lastBusy = Date.now()
+      const idleLeaf = goals.leaf()
+      if (idleLeaf && Date.now() - lastBusy > IDLE_MS) { lastBusy = Date.now(); escalate('idle', { idle_s: IDLE_MS / 1000 }, idleLeaf) }
       goals.tick(bot) // checks every 250 ms
       tickTrialWindow()
       // Watch modules wake Jev when they turn true (rising edge only).

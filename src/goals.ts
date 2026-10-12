@@ -8,7 +8,7 @@ import { placedStanding, seenTypes, type Pos } from './world.ts'
 
 // A check is a generic predicate over raw state; System 2 picks the module and fills in the values.
 export type CheckSpec = {
-  module: 'near_entity' | 'inventory_delta' | 'entity_alive' | 'cleared' | 'authored'
+  module: 'near_entity' | 'inventory_delta' | 'entity_alive' | 'cleared' | 'at_place' | 'authored'
   name: string | null // authored: a check module System 2 registered (src/modules.ts)
   player: string | null // near_entity, entity_alive
   radius: number | null // near_entity; cleared: blocks around the goal's place
@@ -70,6 +70,14 @@ export function compile (spec: CheckSpec, goal: Pick<Goal, 'inventory' | 'place'
         const start = count(goal.inventory)
         const have = (bot: Bot) => Math.max(0, count(inventoryCounts(bot)) - start)
         return { desc: `${want} more ${spec.match}`, test: (bot: Bot) => have(bot) >= want, progress: (bot: Bot) => ({ have: Math.min(have(bot), want), want }) }
+      }
+      // The bot is within radius of the goal's place (an exploration step: walking there shows what's around it).
+      case 'at_place': {
+        const r = spec.radius ?? 3
+        return {
+          desc: `within ${r} of the goal's place`,
+          test: (bot: Bot) => { const at = goal.place; const me = bot.entity.position; return !!at && Math.hypot(me.x - at[0] - 0.5, me.z - at[2] - 0.5) <= r }
+        }
       }
       // Nothing matching is left near the goal's place, as far as the bot has seen (src/world.ts seen memory), judged
       // from close by. The goal's place is read when the check runs, so it can be set after the check.
