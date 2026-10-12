@@ -3,7 +3,7 @@
 // a Minecraft client. Pure, so the monitor and Remotion share it.
 
 export type WorldRow =
-  | { t: number, kind: 'blocks', min: number[], max: number[], palette: string[], cells: number[], camera: { at: number[], facing: number[] } }
+  | { t: number, kind: 'blocks', min: number[], max: number[], palette: string[], cells: number[], camera: { at: number[], facing: number[], follow?: boolean } }
   | { t: number, kind: 'block', pos: number[], name: string }
   | { t: number, kind: 'entities', list: Entity[] }
 export type Entity = { id: number, name: string, username?: string, pos: number[], yaw: number, pitch: number }
