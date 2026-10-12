@@ -221,7 +221,7 @@ export class Channels {
 // fails when Mineflayer has a Bot method that no entry covers and NOT_MAPPED doesn't explain.
 export type ApiHost = {
   blockAt: (bot: Bot, pos: [number, number, number]) => string | null
-  scan: (bot: Bot, opts: { match: string, radius?: number, los?: boolean, max?: number }) => unknown
+  scan: (bot: Bot, opts: { match: string, radius?: number, max?: number }) => unknown
   reachable: (bot: Bot, pos: [number, number, number]) => Promise<unknown>
   allowed: string[] // players authored code may whisper to: the instruction allowlist
   onCall?: (row: ApiCall) => void // each action as it starts and as it settles (a trace row, for the monitor)
@@ -350,7 +350,7 @@ const READS: Record<string, Entry> = {
 
 const ACTIONS: Record<string, Entry> = {
   // Async although they're reads: host time inside a sync call would count against the realm's 20 ms slice.
-  scan: { covers: ['findBlocks', 'canSeeBlock'], doc: 'scan({ match: glob, radius, los }) → { total, clusters: [{ count, names, nearest, rel, y_rel, min, max, positions }] }', run: async ({ bot, host }, opts) => host.scan(bot, opts) },
+  scan: { covers: ['findBlocks', 'canSeeBlock'], doc: 'scan({ match: glob, radius }) → (blocks in line of sight only) { total, clusters: [{ count, names, nearest, rel, y_rel, min, max, positions }] }', run: async ({ bot, host }, opts) => host.scan(bot, opts) },
   reachable: {
     covers: [], doc: 'reachable(x, y, z) → { reachable: boolean, status }: can the pathfinder get within reach of that block without building; status "timeout" means it gave up after 1 s, not that it\'s unreachable',
     run: async ({ bot, host }, ...a) => host.reachable(bot, xyz(a))

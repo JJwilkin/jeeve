@@ -116,13 +116,12 @@ const TOOLS: Anthropic.Tool[] = [
 const PERCEPTION: Anthropic.Tool[] = [
   {
     name: 'scan',
-    description: 'Find blocks whose name matches a glob (e.g. "*_log", "oak_leaves", "*_ore") within a radius, grouped into connected clusters, nearest first. Each cluster gives its exact count, block names, nearest block, bounds (absolute [x, y, z]), its position relative to your feet (rel [dx, dy, dz]) and its height range relative to your feet (y_rel [min, max]). Use it for how many, where and how high.',
+    description: 'Find blocks whose name matches a glob (e.g. "*_log", "oak_leaves", "*_ore") within a radius, grouped into connected clusters, nearest first. Each cluster gives its exact count, block names, nearest block, bounds (absolute [x, y, z]), its position relative to your feet (rel [dx, dy, dz]) and its height range relative to your feet (y_rel [min, max]). Use it for how many, where and how high. It counts only blocks in your line of sight: blocks hidden behind others (inside a canopy, behind a trunk) are missing, so a count is a lower bound.',
     input_schema: {
       type: 'object', additionalProperties: false, required: ['match'],
       properties: {
         match: { type: 'string' },
-        radius: { type: 'integer', description: 'Blocks, 1-32. Default 16.' },
-        los: { type: 'boolean', description: 'Only blocks in your line of sight. Default false: you see through walls.' }
+        radius: { type: 'integer', description: 'Blocks, 1-32. Default 16.' }
       }
     }
   },
@@ -194,7 +193,7 @@ jeeve.program.because, jeeve.decide.trigger, jeeve.decide.changed, jeeve.decide.
 jeeve.behavior.name, jeeve.behavior.params, jeeve.behavior.run_id, jeeve.behavior.end_reason (done, stuck, none_found, target_dead,
 target_lost, vetoed, replaced, stopped, cut, goal_closed, place_changed, death; authored behaviors also error, timeout), jeeve.behavior.decided_by
 (a decide span, or builder:<request id> for a trial), jeeve.behavior.version, jeeve.behavior.detail (authored: error and last actions),
-jeeve.module.id, jeeve.module.kind, jeeve.module.activation (ok, failed_trial, trial_started, loaded, disabled), jeeve.system2.trigger, jeeve.perceive.tool, jeeve.perceive.query, jeeve.perceive.mode (xray, los).
+jeeve.module.id, jeeve.module.kind, jeeve.module.activation (ok, failed_trial, trial_started, loaded, disabled), jeeve.system2.trigger, jeeve.perceive.tool, jeeve.perceive.query, jeeve.perceive.mode (los; xray in traces before 2026-10-12).
 Window events (events_json on window spans): death, damage, owner_damage, vetoed, chat.`
 
 export type System2Result = { decision: Decision | null, model: string, usage: Anthropic.Beta.BetaUsage | null, turns: number, sql: string[], refusal: boolean }

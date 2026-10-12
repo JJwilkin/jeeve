@@ -92,8 +92,8 @@ export async function build (req: CapabilityRequest, brief: Record<string, unkno
         return await inflight
       })
     }),
-    scan: perceive('scan', 'Find blocks matching a glob (e.g. "*_log", "oak_leaves") within a radius (1-32, default 16), grouped into connected clusters with exact counts, bounds (absolute [x, y, z]), position relative to the feet (rel) and height range (y_rel). los: only blocks in line of sight.',
-      { match: { type: 'string' }, radius: { type: 'integer' }, los: { type: 'boolean' } }, ['match']),
+    scan: perceive('scan', 'Find blocks matching a glob (e.g. "*_log", "oak_leaves") within a radius (1-32, default 16), grouped into connected clusters with exact counts, bounds (absolute [x, y, z]), position relative to the feet (rel) and height range (y_rel). Only blocks in line of sight: hidden ones (behind a trunk, inside a canopy) aren\'t counted.',
+      { match: { type: 'string' }, radius: { type: 'integer' } }, ['match']),
     reachable: perceive('reachable', 'Can the bot walk to within arm\'s reach of this block with the pathfinder, without placing blocks? Absolute position.',
       { position: { type: 'array', items: { type: 'integer' } } }, ['position'])
   }

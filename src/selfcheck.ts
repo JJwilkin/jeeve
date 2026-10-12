@@ -308,13 +308,10 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
       .filter(p => p.distanceTo(new Vec3(0, 0, 0)) <= maxDistance),
     canSeeBlock: (b: { position: Vec3 }) => b.position.x > 0
   }
+  // Line of sight only: the lone log at x = -6 is hidden (this fake bot sees x > 0).
   const logs = scan(bot, { match: '*_log', radius: 16 })
-  assert.deepEqual(logs.clusters.map(c => [c.count, c.nearest, c.y_rel, c.min, c.max]), [
-    [5, [3, 0, 0], [0, 4], [3, 0, 0], [3, 4, 0]],
-    [1, [-6, 0, 0], [0, 0], [-6, 0, 0], [-6, 0, 0]]
-  ])
-  assert.equal(logs.total, 6)
-  assert.deepEqual(scan(bot, { match: '*_log', radius: 16, los: true }).clusters.map(c => c.count), [5]) // line of sight hides one
+  assert.deepEqual(logs.clusters.map(c => [c.count, c.nearest, c.y_rel, c.min, c.max]), [[5, [3, 0, 0], [0, 4], [3, 0, 0], [3, 4, 0]]])
+  assert.equal(logs.total, 5)
   const leaves = scan(bot, { match: 'oak_leaves' })
   assert.deepEqual([leaves.total, leaves.clusters.length, leaves.clusters[0].y_rel], [12, 1, [3, 5]])
   assert.equal(scan(bot, { match: 'diamond_ore' }).total, 0)

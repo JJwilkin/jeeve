@@ -263,7 +263,7 @@ export async function startAgent (opts: AgentOptions) {
     recorder.record('perceive', {
       parent,
       attrs: {
-        'jeeve.perceive.tool': tool, 'jeeve.perceive.query': JSON.stringify(input), 'jeeve.perceive.mode': tool === 'scan' ? (input.los ? 'los' : 'xray') : undefined,
+        'jeeve.perceive.tool': tool, 'jeeve.perceive.query': JSON.stringify(input), 'jeeve.perceive.mode': tool === 'scan' ? 'los' : undefined,
         'jeeve.perceive.latency_ms': +(performance.now() - t0).toFixed(1), 'jeeve.perceive.result_bytes': JSON.stringify(out).length
       },
       input, output: out

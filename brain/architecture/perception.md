@@ -59,7 +59,7 @@ Measured: see "Implementation".
 - This replaces the 16³ block cube that [[system-1]] and [[trace-schema]] planned for the snapshot. A full cube is ~5k blocks, while notable blocks with positions are ~1 KB. Add the cube when an encoder that's being replayed needs terrain.
 
 ## Fairness
-`scan` sees through walls by default (x-ray). `los: true` keeps only blocks the bot can see (`bot.canSeeBlock`, a ray cast per block). The mode is recorded on every call as `jeeve.perceive.mode` (`xray` | `los`). It's a parameter, not a fixed bound, for the local milestone. On public servers it becomes an operator setting ([[layers]], [[fast-bots]]).
+~~`scan` sees through walls by default (x-ray). `los: true` keeps only blocks the bot can see.~~ **Since 2026-10-12 (Joshua's call): `scan` is line of sight only.** It keeps only blocks the bot can see (`bot.canSeeBlock`, a ray cast per block), for 2A, the builder and authored behaviors alike, and the `los` option is gone. `jeeve.perceive.mode` is always `los` (`xray` in older traces). **Consequence:** a count is a lower bound. Leaves inside a canopy or blocks behind a trunk aren't counted, so `scan` can't prove "none left". The raw snapshot (Jev's view, and what checks read) still sees through walls.
 
 ## Tracing
 Each call is a `perceive` span, **a child of the `system2` span** that made it. The `system2` span now opens when the call starts and ends when the decision is applied.

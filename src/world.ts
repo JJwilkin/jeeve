@@ -20,15 +20,14 @@ export function blockAt (bot: Bot, p: Pos): string | null {
 }
 
 // Blocks whose name matches a glob, grouped into 26-connected clusters, nearest cluster first.
-// los: only blocks the bot can see (otherwise it sees through walls; fairness is a setting).
-export function scan (bot: Bot, q: { match: string, radius?: number, los?: boolean }) {
+// Only blocks the bot can see (one ray cast per block, bot.canSeeBlock): no x-ray (decided 2026-10-12).
+export function scan (bot: Bot, q: { match: string, radius?: number }) {
   const radius = Math.min(Math.max(1, Math.round(q.radius ?? 16)), SCAN_LIMITS.radius)
-  const los = q.los ?? false
   const re = glob(q.match)
   const ids = bot.registry.blocksArray.filter(b => re.test(b.name)).map(b => b.id)
   const found = ids.length ? bot.findBlocks({ matching: ids, maxDistance: radius, count: SCAN_LIMITS.blocks }) : []
   const truncated = found.length >= SCAN_LIMITS.blocks
-  const blocks = found.map(p => bot.blockAt(p)!).filter(b => b && (!los || bot.canSeeBlock(b)))
+  const blocks = found.map(p => bot.blockAt(p)!).filter(b => b && bot.canSeeBlock(b))
 
   const key = (p: Vec3) => `${p.x},${p.y},${p.z}`
   const left = new Map(blocks.map(b => [key(b.position), b]))
@@ -63,7 +62,7 @@ export function scan (bot: Bot, q: { match: string, radius?: number, los?: boole
     })
   }
   clusters.sort((a, c) => a.dist - c.dist)
-  return { match: q.match, radius, los, total: blocks.length, truncated, clusters: clusters.slice(0, SCAN_LIMITS.clusters) }
+  return { match: q.match, radius, total: blocks.length, truncated, clusters: clusters.slice(0, SCAN_LIMITS.clusters) }
 }
 
 // Can the guarded pathfinder get to where the block is within arm's reach (the goal collectblock uses),
