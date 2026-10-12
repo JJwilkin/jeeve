@@ -137,6 +137,41 @@ export const BEHAVIORS: Record<string, Spec> = {
   }
 }
 
+// Look before a goal counts as done (brain/architecture/perception.md → "Confirm before done"): walk to a few spots
+// around the goal's place and look at it from each, so the seen memory catches what was hidden from where the bot
+// stood. Run by the runtime when a check passes, never offered to Jev.
+// ponytail: four fixed spots 4 blocks out; choose spots by what's unseen if this misses blocks.
+export const LOOK_AROUND: Spec = {
+  channels: ['legs', 'aim'],
+  targets: 'block',
+  describe: () => "Look around the goal's place",
+  start (bot, target: { place: Xyz }, emit) {
+    const [x, y, z] = target.place
+    let stopped = false
+    const here = bot.entity.position
+    const spots = [[4, 0], [0, 4], [-4, 0], [0, -4]].map(([dx, dz]) => [x + dx, z + dz])
+      .sort((a, b) => Math.hypot(a[0] - here.x, a[1] - here.z) - Math.hypot(b[0] - here.x, b[1] - here.z))
+    const arrive = () => new Promise<void>(resolve => {
+      const timer = setTimeout(done, 6000)
+      const off = listen(bot, { goal_reached: done, path_update: (r: { status: string }) => { if (r.status === 'noPath' || r.status === 'timeout') done() } })
+      function done () { clearTimeout(timer); off(); resolve() }
+    })
+    void (async () => {
+      for (const [sx, sz] of spots) {
+        if (stopped) return
+        setGoal(bot, new goals.GoalNearXZ(sx, sz, 1))
+        await arrive()
+        if (stopped) return
+        bot.pathfinder.setGoal(null)
+        await bot.lookAt(new Vec3(x + 0.5, y + 2, z + 0.5))
+        await bot.waitForTicks(8) // two passes of the seen memory (src/world.ts observe)
+      }
+      if (!stopped) emit('done')
+    })().catch(() => { if (!stopped) emit('stuck') })
+    return { stop: () => { stopped = true; bot.pathfinder.setGoal(null) } }
+  }
+}
+
 export const STOP_DESC: Record<Channel, string> = {
   legs: 'Stand still',
   aim: 'Stop looking at anything in particular',

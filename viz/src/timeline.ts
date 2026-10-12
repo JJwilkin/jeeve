@@ -186,6 +186,7 @@ export function beats (rows: Row[]): Beat[] {
     else if (r.kind === 'event' && r.name === 'trial_window') b(r, 'trial_window', { behavior: r.attrs?.behavior }, 'Nothing threatens Jeeve, so the builder gets the body to test its code.')
     else if (r.kind === 'trial') b(r, r.attrs?.['jeeve.trial.passed'] ? 'trial_passed' : 'trial_failed', { behavior: r.attrs?.['jeeve.module.id'], end: r.attrs?.['jeeve.trial.end'], error: r.error }, r.attrs?.['jeeve.trial.passed'] ? 'The trial passes. Jeeve has a new skill.' : 'The trial fails. The builder reads what went wrong.')
     else if (r.kind === 'event' && r.name === 'trial_preempted') b(r, 'preempted', {}, 'A threat: the trial stops, and Jeeve deals with it first.')
+    else if (r.kind === 'event' && r.name === 'confirm') b(r, 'confirm', {}, 'Jeeve looks around to make sure it got everything.')
     // Jev's own doubts (low_confidence, jev_escalate) come every few seconds: not worth a caption.
     else if (r.kind === 'escalation_sent' && ['stuck', 'none_found'].includes(r.reason)) b(r, 'escalation', { reason: r.reason }, 'Jeeve is stuck, so the fast model asks System 2.')
   }

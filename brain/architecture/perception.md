@@ -105,6 +105,15 @@ Built in `src/world.ts`, `src/system2.ts` (the tools and parallel dispatch), `sr
 
 **Judgment:** every `perceive` span lands with its query and result, under its `system2` span (checked by SQL in the e2e).
 
+## Seen memory and confirm before done (2026-10-12)
+Decided with Joshua while making the orchard clip ([[brain-monitor]]): **no x-ray anywhere, and the bot looks around to confirm.** It replaces the x-ray cube behind the always-on summary, the raw snapshot and checks.
+- **Why.** Checks read the raw snapshot, an x-ray cube 8 blocks out that dropped any type with more than 64 blocks. In the orchard (four canopy trees), walking toward the next tree pushed `oak_leaves` over 64, so it vanished, and 2A's correct "no leaves left at the first tree" check passed with them still up. That closed the goal and cancelled the skill build, twice.
+- **Seen memory** (`src/world.ts` `observe`, every 250 ms before the goal checks). Every block within 8 blocks with an empty neighbour that a ray from the eyes reaches (`bot.canSeeBlock`) is remembered with when it was seen. A remembered block is forgotten only when the bot sees its spot empty (a clear ray to the spot's centre). Blocks out of sight stay as last seen: what Jeeve believes. A block boxed in on all sides is never seen.
+- **Everything reads it.** `notableBlocks` (Jev's summary and the raw snapshot) reads the memory, as `scan` reads line of sight. Checks and watch modules get a wider view, `checkSnapshot`: every remembered block within 16 blocks, plus `crowded`, the types with more than 512 there (terrain), which a check must count as present.
+- **Confirm before done.** When an authored check passes, the goal stays open. The runtime runs `look_around` (`src/behaviors.ts`, pinned on legs and aim, not offered to Jev): it walks to four spots 4 blocks around the goal's place and looks at it from each. The check runs again on the next tick over what the look added, and the goal closes only if it still passes. A trial holds the body, so the look waits for it. The look is traced as a `confirm` window event.
+- **Costs.** A goal whose check reads blocks takes ~10–20 s longer. Built-in checks (inventory, distance) don't look. A goal can no longer complete during a trial, so a trial passes on `done` plus `pass_when` only.
+- *Ceilings:* `crowded` types are a blind spot for checks (a region query would fix it). Four fixed spots can still miss a block hidden from all of them.
+
 ## Open questions
 - **A window cut during a System 2 call.** The `system2` span can end after its window root, because a 60 s cut doesn't wait for the call. Its spans still export, but the trace was finalized without them. Seen in traces? Then end and reopen the span at the cut, as behaviors do.
 - **Block states.** `blockAt` and `scan` return names only. *Since [[full-player-action-api]], code System 2 writes can read them with `api.blockInfo`; System 2's own tools still can't.* System 2 rightly expected a logless canopy to decay, but player-placed leaves are `persistent` ([[runtime-authored-behaviors]] e2e). Expose a few states (e.g. `persistent`, `axis`) if more cases like this show up.

@@ -92,41 +92,65 @@ export async function reachable (bot: Bot, p: Pos, timeoutMs = 1000) {
   return { reachable: r?.status === 'success', status: r?.status ?? 'noPath', ...(r?.status === 'success' ? { steps: r.path.length } : {}) }
 }
 
-// Notable blocks: types that are rare in the cube around the bot (≤ rareMax), so terrain drops out without
-// a hand-written list. Exact count and positions nearest first. Feeds Jev's summary and the raw snapshot.
-// Memoized until the bot moves to another block or any block changes, since one decide reads it twice
-// (snapshot + encoder) and watch modules read it every 250 ms.
-const changes = new WeakMap<Bot, { n: number }>()
-let memo: { key: string, v: Notable[] } | null = null
-export type Notable = { name: string, count: number, positions: Pos[] }
-export function notableBlocks (bot: Bot, radius = 8, rareMax = 64): Notable[] {
-  let c = changes.get(bot)
-  if (!c) {
-    const counter = c = { n: 0 }
-    changes.set(bot, c)
-    bot.on?.('blockUpdate', () => { counter.n++ })
-  }
+// ---- what the bot has seen: line of sight only, no x-ray (brain/architecture/perception.md → "Seen memory") ----
+// observe() runs every 250 ms. Each block within SEEN.radius that has an empty neighbour and that a ray from the
+// eyes reaches is remembered with when it was seen; a remembered block whose spot the bot now sees empty, or as
+// something else, is updated. Blocks out of sight stay as last seen: what Jeeve believes, not what the server says.
+export const SEEN = { radius: 8, keepWithin: 48 }
+type Seen = { name: string, pos: Pos, t: number }
+const memories = new WeakMap<Bot, Map<string, Seen>>()
+const memory = (bot: Bot) => { let m = memories.get(bot); if (!m) memories.set(bot, m = new Map()); return m }
+const empty = (b: { name: string } | null) => !b || NOTHING.has(b.name)
+
+export function observe (bot: Bot) {
+  const mem = memory(bot)
   const me = feet(bot)
-  const key = `${bot.username}|${me}|${radius}|${rareMax}|${c.n}`
-  if (memo?.key === key) return memo.v
-  const seen = new Map<string, Pos[]>()
+  const eyes = bot.entity.position.offset(0, (bot.entity as { eyeHeight?: number }).eyeHeight ?? 1.62, 0)
+  const r = SEEN.radius
   const p = new Vec3(0, 0, 0)
-  for (let dx = -radius; dx <= radius; dx++) {
-    for (let dy = -radius; dy <= radius; dy++) {
-      for (let dz = -radius; dz <= radius; dz++) {
-        const b = bot.blockAt(p.set(me.x + dx, me.y + dy, me.z + dz))
-        if (!b || NOTHING.has(b.name)) continue
-        const s = seen.get(b.name)
-        if (!s) seen.set(b.name, [[p.x, p.y, p.z]])
-        else s.push([p.x, p.y, p.z])
+  const now = Date.now()
+  // An empty spot is seen when a ray from the eyes to its centre hits nothing on the way.
+  const seesEmpty = (q: Vec3) => {
+    const to = q.offset(0.5, 0.5, 0.5)
+    const range = eyes.distanceTo(to)
+    return !bot.world.raycast(eyes, to.minus(eyes).normalize(), range - 0.5)
+  }
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dz = -r; dz <= r; dz++) {
+        p.set(me.x + dx, me.y + dy, me.z + dz)
+        const key = `${p.x},${p.y},${p.z}`
+        const b = bot.blockAt(p)
+        if (empty(b)) { if (mem.has(key) && seesEmpty(p)) mem.delete(key); continue }
+        const open = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].some(([x, y, z]) => empty(bot.blockAt(p.offset(x, y, z))))
+        if (open && bot.canSeeBlock(b!)) mem.set(key, { name: b!.name, pos: [p.x, p.y, p.z], t: now })
       }
     }
   }
+  if (mem.size > 20_000) for (const [k, v] of mem) if (Math.abs(v.pos[0] - me.x) + Math.abs(v.pos[2] - me.z) > SEEN.keepWithin) mem.delete(k)
+}
+
+// Remembered blocks within radius of the feet, by type, nearest first.
+export function seenTypes (bot: Bot, radius: number): Map<string, Pos[]> {
+  const me = feet(bot)
+  const out = new Map<string, Pos[]>()
+  for (const v of memory(bot).values()) {
+    if (Math.max(Math.abs(v.pos[0] - me.x), Math.abs(v.pos[1] - me.y), Math.abs(v.pos[2] - me.z)) > radius) continue
+    const list = out.get(v.name)
+    if (list) list.push(v.pos); else out.set(v.name, [v.pos])
+  }
   const m1 = (a: Pos) => Math.abs(a[0] - me.x) + Math.abs(a[1] - me.y) + Math.abs(a[2] - me.z)
-  const v = [...seen.entries()]
+  for (const list of out.values()) list.sort((a, c) => m1(a) - m1(c))
+  return out
+}
+
+// Notable blocks: remembered types that are rare in the cube around the bot (≤ rareMax), so terrain drops out
+// without a hand-written list. Exact count and positions nearest first. Feeds Jev's summary and the raw snapshot.
+export type Notable = { name: string, count: number, positions: Pos[] }
+export function notableBlocks (bot: Bot, radius = 8, rareMax = 64): Notable[] {
+  const m1 = (a: Pos) => { const me = feet(bot); return Math.abs(a[0] - me.x) + Math.abs(a[1] - me.y) + Math.abs(a[2] - me.z) }
+  return [...seenTypes(bot, radius).entries()]
     .filter(([, ps]) => ps.length <= rareMax)
-    .map(([name, ps]) => ({ name, count: ps.length, positions: ps.sort((a, c) => m1(a) - m1(c)) }))
+    .map(([name, ps]) => ({ name, count: ps.length, positions: ps }))
     .sort((a, c) => m1(a.positions[0]) - m1(c.positions[0]))
-  memo = { key, v }
-  return v
 }

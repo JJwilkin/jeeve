@@ -3,7 +3,7 @@
 import type { Bot } from 'mineflayer'
 import type { Entity } from 'prismarine-entity'
 import { Vec3 } from 'vec3'
-import { notableBlocks, type Pos } from './world.ts'
+import { notableBlocks, seenTypes, type Pos } from './world.ts'
 
 export type Handles = { byId: Map<number, string>, byHandle: Map<string, number>, next: number }
 export const newHandles = (): Handles => ({ byId: new Map(), byHandle: new Map(), next: 0 })
@@ -152,5 +152,20 @@ export function rawSnapshot (bot: Bot, radius = 32) {
     entities: Object.values(bot.entities)
       .filter(e => e !== me && e.position.distanceTo(me.position) <= radius)
       .map(e => ({ id: e.id, name: e.name, type: e.type, username: e.username, pos: r(e.position), vel: r(e.velocity) }))
+  }
+}
+
+// What check and watch modules judge: the raw snapshot, with blocks widened to every remembered block within
+// CHECK_VIEW.radius of the feet. A type with more than CHECK_VIEW.max there (terrain) is listed in `crowded`
+// instead: present, too many to list, never "none left". A narrower view made the orchard clip's "no leaves left
+// at the first tree" check pass while they were still up (2026-10-12).
+// ponytail: crowded types are a blind spot for checks; give checks region queries if a goal needs one.
+export const CHECK_VIEW = { radius: 16, max: 512 }
+export function checkSnapshot (bot: Bot) {
+  const types = [...seenTypes(bot, CHECK_VIEW.radius).entries()]
+  return {
+    ...rawSnapshot(bot),
+    blocks: Object.fromEntries(types.filter(([, ps]) => ps.length <= CHECK_VIEW.max)),
+    crowded: types.filter(([, ps]) => ps.length > CHECK_VIEW.max).map(([name]) => name)
   }
 }

@@ -16,7 +16,7 @@ import { MockLanguageModelV4 } from 'ai/test'
 import { build, type CapabilityRequest } from './builder.ts'
 import { coalescing, makeDecider } from './decide.ts'
 import { direction, distanceBucket, makeEgocentric, newHandles, rawSnapshot } from './encoder.ts'
-import { blockAt, notableBlocks, reachable, scan } from './world.ts'
+import { blockAt, notableBlocks, observe, reachable, scan } from './world.ts'
 import { compile, glob, Goals } from './goals.ts'
 import { controlVector, guardedMovements, unsafeAt } from './guards.ts'
 import { compileBehavior, compileModule, ModuleRegistry, startBehavior, type BehaviorHost } from './modules.ts'
@@ -103,8 +103,10 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   const bot: any = {
     entity: me, entities: { 1: me, 2: josh }, health: 20, food: 20, heldItem: null,
     inventory: { items: () => [] },
-    blockAt: (p: Vec3) => p.x === 0 && p.y === 0 && p.z === -3 ? { name: 'oak_log', position: p } : null
+    blockAt: (p: Vec3) => p.x === 0 && p.y === 0 && p.z === -3 ? { name: 'oak_log', position: p } : null,
+    canSeeBlock: () => true, world: { raycast: () => null }
   }
+  observe(bot) // the block view is what the bot has seen
   const started: string[] = []
   const targets: unknown[] = []
   const channels: any = {
@@ -248,6 +250,20 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.deepEqual(c.abandoned.map(g => g.id), [child.id, b.id])
   assert.equal(goals.program(), null) // back to the default
   assert.equal(goals.place(), null)
+
+  // Confirm before done: an authored check that passes holds the goal open while the runtime looks around; the
+  // goal closes on a later tick, once the look has ended and the check still passes.
+  let looks = 0
+  const held = new Goals({ completed: g => completed.push(g.id), escalate: () => {}, confirm: g => { if (g.confirmedAt) return false; looks++; g.confirming = true; return true } })
+  const d = held.instruction('break the tree', { player: 'Josh', via: 'whisper' }, bot).root
+  d.done_when = { spec: spec({ module: 'authored', name: 'tree_gone' }), desc: 'tree_gone', test: () => true } as any
+  held.tick(bot)
+  held.tick(bot)
+  assert.deepEqual([d.status, looks], ['active', 1]) // looking: one look, no re-check meanwhile
+  d.confirming = false
+  d.confirmedAt = Date.now()
+  held.tick(bot)
+  assert.equal(d.status, 'completed')
 }
 
 // Modules System 2 writes: sandboxed, trialled before registering, disabled after repeated errors.
@@ -310,8 +326,10 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
       .filter(([, n]) => matching.includes(names.indexOf(n)))
       .map(([k]) => new Vec3(...k.split(',').map(Number) as [number, number, number]))
       .filter(p => p.distanceTo(new Vec3(0, 0, 0)) <= maxDistance),
-    canSeeBlock: (b: { position: Vec3 }) => b.position.x > 0
+    canSeeBlock: (b: { position: Vec3 }) => b.position.x > 0,
+    world: { raycast: () => blocked ? { position: new Vec3(0, 0, 0) } : null } // whether an empty spot's view is blocked
   }
+  let blocked = false
   // Line of sight only: the lone log at x = -6 is hidden (this fake bot sees x > 0).
   const logs = scan(bot, { match: '*_log', radius: 16 })
   assert.deepEqual(logs.clusters.map(c => [c.count, c.nearest, c.y_rel, c.min, c.max]), [[5, [3, 0, 0], [0, 4], [3, 0, 0], [3, 4, 0]]])
@@ -321,15 +339,30 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.equal(scan(bot, { match: 'diamond_ore' }).total, 0)
   assert.equal(blockAt(bot, [3, 2, 0]), 'oak_log')
 
+  // The block view is what the bot has seen: the lone log at x = -6 is out of sight, and the trunk log at y = 3 is
+  // boxed in by leaves on every side, so neither is there.
+  observe(bot)
   const notable = notableBlocks(bot, 8, 64)
-  assert.deepEqual(notable.map(n => [n.name, n.count]), [['oak_log', 6], ['oak_leaves', 12]]) // grass (289) is terrain
-  const raw = rawSnapshot({ ...bot, inventory: undefined, entities: {}, health: 20, food: 20 } as any)
-  assert.deepEqual(raw.blocks.oak_log.slice(0, 2), [[3, 0, 0], [3, 1, 0]])
+  assert.deepEqual(notable.map(n => [n.name, n.count]), [['oak_log', 4], ['oak_leaves', 12]]) // grass (136 seen) is terrain
+  // A leaf broken out of sight is still believed there; once the bot sees the spot empty, it's forgotten.
+  world.delete('4,5,0')
+  blocked = true
+  observe(bot)
+  assert.equal(notableBlocks(bot, 8, 64).find(n => n.name === 'oak_leaves')!.count, 12)
+  blocked = false
+  observe(bot)
+  assert.equal(notableBlocks(bot, 8, 64).find(n => n.name === 'oak_leaves')!.count, 11)
+  world.set('4,5,0', 'oak_leaves')
+  observe(bot)
+  Object.assign(bot, { entities: {}, health: 20, food: 20, heldItem: null }) // the same bot: the memory is per bot
+  const raw = rawSnapshot({ ...bot, inventory: undefined } as any)
+  assert.deepEqual(raw.blocks, {}) // a copy of the bot has seen nothing
+  assert.deepEqual(rawSnapshot(Object.assign(bot, { inventory: undefined })).blocks.oak_log.slice(0, 2), [[3, 0, 0], [3, 1, 0]])
   const encoded = makeEgocentric({ entity_cap: 8, radius: 16, block_radius: 8, block_cap: 6, rare_max: 64 })(
-    { ...bot, entities: {}, health: 20, food: 20, heldItem: null, inventory: { items: () => [] } } as any,
+    Object.assign(bot, { inventory: { items: () => [] } }),
     { handles: newHandles(), directive: null, channels: {}, events: [] })
   assert.deepEqual(encoded.state.blocks, [
-    { name: 'oak_log', count: 'many (6)', nearest: 'close, right' },
+    { name: 'oak_log', count: 'a few (4)', nearest: 'close, right' },
     { name: 'oak_leaves', count: 'many', nearest: 'close, right, ~3 up' }
   ])
 }

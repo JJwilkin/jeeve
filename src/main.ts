@@ -9,17 +9,17 @@ import pf from 'mineflayer-pathfinder'
 import collectblock from 'mineflayer-collectblock'
 import { Judgeval } from 'judgeval'
 import type { Span } from '@opentelemetry/api'
-import { authoredSpec, BEHAVIORS, CHANNELS, Channels, type ApiHost, type Spec } from './behaviors.ts'
+import { authoredSpec, BEHAVIORS, CHANNELS, Channels, LOOK_AROUND, type ApiHost, type Spec } from './behaviors.ts'
 import { build, BUILDER_MODEL, type BehaviorDraft, type BuildResult, type CapabilityRequest, type TrialReport, type TrialTarget } from './builder.ts'
 import { coalescing, makeDecider, optionTarget, type Ask } from './decide.ts'
-import { attacking, describeEntity, handleFor, inventoryCounts, newHandles, rawSnapshot, type Attackers, type Directive } from './encoder.ts'
+import { attacking, checkSnapshot, describeEntity, handleFor, inventoryCounts, newHandles, rawSnapshot, type Attackers, type Directive } from './encoder.ts'
 import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal } from './goals.ts'
 import { guardedMovements, installGuards } from './guards.ts'
 import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type ModuleSource, type Snapshot } from './modules.ts'
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
 import { makeSystem2, type Decision, type RequestDraft } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
-import { blockAt, reachable, scan, type Pos } from './world.ts'
+import { blockAt, observe, reachable, scan, type Pos } from './world.ts'
 
 export type AgentOptions = {
   host?: string
@@ -43,6 +43,8 @@ const TRIAL_WINDOW = { hostileWithin: 8, quietMs: 5_000, maxPreempts: 3 }
 // an authored behavior that ended none_found on its target about 100 times in 20 s (orchard clip, 2026-10-12).
 // ponytail: one fixed cooldown; per-behavior backoff if traces show it's too long or too short.
 const FAILED_COOLDOWN_MS = 10_000
+// A look that ended this recently confirms a check that still passes; an older one, or none, means look first.
+const CONFIRM_FRESH_MS = 3_000
 // Trace rows stay small: long outputs (a scan, an event's data) are cut.
 const short = (v: unknown, max = 500) => { const s = JSON.stringify(v); return s && s.length > max ? s.slice(0, max) + '…' : v }
 
@@ -111,8 +113,30 @@ export async function startAgent (opts: AgentOptions) {
       if (g.from?.via === 'whisper') bot.whisper(g.from.player, `done: ${g.text}, ${g.summary}`)
       afterGoalChange(g)
     },
+    confirm: g => confirm(g),
     escalate: (reason, g) => escalate(reason, { goal: g.id }, g)
   })
+
+  // ---- confirm before done: a check that reads the world passed; look around the place, then judge again ----
+  // The check re-runs on the next tick over what the look added to the seen memory. A trial holds the body, so the
+  // look waits until it ends.
+  let confirming: Goal | null = null
+  function confirm (g: Goal): boolean {
+    if (g.confirmedAt && Date.now() - g.confirmedAt < CONFIRM_FRESH_MS) return false
+    if (trial || confirming) return true
+    const me = bot.entity.position.floored()
+    const place = g.place ?? goals.place() ?? [me.x, me.y, me.z] as Pos
+    g.confirming = true
+    confirming = g
+    recorder.windowEvent('confirm', { goal: g.id, place: place.join(',') })
+    note(`looking around before calling goal ${g.id} done`)
+    channels.set('look_around:confirm', 'look_around', { place }, 'confirm', { spec: LOOK_AROUND, pinned: true })
+    return true
+  }
+  const endConfirm = () => {
+    if (confirming) { confirming.confirming = false; confirming.confirmedAt = Date.now() }
+    confirming = null
+  }
 
   // A root closing is a goal boundary: cut the window. Programs stack with goals, so re-sync.
   function afterGoalChange (closed: Goal) {
@@ -136,6 +160,7 @@ export async function startAgent (opts: AgentOptions) {
     end: (slot, reason) => {
       recorder.endBehavior(slot.runId, reason, slot.run.detail?.())
       if ((reason === 'none_found' || reason === 'stuck') && !slot.pinned) failedAt.set(optionTarget(slot.key), Date.now())
+      if (slot.key === 'look_around:confirm') return endConfirm()
       if (slot.pinned) return finishTrial(reason, slot.run.detail?.() as RunDetail | undefined) // only trials are pinned
       // An authored behavior that keeps failing (its own error or time limit) is disabled, as checks are.
       const m = modules.get(slot.behavior)
@@ -608,7 +633,7 @@ export async function startAgent (opts: AgentOptions) {
   }
 
   function settleTrial (t: TrialRun, end: string, detail?: RunDetail) {
-    const judged = rawSnapshot(bot)
+    const judged = checkSnapshot(bot)
     const claimFails = end === 'done' && t.passWhen && !modules.get(t.passWhen)?.run(judged)
     if (claimFails) detail = { ...detail, actions: detail?.actions ?? [], error: `returned done, but pass_when ${t.passWhen} is false on ${JSON.stringify({ self: judged.self, blocks: judged.blocks })}` }
     const passed = (end === 'done' && !claimFails) || (end === 'goal_closed' && t.goal?.status === 'completed')
@@ -632,6 +657,7 @@ export async function startAgent (opts: AgentOptions) {
   // ---- instructions: whispers from allowed players, or the local API ----
   function instruct (text: string, from: { player: string, via: 'whisper' | 'api' }) {
     const { root, abandoned } = goals.instruction(text, from, bot)
+    if (confirming) channels.stop(LOOK_AROUND.channels, 'cancelled')
     dropStaleRequests()
     channels.stopStalePlace(null) // other behaviors keep running while System 2 reads the instruction
     for (const g of abandoned) recorder.record('goal', { attrs: { 'jeeve.goal.id': g.id, 'jeeve.goal.transition': 'abandoned' }, output: { summary: g.summary } })
@@ -715,12 +741,13 @@ export async function startAgent (opts: AgentOptions) {
       if (near && !hostileNear) { note('hostile mob within range'); if (fires('hostile_near')) wake('hostile_near') }
       hostileNear = near
       if (++ticks % 5 !== 0) return
+      observe(bot) // the seen memory first, so checks judge what's in sight now
       goals.tick(bot) // checks every 250 ms
       tickTrialWindow()
       // Watch modules wake Jev when they turn true (rising edge only).
       const watch = program.triggers.watch ?? []
       if (!watch.length) return
-      const snap = rawSnapshot(bot)
+      const snap = checkSnapshot(bot)
       for (const name of watch) {
         const on = modules.get(name)?.run(snap) ?? false
         if (on && !watching.get(name)) { note(`watch ${name} turned true`); wake(`watch:${name}`) }

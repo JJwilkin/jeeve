@@ -1,7 +1,7 @@
 // The goal tree (brain/architecture/system-2.md). Only System 2 writes nodes and fails goals; code
 // changes status only for `completed` (the check passed) and `abandoned` (a new instruction).
 import type { Bot } from 'mineflayer'
-import { inventoryCounts, rawSnapshot } from './encoder.ts'
+import { checkSnapshot, inventoryCounts } from './encoder.ts'
 import type { Module } from './modules.ts'
 import type { Program } from './program.ts'
 import type { Pos } from './world.ts'
@@ -25,6 +25,8 @@ export type Goal = {
   parent: string | null
   text: string
   from: { player: string, via: 'whisper' | 'api' } | null
+  confirming?: boolean // looking around before the check is trusted (see Goals.tick)
+  confirmedAt?: number // when the last look ended
   status: 'active' | 'suspended' | 'completed' | 'failed' | 'abandoned'
   done_when: Compiled | null
   escalate_if: Compiled[]
@@ -69,7 +71,7 @@ export function compile (spec: CheckSpec, goal: Pick<Goal, 'inventory'>, modules
       case 'authored': {
         const m = spec.name ? modules?.(spec.name) : undefined
         if (!m || m.kind !== 'check') throw new Error(`no registered check module named ${spec.name}`)
-        return { desc: `${m.id}: ${m.description}`, test: (bot: Bot) => m.run(rawSnapshot(bot)) }
+        return { desc: `${m.id}: ${m.description}`, test: (bot: Bot) => m.run(checkSnapshot(bot)) }
       }
       case 'entity_alive':
         return {
@@ -84,6 +86,8 @@ export function compile (spec: CheckSpec, goal: Pick<Goal, 'inventory'>, modules
 
 export type GoalEvents = {
   completed: (goal: Goal) => void
+  // An authored check passed: return true to hold the goal open while Jeeve looks around to confirm it.
+  confirm?: (goal: Goal) => boolean
   escalate: (reason: string, goal: Goal) => void
 }
 
@@ -152,7 +156,8 @@ export class Goals {
     const leaf = this.leaf()
     if (!leaf) return
     const now = Date.now()
-    if (leaf.status === 'active' && leaf.done_when?.test(bot)) {
+    if (leaf.status === 'active' && !leaf.confirming && leaf.done_when?.test(bot)) {
+      if (leaf.done_when.spec.module === 'authored' && this.on.confirm?.(leaf)) return
       const p = leaf.done_when.progress?.(bot)
       this.close(leaf, 'completed', p ? `${p.have}/${p.want}` : leaf.done_when.desc)
       this.on.completed(leaf)
