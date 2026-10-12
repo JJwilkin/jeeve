@@ -7,6 +7,18 @@ status: active
 
 Three scored scenes, run unattended, and what each round changed. Started with Joshua, 2026-10-12. The rule he set: **don't tune to the scenes.** Each failure points to a gap in Jeeve's **search** (finding out what the world holds that matters for the goal) or **learning** (keeping what worked as skills). The fix goes in the harness, per the [[bitter-lesson]].
 
+## The night of 2026-10-12, in short
+- **138 scored runs, 125 passed.** Over the last 59 (random layouts, four scenes including a search scene), 58 passed. `node scripts/bench-report.ts` has the per-commit table.
+- **30 gaps found and fixed in the harness**, below. None is tuned to a scene:
+  - **perception:** line of sight, a far look, a memory of what was seen, ground told by shape;
+  - **search:** `survey`, frontier exploration widening from the task's origin, explored coverage, `plan_done`, `idle` and `stalled`;
+  - **learning:** a shared library across runs, curation, general item skills, escalation backoff learned from 2A's answers;
+  - **control:** no restart thrash, a target-switch dwell, the whole-body hold, the protected player treated like the bot;
+  - **correctness:** crafting settles the inventory, the bot's own scaffolding and digs, versioned module names, a plan's program carries across steps.
+- **Medians on random layouts by the end:** orchard (3–5 canopy trees) ~160–200 s; workshop (a different tool each run) ~45 s; guard always passes; forage (trees beyond sight) ~200 s with 18–23 logs.
+- `npm run e2e` passes (62 checks) after the night's changes.
+- Clips, start to end: `clips/reel-16x9.mp4` and `clips/reel-9x16.mp4` (`scripts/reel.ts`), from the notable runs' own clips.
+
 ## The bench
 - `npm run bench -- <rounds> [scenarios] [--fresh]` (`scripts/bench.ts`). Each scenario in `scripts/clip.ts` runs with `--bench`: no OBS, no client, no render. Runs go in parallel on ports 25571+, each with its own world. One row per run goes to `bench/results.jsonl`: pass, time, 2A calls and seconds, builds and trials, the library it started with, plan steps, look-arounds, deaths, commit.
 - **Scored by Josh, not by Jeeve.** The scripted player sees every block, so verification is ground truth:
