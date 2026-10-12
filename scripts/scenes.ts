@@ -74,14 +74,14 @@ export function guardScene (seed: number): Scene {
   return { trees: [], chest: null, waves: between(r, 3, 5), jeeve: [30, -60, -10], josh: [32, -60, -10], instructions: ['follow me and keep me safe'] }
 }
 
-// Forage: small trees scattered 28–45 blocks from the start, beyond the far look (24): nothing is in sight, so the
-// task is search. Its own, wider area around the origin.
-export const FORAGE_AREA = { min: [-50, -61, -50] as Xyz, max: [50, -48, 50] as Xyz }
+// Forage: small trees scattered 40–60 blocks from the start, beyond the far look (24 out, about 34 on a diagonal):
+// nothing is in sight, so the task is search. Its own, wider area around the origin.
+export const FORAGE_AREA = { min: [-66, -61, -66] as Xyz, max: [66, -50, 66] as Xyz }
 export function forageScene (seed: number): Scene {
   const r = rng(seed)
   const trees: Tree[] = []
   for (let tries = 0; trees.length < between(r, 6, 8) && tries < 500; tries++) {
-    const a = r() * Math.PI * 2, d = 28 + r() * 17
+    const a = r() * Math.PI * 2, d = 40 + r() * 20
     const x = Math.round(Math.cos(a) * d), z = Math.round(Math.sin(a) * d)
     if (trees.some(t => Math.max(Math.abs(t.x - x), Math.abs(t.z - z)) < 6)) continue
     trees.push({ x, z, wood: pick(r, ['oak', 'birch'] as const), trunk: between(r, 4, 5), canopy: false })

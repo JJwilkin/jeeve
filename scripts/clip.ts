@@ -76,7 +76,7 @@ const SCENARIOS: Record<string, Scenario> = {
   }),
   // forage: "get me 16 logs" with every tree beyond sight: search. Scored on what Jeeve holds.
   forage: fromScene(forageScene(SEED), {
-    timeoutMs: 10 * 60_000, area: FORAGE_AREA, camera: { at: [0, -14, 62], facing: [0, -60, 0] },
+    timeoutMs: 10 * 60_000, area: FORAGE_AREA, camera: { at: [0, 6, 78], facing: [0, -60, 0] },
     verify: async ({ agent }) => {
       const n = agent.bot.inventory.items().filter(i => i.name.endsWith('_log')).reduce((s, i) => s + i.count, 0)
       return { pass: n >= 16, detail: `Jeeve holds ${n} logs` }
