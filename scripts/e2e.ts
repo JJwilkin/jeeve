@@ -221,8 +221,10 @@ const reported = () => reportedAt > 0 || (whispers.slice(heard).some(w => !/^(on
 josh.whisper('Jeeve', 'break the leaves too')
 await until('"break the leaves too": Jeeve reports a limit up front or breaks leaves', () => reported() || treeBlocks(/_leaves$/) < leavesBefore - 5, 60000)
 const leafLooks = looksSince(looked)
-check('"break the leaves too": System 2 looked at the leaves', leafLooks.some(r => /leaves/.test(r.attrs['jeeve.perceive.query']) || r.attrs['jeeve.perceive.tool'] === 'reachable'),
-  leafLooks.map(r => `${r.attrs['jeeve.perceive.tool']} ${r.attrs['jeeve.perceive.query']}`).join('; '))
+// Looking can be a scan or reachable call, or the leaves already being on 2A's seen map (what the bot has seen).
+const leavesOnMap = traceRecords().some(r => r.kind === 'system2' && r.t > asked && JSON.stringify(r.input?.seen_map ?? []).includes('leaves'))
+check('"break the leaves too": System 2 looked at the leaves', leavesOnMap || leafLooks.some(r => /leaves/.test(r.attrs['jeeve.perceive.query']) || r.attrs['jeeve.perceive.tool'] === 'reachable'),
+  `${leavesOnMap ? 'on the seen map; ' : ''}${leafLooks.map(r => `${r.attrs['jeeve.perceive.tool']} ${r.attrs['jeeve.perceive.query']}`).join('; ')}`)
 if (reported()) check('"break the leaves too": the report came before any stuck', !traceRecords().some(r => r.kind === 'behavior_end' && r.reason === 'stuck' && r.t > asked && r.t < reportedAt))
 else console.log(`INFO "break the leaves too": leaves ${leavesBefore} → ${treeBlocks(/_leaves$/)}`)
 server.command('gamerule random_tick_speed 3')
