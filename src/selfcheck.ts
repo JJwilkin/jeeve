@@ -387,7 +387,7 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
     { handles: newHandles(), directive: null, channels: {}, events: [] })
   assert.deepEqual(encoded.state.blocks, [
     { name: 'oak_log', count: 'a few (4)', nearest: 'close, right' },
-    { name: 'oak_leaves', count: 'many', nearest: 'close, right, ~3 up' }
+    { name: 'oak_leaves', count: 'many (9)', nearest: 'close, right, ~3 up' }
   ])
 }
 
