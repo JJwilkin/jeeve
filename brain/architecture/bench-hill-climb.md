@@ -78,6 +78,9 @@ On layouts it hadn't seen, Jeeve learned in the first round and reused after. 2A
 
 Also: e2e expectations updated for the new design: the built-in `cleared` check counts as "tests that none are left", and "hears done" waits for the look before done. 2A matches logs only unless leaves are asked for ("break this tree": natural leaves decay).
 
+29. **A regression from #20, caught by the e2e.** Collect holds the whole body, so while a zombie hit Jeeve, the hands' answer "attack it" was held, and Jeeve kept collecting until it died. **Fix:** the hold doesn't apply while the bot is under threat (damage in the last 5 s, or a hostile within 8 blocks).
+30. **Jeeve's own digging left stale memory.** Collect broke a log inside a canopy. Its empty spot was hidden by leaves, so the memory never saw it gone, and "break this tree" couldn't close: 2A eventually gave up on a finished tree. **Fix:** blocks the bot digs itself are forgotten at once (`noteDug`, on `diggingCompleted`), as placed ones are remembered.
+
 ## Open
 - **Trials still consume materials** ([[orchestrator-and-builder]] → Open questions). Workshop round 1 burned its wood on failed trials.
 - **Idle time** is still large while the builder works or 2A thinks. Jev could do the parts of a plan it can already do meanwhile.
