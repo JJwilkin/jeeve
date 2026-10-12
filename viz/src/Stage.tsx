@@ -6,6 +6,8 @@ import { MESSAGE_MS, type Message, type Node, type Panels } from './timeline.ts'
 
 export type Layout = 'wide' | 'tall'
 export const SIZE: Record<Layout, { w: number, h: number }> = { wide: { w: 1920, h: 1080 }, tall: { w: 1080, h: 1920 } }
+// The game view inside the stage.
+export const FOOTAGE: Record<Layout, { w: number, h: number }> = { wide: { w: 1280, h: 720 }, tall: { w: 1080, h: 608 } }
 
 const C = { bg: '#0b0e14', card: '#131823', line: '#263042', text: '#e6e9ef', dim: '#8b93a6', s2: '#b18cff', builder: '#ffb547', s1: '#47c8ff', player: '#7ee787', ok: '#3fb950', bad: '#f85149' }
 const MONO = "'SF Mono', Menlo, Consolas, monospace"

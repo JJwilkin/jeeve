@@ -10,17 +10,19 @@
     "studio": "remotion studio src/remotion/index.tsx"
   },
   "dependencies": {
+    "@react-three/fiber": "^9.1.2",
     "@remotion/cli": "4.0.534",
-    "mineflayer": "^4.39.0",
-    "prismarine-viewer": "^1.33.0",
+    "@remotion/three": "4.0.534",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "remotion": "4.0.534"
+    "remotion": "4.0.534",
+    "three": "^0.170.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.170.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.4"
   }

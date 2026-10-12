@@ -165,7 +165,8 @@ For each beat, write one plain sentence of at most 14 words for a viewer who has
 
 function render (dir: string) {
   for (const [layout, name] of [['wide', 'clip-16x9.mp4'], ['tall', 'clip-9x16.mp4']]) {
-    const r = spawnSync('npx', ['remotion', 'render', 'src/remotion/index.tsx', layout, resolve(dir, name), '--public-dir', resolve(dir)], { cwd: 'viz', stdio: 'inherit' })
+    // --gl=angle: WebGL for the recorded-world camera (three.js) in headless Chrome on macOS.
+    const r = spawnSync('npx', ['remotion', 'render', 'src/remotion/index.tsx', layout, resolve(dir, name), '--public-dir', resolve(dir), '--gl=angle'], { cwd: 'viz', stdio: 'inherit' })
     if (r.status !== 0) throw new Error(`remotion render ${layout} failed`)
     console.log(`[clip] ${resolve(dir, name)}`)
   }
