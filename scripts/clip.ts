@@ -204,8 +204,11 @@ const camera = record ? await obs() : null // fail fast, before the server start
 
 const server = startServer(line => { if (/ERROR|joined the game|left the game/.test(line)) console.log('[server]', line) })
 await server.ready
-const LIBRARY = `traces/clip-module-library-${PORT}.json` // empty, so the builder has to write the skill
-if (existsSync(LIBRARY)) rmSync(LIBRARY)
+// Empty, so the builder has to write the skill, unless JEEVE_KEEP_LIBRARY: bench runs start from what Jeeve learned
+// in earlier runs (scripts/bench.ts seeds and merges it).
+const LIBRARY = `traces/clip-module-library-${PORT}.json`
+if (!process.env.JEEVE_KEEP_LIBRARY && existsSync(LIBRARY)) rmSync(LIBRARY)
+const learned = existsSync(LIBRARY) ? (JSON.parse(readFileSync(LIBRARY, 'utf8')).modules as Array<{ kind: string, name: string }>).map(m => `${m.kind}:${m.name}`) : []
 const agent = await startAgent({ port: PORT, allowed: ['Josh'], apiPort: API, moduleLibrary: LIBRARY })
 const josh = mineflayer.createBot({ username: 'Josh', auth: 'offline', host: 'localhost', port: PORT })
 await Promise.all([new Promise<void>(r => agent.bot.once('spawn', () => r())), new Promise<void>(r => josh.once('spawn', () => r()))])
@@ -316,6 +319,7 @@ const result = {
   s: Math.round((end - TAIL_MS - asked) / 1000),
   system2: { calls: of('system2').length, s: Math.round(of('system2').reduce((n, r) => n + (r.attrs?.['jeeve.system2.latency_ms'] ?? 0), 0) / 1000) },
   builder: of('builder').map(r => ({ status: r.status, behavior: r.behavior, trials: r.attrs?.['jeeve.builder.trials'], s: Math.round((r.attrs?.['jeeve.builder.latency_ms'] ?? 0) / 1000) })),
+  library: learned, // what the run started with: skills and checks from earlier runs
   plan_steps: rows.filter(r => r.kind === 'goal' && r.attrs?.['jeeve.goal.plan_step']).length,
   confirms: rows.filter(r => r.kind === 'event' && r.name === 'confirm').length,
   deaths: rows.filter(r => r.kind === 'event' && r.name === 'death').length,

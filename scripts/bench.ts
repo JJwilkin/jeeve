@@ -2,18 +2,36 @@
 // runs with --bench, in parallel on its own port and world, for N rounds. Rows land in bench/results.jsonl.
 //   npm run bench -- 3                      three rounds of every scenario
 //   npm run bench -- 1 orchard workshop     one round of these
+//   npm run bench -- 3 --fresh              start from an empty skill library
+// Learning: every run starts from bench/library.json, the skills and checks Jeeve learned in earlier runs, and what
+// a run learns is merged back after its round. One Jeeve that keeps what it learned, across runs and scenarios.
 import { spawn } from 'node:child_process'
-import { createWriteStream, mkdirSync, readFileSync } from 'node:fs'
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
-const args = process.argv.slice(2)
+const flags = process.argv.slice(2).filter(a => a.startsWith('--'))
+const args = process.argv.slice(2).filter(a => !a.startsWith('--'))
 const rounds = Number(args[0] ?? 1)
 const scenarios = args.slice(1).length ? args.slice(1) : ['orchard', 'workshop', 'guard']
+const SHARED = 'bench/library.json'
+mkdirSync('bench', { recursive: true })
+if (flags.includes('--fresh') && existsSync(SHARED)) rmSync(SHARED)
+const portLibrary = (port: number) => `traces/clip-module-library-${port}.json`
+type Stored = { kind: string, name: string, version: number, origin?: { created_at?: string } }
+const modulesIn = (file: string): Stored[] => existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).modules : []
+// The shared library keeps the newest version of each module by name.
+function merge (files: string[]) {
+  const by = new Map(modulesIn(SHARED).map(m => [`${m.kind}:${m.name}`, m]))
+  for (const f of files) for (const m of modulesIn(f)) { const k = `${m.kind}:${m.name}`; const old = by.get(k); if (!old || (m.origin?.created_at ?? '') > (old.origin?.created_at ?? '')) by.set(k, m) }
+  writeFileSync(SHARED, JSON.stringify({ modules: [...by.values()] }, null, 2) + '\n')
+  return by.size
+}
 const BASE_PORT = 25571 // 25570 is for runs Joshua watches
 mkdirSync('bench/logs', { recursive: true })
 
 const run = (scenario: string, port: number, round: number) => new Promise<void>(resolve => {
   const log = createWriteStream(`bench/logs/${scenario}-r${round}-${Date.now()}.log`)
-  const child = spawn('node', ['--env-file=../judgment/.env.jeeve', 'scripts/clip.ts', scenario, '--bench'], { env: { ...process.env, JEEVE_PORT: String(port) } })
+  if (existsSync(SHARED)) copyFileSync(SHARED, portLibrary(port)); else rmSync(portLibrary(port), { force: true })
+  const child = spawn('node', ['--env-file=../judgment/.env.jeeve', 'scripts/clip.ts', scenario, '--bench'], { env: { ...process.env, JEEVE_PORT: String(port), JEEVE_KEEP_LIBRARY: '1' } })
   child.stdout.pipe(log)
   child.stderr.pipe(log)
   child.stdout.on('data', d => { for (const line of String(d).split('\n')) if (/^\[(bench|clip)\] (verify|"|\{)/.test(line)) console.log(`${scenario}#${round}: ${line.slice(0, 300)}`) })
@@ -26,6 +44,7 @@ const before = readFileSync('bench/results.jsonl', { flag: 'a+' }).toString().sp
 for (let r = 1; r <= rounds; r++) {
   console.log(`[bench] round ${r}/${rounds}: ${scenarios.join(', ')}`)
   await Promise.all(scenarios.map((s, i) => run(s, BASE_PORT + i, r)))
+  console.log(`[bench] round ${r}: the shared library has ${merge(scenarios.map((_, i) => portLibrary(BASE_PORT + i)))} modules`)
 }
 const rows = readFileSync('bench/results.jsonl', 'utf8').split('\n').filter(Boolean).slice(before).map(l => JSON.parse(l))
 for (const s of scenarios) {
