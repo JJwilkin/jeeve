@@ -1,5 +1,6 @@
 // End to end on the local server: a scripted player "Josh" gives the three first-milestone instructions and
-// checks the outcomes, a live guard veto, the local API, and that the episode landed in Judgment.
+// checks the outcomes, a live guard veto, behaviors System 2 writes (pillaring, crafting, a chest), the local API, and
+// that the episode landed in Judgment.
 // Uses the real Jev, Claude (System 2) and Judgment staging. Run: MINECRAFT_EULA=true npm run e2e (EULA once).
 // Parallel runs (e.g. one per worktree): give each its own port, JEEVE_PORT=25566 npm run e2e. The server then runs
 // in .server/runs/<port>/ (own world and logs, shared jar) and the API listens on 7790 + (port - 25565).
@@ -69,6 +70,15 @@ const fixture = await agent.trialBehavior({
 check('guard: authored code walking off the pillar is vetoed', fixture.end === 'vetoed' && !fixture.passed && agent.bot.entity.position.y >= y0 - 0.1,
   `end ${fixture.end}, error ${fixture.error}, y ${agent.bot.entity.position.y.toFixed(2)}`)
 server.command('fill 50 -60 0 50 -56 0 air')
+// Chat from authored code: whispers reach players who give instructions, never anyone else (the chat policy).
+const heardBefore = whispers.length
+const chatFixture = await agent.trialBehavior({
+  name: 'e2e_whisper', description: 'e2e fixture: whisper', channels: ['hands'], targets: 'block', timeout_s: 5,
+  code: 'async (api) => { await api.whisper("Josh", "e2e hello"); await api.whisper("Stranger", "psst"); return "done" }', trial: { block: 'stone', count: 1 }
+})
+await sleep(500)
+check('chat policy: authored code whispers to Josh, and a whisper to a stranger is refused', whispers.slice(heardBefore).includes('e2e hello') && chatFixture.end === 'error' && /not a player who gives instructions/.test(chatFixture.error ?? ''),
+  `end ${chatFixture.end}, error ${chatFixture.error}`)
 
 server.command('tp Jeeve 0 -60 0')
 server.command('tp Josh 14 -60 6')
@@ -213,7 +223,7 @@ const treeAsked = Date.now()
 josh.whisper('Jeeve', "break that whole tree, leaves included. The leaves won't decay on their own")
 // A behavior System 2 wrote earlier in this run (the oak scenario) may be reused here; what this scenario checks is
 // that authored code does the work: the trial of a new behavior, or a registered one Jev picks.
-const SEED = new Set(['navigate', 'follow', 'track', 'attack_when_ready', 'collect', 'e2e_step_forward'])
+const SEED = new Set(['navigate', 'follow', 'track', 'attack_when_ready', 'collect', 'e2e_step_forward', 'e2e_whisper'])
 const authoredRuns = () => traceRecords().filter(r => r.kind === 'behavior_start' && r.t > treeAsked && !SEED.has(r.name))
 const registered = () => [...agent.modules.modules.values()].filter(m => m.kind === 'behavior')
 // Room for a few write → trial → rewrite rounds: a System 2 call takes 5–40 s and a failed trial up to its time limit.
@@ -230,6 +240,47 @@ await until('a behavior System 2 wrote passed its trial and is registered', () =
   const { loaded } = new ModuleRegistry(() => {}, LIBRARY).load()
   check('behaviors persist: a fresh registry reloads the authored behaviors from the library', ids.length > 0 && ids.every(id => loaded.includes(id)), loaded.join(', '))
 }
+
+// The full player action API: crafting and containers. No seed behavior crafts or opens a chest, so System 2 has
+// to write behaviors that call craft, open and deposit.
+const held = (re: RegExp) => agent.bot.inventory.items().filter(i => re.test(i.name)).reduce((n, i) => n + i.count, 0)
+const callsSince = (t: number) => traceRecords().filter(r => r.kind === 'behavior_end' && r.t > t).flatMap(r => r.detail?.actions ?? []).map((a: { call: string, ok: boolean }) => `${a.call}${a.ok ? '' : ' ✗'}`)
+const WORKSHOP = { x: -20, z: 20 }
+server.command(`fill ${WORKSHOP.x - 6} -60 ${WORKSHOP.z - 6} ${WORKSHOP.x + 6} -55 ${WORKSHOP.z + 6} air`) // the world persists between runs
+server.command(`tp Jeeve ${WORKSHOP.x} -60 ${WORKSHOP.z}`)
+server.command(`tp Josh ${WORKSHOP.x - 3} -60 ${WORKSHOP.z - 3}`)
+server.command('clear Jeeve')
+server.command('give Jeeve oak_log 4') // a pickaxe from logs: 3 logs make the 9 planks for a table, sticks and the head
+await sleep(1500)
+{
+  const asked = Date.now()
+  josh.whisper('Jeeve', 'craft a wooden pickaxe')
+  await until('"craft a wooden pickaxe": Jeeve holds one, crafted from logs', () => held(/^wooden_pickaxe$/) >= 1, 480000)
+  await until('"craft a wooden pickaxe": Josh hears "done"', () => whispers.some(w => w.startsWith('done: craft a wooden pickaxe')), 20000)
+  const calls = callsSince(asked)
+  console.log(`authored calls: ${calls.join('; ')}`)
+  check('"craft a wooden pickaxe": authored code called craft', calls.some(c => c.startsWith('craft(') && !c.endsWith('✗')))
+}
+const CHEST = [WORKSHOP.x + 3, -60, WORKSHOP.z]
+server.command(`setblock ${CHEST.join(' ')} chest`)
+server.command('give Jeeve oak_log 6')
+await sleep(1000)
+{
+  const asked = Date.now()
+  const logsHeld = held(/_log$/)
+  josh.whisper('Jeeve', 'put your logs in the chest')
+  await until('"put your logs in the chest": Jeeve holds no logs', () => held(/_log$/) === 0, 480000)
+  const calls = callsSince(asked)
+  console.log(`authored calls: ${calls.join('; ')}`)
+  check('"put your logs in the chest": authored code opened the chest and deposited', calls.some(c => c.startsWith('open(')) && calls.some(c => c.startsWith('deposit(') && !c.endsWith('✗')))
+  server.command(`tp Josh ${CHEST[0] - 1} -60 ${CHEST[2] + 2}`)
+  await sleep(1000)
+  const chest = await josh.openContainer(josh.blockAt(new Vec3(CHEST[0], CHEST[1], CHEST[2]))!)
+  const inChest = chest.containerItems().filter(i => i.name.endsWith('_log')).reduce((n, i) => n + i.count, 0)
+  chest.close()
+  check('"put your logs in the chest": the logs are in the chest', inChest === logsHeld, `${inChest} in the chest, Jeeve held ${logsHeld}`)
+}
+
 await sleep(12000) // let System 2 answer the last instruction before the episode ends
 
 // Summary from the local mirror.

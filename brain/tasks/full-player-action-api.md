@@ -2,7 +2,7 @@
 date: 2026-10-11
 tags: [task, behaviors, action-api, bitter-lesson]
 status: active
-progress: todo
+progress: done
 ---
 # Task: the full player action API
 
@@ -60,6 +60,6 @@ Give code System 2 writes **every action a human player has**, mapped one-to-one
 - The e2e has a scenario where System 2 writes behaviors live, using the new actions, for instructions it can't do today:
   - "craft a wooden pickaxe" (from logs: planks, sticks, crafting table, pickaxe);
   - "put your logs in the chest" (a chest placed by the e2e).
-- A guard vetoes at least one unsafe use of a new action.
+- ~~A guard vetoes at least one unsafe use of a new action.~~ Dropped by Joshua (2026-10-11): no new guards for now; guards are added by the runtime for the context Jeeve plays in. The e2e checks the chat policy's refusal instead (a whisper to a stranger).
 - `npm run check`, `npm run typecheck` and `npm run e2e` pass.
 - [[roadmap]] and the index are updated, and this task's `progress` is `done`.

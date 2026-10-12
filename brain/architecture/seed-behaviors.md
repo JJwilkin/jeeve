@@ -35,7 +35,7 @@ So a behavior **claims a set of channels**, and starting it replaces whatever ho
 
 - **No restart for the same option.** `keep_current`, or the running option with the same parameters, leaves the behavior running.
 - **A count comes from the goal, not the behavior.** After an interruption, `collect` is restarted with what's left (`collect:oak_log(4)`).
-- **Skipped:** `eat` (add it the first time an episode starves) and `explore` (Jev picks `navigate` toward a compass point instead).
+- **Skipped:** `eat` (System 2 can now write it with `consume`, [[behaviors-and-guards]] → "The player action API") and `explore` (Jev picks `navigate` toward a compass point instead).
 
 ## Guards
 There's no separate filter layer in M1:

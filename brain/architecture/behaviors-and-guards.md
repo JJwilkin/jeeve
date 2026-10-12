@@ -53,7 +53,7 @@ Decided with Joshua while working on [[runtime-authored-behaviors]]. Code is in 
 - `code`: `async (api, target) => 'done' | 'stuck' | 'none_found'`, at most 8000 characters;
 - a trial target, optionally with `pass_when` (see Trial).
 
-**The action API.** Authored code never holds `bot`. It gets:
+**The action API.** *Superseded by "The player action API" below, which gives authored code every player action. This was the first, narrow version.* Authored code never holds `bot`. It gets:
 - **Reads, synchronous:** `self`, `inventory`, `entities`, plus `blockAt` from the shared world queries in `src/world.ts`. `scan` from the same layer is asynchronous: host time inside a synchronous call counts against the realm's 20 ms slice, and the first e2e trial died that way on a radius-16 scan. That layer is owned by [[perception-tools]], and System 2's perception tools use the same one, so there's one block view and not three.
 - **Actions, asynchronous:**
   - `scan` and `reachable` (the world layer's clusters and A*);
@@ -136,6 +136,54 @@ Decided with Joshua while working on [[runtime-authored-behaviors]]. Code is in 
   - The action log *is* the evidence: each rewrite cited a specific call.
   - Budget for 2–3 rounds per new behavior: a System 2 call takes 5–40 s, and a failed trial can take up to its time limit.
   - Jev escalates while a pinned trial holds its channels. Those escalations are now dropped (and traced) during a trial.
+
+### The player action API (2026-10-11)
+Decided with Joshua while working on [[full-player-action-api]]. It replaces the narrow API above, which held only what pillaring needed. Code: `READS`, `ACTIONS` and `NOT_MAPPED` in `src/behaviors.ts`.
+
+**Every player action, one entry each.** Code System 2 writes gets everything a player can do, mapped one to one from Mineflayer (4.39). It doesn't get the abilities we happened to need first. Under the [[bitter-lesson]], we don't decide which abilities exist; the only offline work left is genuinely new inputs or outputs (e.g. vision).
+
+| Channel | Actions |
+|---|---|
+| none | `scan`, `reachable`, `wait`, `next(event)`, `whisper` |
+| legs | `control`, `goto`, `mount`, `dismount`, `steer`, `sleep`, `wake`, `fly` |
+| aim | `look`, `turn` |
+| hands | `dig`, `stop_digging`, `place`, `place_entity`, `equip(glob, dest)`, `unequip`, `hotbar`, `toss`, `attack`, `use`, `release`, `consume`, `fish`, `activate_block`, `activate_entity`, `use_on`, `swing`, `craft(item, count, table?)`, `open`, `open_entity`, `click`, `deposit`, `withdraw`, `close`, `trade`, `enchant`, `rename`, `write_book`, `sign` |
+
+**Reads**, synchronous: `self`, `inventory`, `slots` (every slot, including armor and off-hand), `held` (with durability), `entities`, `blockAt`, `blockInfo` (name and block states, e.g. `persistent`, which [[perception]] had as an open question), `window` (the open window's slots and, for a villager, its trades) and `recipes(item)`. Recipes are game data, not strategy.
+
+**Hand-written, but checked for completeness.** The mapping can't be generated. Mineflayer's arguments are live objects (`Block`, `Entity`, `Item`, `Window`), so each entry turns plain data (a position, an entity id, an item glob, a slot) into them. Which channel an entry drives is a judgment call too. So each entry names the Bot methods it `covers`, and `NOT_MAPPED` lists the rest with a reason:
+- the client lifecycle (`quit`, plugins, `respawn`…);
+- public `chat` (see below);
+- operator and creative-mode actions;
+- queries code can answer from the reads (`nearestEntity`, `blockAtCursor`…).
+
+The selfcheck parses Mineflayer's typed `Bot` interface and fails on any method that's neither covered nor explained. A Mineflayer upgrade that adds an action fails until someone decides what it is. Several methods share an entry: `open` covers `openBlock`, `openChest`, `openFurnace`, `openEnchantmentTable` and `openAnvil`, and `click` covers the slot helpers (`moveSlotItem`, `transfer`…).
+
+**Events are generated.** `api.next(event, ticks)` waits for the next Mineflayer bot event of any name (`windowOpen`, `entityHurt`, `playerCollect`, `chat`…). It resolves with that event's arguments, converted to plain data by their shape (entities, blocks, windows, items, Vec3s), or with null on timeout. Polling still works. Events from before the call aren't buffered, and a run's listeners are removed when it ends.
+
+**Menus belong to the hands.** `open` and `open_entity` need the hands channel. The window they open is held by that run across awaits, until `close()` or the run ends (the cleanup closes it). One window at a time, as in the game. Legs and aim aren't frozen while it's open: walking away closes it on the server's side, as it does for a player. "No moving with a menu open" is an anti-cheat convention, so it waits for the fairness settings for public servers ([[layers]]). `craft` with a table opens and closes the table itself.
+
+**Guards: none new (Joshua, 2026-10-11).** The physics guards still wrap `setControlState`, `dig` and `placeBlock`, so every action built on them is covered. We considered guards on hitting the instructor, chat spam, lava or fire near the bot, and tossing the whole inventory. None were added: guards are a runtime matter, added for the context Jeeve plays in (an arena wants players hittable, a co-op server doesn't), and only once a context needs one. Known holes, for when it does:
+- `steer` drives a vehicle without the movement guard;
+- `use` with a lava bucket isn't checked;
+- `attack` can hit anyone.
+
+**Chat: whispers to allowlisted players only.** For the local milestone, authored code can `whisper` the players who may give instructions, and never runs a `/` command. There's no public chat. Speech stays tied to the people Jeeve works for ([[system-2]] → "Reporting back"). Incoming chat reaches code only as event data from `next("chat")`; code can't eval it, so the injection risk stays where it was: System 2 reading players' text. **Revisit before other servers:** public chat, and marking chat from players who aren't allowlisted as untrusted in System 2's context.
+
+**Item targets.** A behavior can take an `item` target (`{ name, count }`), e.g. something to craft. Jev is offered it for the item an `inventory_delta` goal still needs, the way `collect` is offered block types. Without it, a registered craft behavior would pass its trial and never be picked again.
+
+**Seed behaviors stay wrapped plugins.** They could be written on this API: `track` is `look` plus `wait(1)`, and `attack_when_ready` is `attack` on a cooldown. Rewriting them would give one kind of behavior instead of two, but no new capability, and it would risk an e2e that passes today. `navigate` and `follow` are pathfinding, which is search ([[seed-behaviors]]). `collect` is still the first one System 2 should replace, now that it can.
+
+**Describing it to System 2.** `API_DOC` is generated from the tables, one line per entry, and goes into System 2's cached system prompt. A builder (System 2B, [[system-2a-2b]]) should use the same string. The base system prompt grew from 2,525 to 4,187 tokens. It's cached, so a call pays for it once per 5 minutes.
+
+**First results (e2e, 2026-10-11, E2E PASS, every check).** Two instructions no seed behavior can do. Jeeve starts each with only what the e2e gives him.
+- **"craft a wooden pickaxe"** (4 oak logs, no table): System 2 wrote `craft_item` from the instruction.
+  - v1's arithmetic left 2 planks for a head that needs 3. `craft` said "not enough ingredients", and the run ended `stuck`.
+  - v2 crafted more planks, walked to the table it had placed, and crafted the pickaxe. That was 55 s and two System 2 writes.
+  - On a mini run before that, v1 gave up without acting. `recipes` was capped at 8 entries, and Mineflayer lists one recipe per wood type, so oak was cut off. The cap is gone, and recipes whose ingredients Jeeve holds come first.
+- **"put your logs in the chest"** (a chest 3 blocks off): `deposit_in_chest` passed its first trial in 16 s, and all 7 logs ended up in the chest. The code: `scan` → `goto` → `open` → `deposit("*_log")` → `close`.
+- **Chat policy:** an e2e fixture's whisper to Josh arrives, and its whisper to a stranger is refused.
+- **Cost:** with the longer prompt, instruction calls took 4–15 s for 1–2 turns, in line with [[system-2]]'s 5–9 s. No latency change shows.
 
 **Broken behavior or bad choice.** Traces separate the two:
 - `error` and `timeout` are code faults;

@@ -12,7 +12,7 @@ import vm from 'node:vm'
 
 export type ModuleKind = 'check' | 'watch' | 'behavior'
 // Behaviors also declare the channels they claim, their target type and a time limit.
-export type ModuleSource = { kind: ModuleKind, name: string, description: string, code: string, channels?: string[], targets?: 'block' | 'entity', timeout_s?: number }
+export type ModuleSource = { kind: ModuleKind, name: string, description: string, code: string, channels?: string[], targets?: 'block' | 'entity' | 'item', timeout_s?: number }
 export type Snapshot = Record<string, unknown>
 export type Stats = { calls: number, errors: number, totalMs: number, maxMs: number, lastError?: string }
 export type Origin = { session: string, goal: string, created_at: string }
@@ -215,7 +215,7 @@ export function compileBehavior (src: ModuleSource) {
   if (!LAYOUTS.some(l => l.join('+') === [...(src.channels ?? [])].sort((a, b) => ['legs', 'aim', 'hands'].indexOf(a) - ['legs', 'aim', 'hands'].indexOf(b)).join('+'))) {
     throw new Error(`channels must be one of ${LAYOUTS.map(l => l.join('+')).join(', ')}`)
   }
-  if (src.targets !== 'block' && src.targets !== 'entity') throw new Error('targets must be "block" or "entity"')
+  if (!['block', 'entity', 'item'].includes(src.targets!)) throw new Error('targets must be "block", "entity" or "item"')
   const t = src.timeout_s ?? 0
   if (!(t >= 1 && t <= MODULE_LIMITS.behaviorTimeoutS)) throw new Error(`timeout_s must be 1–${MODULE_LIMITS.behaviorTimeoutS}`)
   behaviorRealm(src.code, [], [], () => undefined)

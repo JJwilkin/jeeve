@@ -30,16 +30,18 @@ const sameSet = (a: Channel[], b: Channel[]) => a.length === b.length && a.every
 export const behaviorsFor = (claims: Channel[], allowed: string[]) => allowed.filter(b => BEHAVIORS[b] && !BEHAVIORS[b].disabled && sameSet(BEHAVIORS[b].channels, claims))
 
 // An entity target is a handle, resolved to a live entity when the answer arrives.
-export type Option = { desc: string, behavior?: string, handle?: string, block?: { name: string, count: number }, place?: Pos }
+export type Option = { desc: string, behavior?: string, handle?: string, block?: Thing, place?: Pos } // block: a block or item target
+export type Thing = { name: string, count: number }
 
 // Option generator `behaviors_x_targets`: behaviors whose channel set is the question's × encoded
-// targets (entities, or block types with what's left of the goal's count), plus `keep_current` and `stop`.
+// targets (entities; block types with what's left of the goal's count; the item the goal still needs), plus
+// `keep_current` and `stop`.
 // A behavior that takes places (navigate) also gets the goal's place, so Jev can walk back once it's out of view.
 // No two options may mean the same thing: Jev splits probability between them and confidence collapses.
 // So `stop` is offered only while something runs, and the running option only as `keep_current`.
 export function optionsFor (
   claims: Channel[], allowed: string[], enc: Pick<Encoded, 'entities' | 'blocks' | 'place'>,
-  running: string | null, remaining: (block: string) => number
+  running: string | null, remaining: (block: string) => number, items: Thing[] = []
 ): Record<string, Option> {
   const whole = claims.length > 1
   const opts: Record<string, Option> = running
@@ -49,10 +51,12 @@ export function optionsFor (
     const spec = BEHAVIORS[name]
     const targets: Array<[string, Option]> = spec.targets === 'entity'
       ? enc.entities.map(e => [`${name}:${e.id}`, { desc: spec.describe(`${e.id} (${e.desc})`), behavior: name, handle: e.id }])
-      : enc.blocks.flatMap(b => {
-        const n = remaining(b.name)
-        return n > 0 ? [[`${name}:${b.name}(${n})`, { desc: spec.describe(`${n} ${b.name} (${b.desc})`), behavior: name, block: { name: b.name, count: n } }]] : []
-      })
+      : spec.targets === 'item'
+        ? items.map(i => [`${name}:${i.name}(${i.count})`, { desc: spec.describe(`${i.count} ${i.name}`), behavior: name, block: i }])
+        : enc.blocks.flatMap(b => {
+          const n = remaining(b.name)
+          return n > 0 ? [[`${name}:${b.name}(${n})`, { desc: spec.describe(`${n} ${b.name} (${b.desc})`), behavior: name, block: { name: b.name, count: n } }]] : []
+        })
     if (spec.describePlace && enc.place) targets.push([`${name}:place`, { desc: spec.describePlace(enc.place.desc), behavior: name, place: enc.place.pos }])
     for (const [key, opt] of targets) if (key !== running) opts[key] = opt
   }
@@ -79,7 +83,7 @@ export function validate (p: Program) {
     if (q.type !== 'choice') continue
     // Worst case options: keep_current + stop + behaviors × target cap (+ the goal's place).
     const max = 2 + behaviorsFor(q.claims, p.allowed_behaviors).reduce((sum, b) =>
-      sum + (BEHAVIORS[b].targets === 'entity' ? p.encoder.params.entity_cap : p.encoder.params.block_cap) + (BEHAVIORS[b].describePlace ? 1 : 0), 0)
+      sum + ({ entity: p.encoder.params.entity_cap, block: p.encoder.params.block_cap, item: 1 }[BEHAVIORS[b].targets]) + (BEHAVIORS[b].describePlace ? 1 : 0), 0)
     if (max > LIMITS.options) throw new Error(`${q.claims.join('+')}: up to ${max} options (max ${LIMITS.options})`)
     for (const b of behaviorsFor(q.claims, p.allowed_behaviors)) covered.add(b)
   }

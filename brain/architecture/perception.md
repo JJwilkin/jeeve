@@ -107,7 +107,7 @@ Built in `src/world.ts`, `src/system2.ts` (the tools and parallel dispatch), `sr
 
 ## Open questions
 - **A window cut during a System 2 call.** The `system2` span can end after its window root, because a 60 s cut doesn't wait for the call. Its spans still export, but the trace was finalized without them. Seen in traces? Then end and reopen the span at the cut, as behaviors do.
-- **Block states.** `blockAt` and `scan` return names only. System 2 rightly expected a logless canopy to decay, but player-placed leaves are `persistent` ([[runtime-authored-behaviors]] e2e). Expose a few states (e.g. `persistent`, `axis`) if more cases like this show up.
+- **Block states.** `blockAt` and `scan` return names only. *Since [[full-player-action-api]], code System 2 writes can read them with `api.blockInfo`; System 2's own tools still can't.* System 2 rightly expected a logless canopy to decay, but player-placed leaves are `persistent` ([[runtime-authored-behaviors]] e2e). Expose a few states (e.g. `persistent`, `axis`) if more cases like this show up.
 - **The `reachable` box.** A path that only exists by leaving the box (a detour of more than 16 blocks) reads as `noPath`. Pad 8 already pruned a 12-block detour round a wall in the selfcheck. If traces show `noPath` for a block `collect` then reaches, widen the pad.
 - **Batching.** If traces keep showing one look per turn, try a stronger prompt, or put the first scan's result into the instruction context.
 - **Clusters merge neighbors.** Two touching trees are one cluster. `names` and bounds usually show it. Split by type, or by trunk, only if traces show System 2 misreading clusters.
