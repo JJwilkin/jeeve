@@ -33,7 +33,7 @@ const between = (r: () => number, lo: number, hi: number) => lo + Math.floor(r()
 
 // canopy: leaves above reach (a 3×3×3 crown on top of the trunk); otherwise one low layer of leaves.
 export type Tree = { x: number, z: number, wood: 'oak' | 'birch', trunk: number, canopy: boolean }
-export type Scene = { trees: Tree[], chest: Xyz | null, jeeve: Xyz, josh: Xyz, instructions: string[], waves: number }
+export type Scene = { trees: Tree[], chest: Xyz | null, jeeve: Xyz, josh: Xyz, instructions: string[], waves: number, item?: string }
 
 function placeTrees (r: () => number, n: number, o: { canopy: boolean, trunk: [number, number], near?: Xyz, within?: number }): Tree[] {
   const trees: Tree[] = []
@@ -66,7 +66,9 @@ export function workshopScene (seed: number): Scene {
   const jeeve: Xyz = [between(r, 28, 46), -60, between(r, -18, -6)]
   const trees = placeTrees(r, between(r, 2, 3), { canopy: false, trunk: [3, 4], near: jeeve, within: 8 })
   const chest: Xyz = [jeeve[0] + pick(r, [-5, -4, 4, 5]), -60, jeeve[2] + pick(r, [-4, 3, 4])]
-  return { trees, chest, waves: 0, jeeve, josh: [jeeve[0] - 3, -60, jeeve[2] + 3], instructions: ['make a wooden pickaxe and put it in the chest'] }
+  // A different tool each run, so a skill has to be general (craft what's asked), not one per item.
+  const item = pick(r, ['wooden_pickaxe', 'wooden_axe', 'wooden_sword', 'wooden_shovel'])
+  return { trees, chest, waves: 0, item, jeeve, josh: [jeeve[0] - 3, -60, jeeve[2] + 3], instructions: [`make a ${item.replace('_', ' ')} and put it in the chest`] }
 }
 
 export function guardScene (seed: number): Scene {

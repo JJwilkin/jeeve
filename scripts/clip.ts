@@ -69,9 +69,10 @@ const SCENARIOS: Record<string, Scenario> = {
       await sleep(1500)
       await josh.lookAt(at.offset(0.5, 0.5, 0.5))
       const chest = await josh.openContainer(josh.blockAt(at)!)
-      const n = chest.containerItems().filter(i => i.name === 'wooden_pickaxe').length
+      const item = workshopScene(SEED).item!
+      const n = chest.containerItems().filter(i => i.name === item).length
       chest.close()
-      return { pass: n > 0, detail: `${n} wooden pickaxe in the chest` }
+      return { pass: n > 0, detail: `${n} ${item} in the chest` }
     }
   }),
   // forage: "get me 16 logs" with every tree beyond sight: search. Scored on what Jeeve holds.

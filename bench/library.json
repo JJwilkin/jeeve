@@ -25,7 +25,8 @@
         },
         "end": "done",
         "ms": 17454
-      }
+      },
+      "idle_rounds": 0
     },
     {
       "kind": "check",
@@ -43,7 +44,8 @@
         "trues": 0,
         "errors": 0,
         "maxMs": 0.155
-      }
+      },
+      "idle_rounds": 1
     },
     {
       "kind": "behavior",
@@ -70,7 +72,8 @@
         },
         "end": "done",
         "ms": 2270
-      }
+      },
+      "idle_rounds": 0
     },
     {
       "kind": "behavior",
@@ -97,7 +100,8 @@
         },
         "end": "done",
         "ms": 1063
-      }
+      },
+      "idle_rounds": 0
     },
     {
       "kind": "check",
@@ -115,7 +119,8 @@
         "trues": 0,
         "errors": 0,
         "maxMs": 0.447
-      }
+      },
+      "idle_rounds": 1
     },
     {
       "kind": "check",
@@ -133,7 +138,8 @@
         "trues": 0,
         "errors": 0,
         "maxMs": 0.202
-      }
+      },
+      "idle_rounds": 0
     },
     {
       "kind": "check",
@@ -151,7 +157,8 @@
         "trues": 2,
         "errors": 0,
         "maxMs": 0.156
-      }
+      },
+      "idle_rounds": 1
     },
     {
       "kind": "check",
@@ -169,7 +176,8 @@
         "trues": 0,
         "errors": 0,
         "maxMs": 0.278
-      }
+      },
+      "idle_rounds": 1
     },
     {
       "kind": "check",
@@ -187,7 +195,8 @@
         "trues": 2,
         "errors": 0,
         "maxMs": 0.166
-      }
+      },
+      "idle_rounds": 1
     },
     {
       "kind": "check",
@@ -205,7 +214,8 @@
         "trues": 0,
         "errors": 0,
         "maxMs": 0.147
-      }
+      },
+      "idle_rounds": 1
     },
     {
       "kind": "check",
@@ -223,7 +233,8 @@
         "trues": 0,
         "errors": 0,
         "maxMs": 0.14
-      }
+      },
+      "idle_rounds": 1
     },
     {
       "kind": "watch",
@@ -241,7 +252,8 @@
         "trues": 17,
         "errors": 0,
         "maxMs": 0.168
-      }
+      },
+      "idle_rounds": 1
     },
     {
       "kind": "check",
@@ -259,7 +271,8 @@
         "trues": 0,
         "errors": 0,
         "maxMs": 0.09
-      }
+      },
+      "idle_rounds": 1
     }
   ]
 }
