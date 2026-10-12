@@ -14,18 +14,27 @@ import mineflayer from 'mineflayer'
 import { startAgent } from '../src/main.ts'
 import { MODEL } from '../src/system2.ts'
 import { beats, parse, type Beat, type Row } from '../viz/src/timeline.ts'
-import { canopy, CANOPY } from './scenes.ts'
+import { canopy, CANOPY, orchard, ORCHARD } from './scenes.ts'
 import { PORT, startServer } from './server.ts'
 
 type Xyz = [number, number, number]
-type Scenario = { setup: (command: (c: string) => void) => void, camera: { at: Xyz, facing: Xyz }, instruction: string, timeoutMs: number }
+// instructions: given in turn, each once the previous one's goal closes. timeoutMs: per instruction.
+type Scenario = { setup: (command: (c: string) => void) => void, camera: { at: Xyz, facing: Xyz }, instructions: string[], timeoutMs: number }
 const SCENARIOS: Record<string, Scenario> = {
   // "It wrote itself a skill": Jeeve can't reach the leaves, 2A asks for a skill, 2B writes and trials a pillaring
   // behavior, and Jeeve climbs and clears them. A wide shot from the south-west takes in Josh, Jeeve and the canopy.
   canopy: {
     setup: command => { canopy(command); command('give Jeeve oak_log 16') },
     camera: { at: [CANOPY.x - 10, -55, CANOPY.z + 10], facing: [CANOPY.x - 1, -56, CANOPY.z] },
-    instruction: CANOPY.instruction,
+    instructions: [CANOPY.instruction],
+    timeoutMs: 10 * 60_000
+  },
+  // "It learns a skill, then uses it": the skill is built on the first tree, then Jev picks it for the other three.
+  // The camera stands back south of the row to take in all four.
+  orchard: {
+    setup: command => { orchard(command); command('give Jeeve oak_log 32') },
+    camera: { at: [39, -52, 6], facing: [39, -56, -12] },
+    instructions: ORCHARD.instructions,
     timeoutMs: 10 * 60_000
   }
 }
@@ -159,10 +168,15 @@ if (camera) {
   await sleep(LEAD_MS)
 }
 const asked = Date.now()
-josh.whisper('Jeeve', scenario.instruction)
-const goal = () => agent.goals.nodes.find(g => g.text === scenario.instruction && !g.parent)
-while (!['completed', 'failed'].includes(goal()?.status ?? '') && Date.now() - asked < scenario.timeoutMs) await sleep(500)
-console.log(`[clip] goal ${goal()?.status ?? 'missing'} after ${((Date.now() - asked) / 1000).toFixed(0)} s`)
+for (const text of scenario.instructions) {
+  const t0 = Date.now()
+  josh.whisper('Jeeve', text)
+  const goal = () => agent.goals.nodes.find(g => g.text === text && !g.parent)
+  while (!['completed', 'failed'].includes(goal()?.status ?? '') && Date.now() - t0 < scenario.timeoutMs) await sleep(500)
+  console.log(`[clip] "${text}": goal ${goal()?.status ?? 'missing'} after ${((Date.now() - t0) / 1000).toFixed(0)} s`)
+  if (goal()?.status !== 'completed') break
+  await sleep(1500)
+}
 const end = Date.now() + TAIL_MS
 await sleep(TAIL_MS)
 
