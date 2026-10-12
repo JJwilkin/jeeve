@@ -191,6 +191,29 @@ export function placedStanding (bot: Bot): Pos[] {
 const coveredBy = new WeakMap<Bot, Set<string>>()
 export const explored = (bot: Bot) => [...coveredBy.get(bot) ?? []].map(k => k.split(',').map(Number))
 
+// The frontier, for search: in each of 8 compass directions from the bot, the nearest cell not yet looked over that
+// borders one that was (frontier-based exploration). Picking unexplored directions from a list of cell centres was
+// too hard for 2A: it searched west four times while the trees it never saw were north and south (forage bench).
+const DIRS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] // +x is east, +z is south
+export function frontier (bot: Bot, within = 128): Array<{ dir: string, at: [number, number], dist: number }> {
+  const seen = coveredBy.get(bot) ?? new Set<string>()
+  const me = bot.entity.position
+  const best = new Map<string, { dir: string, at: [number, number], dist: number }>()
+  for (const k of seen) {
+    const [x, z] = k.split(',').map(Number)
+    for (const [dx, dz] of [[16, 0], [-16, 0], [0, 16], [0, -16], [16, 16], [16, -16], [-16, 16], [-16, -16]]) {
+      const nx = x + dx, nz = z + dz
+      if (seen.has(`${nx},${nz}`)) continue
+      const dist = Math.hypot(nx - me.x, nz - me.z)
+      if (dist > within) continue
+      const dir = DIRS[(Math.round(Math.atan2(nz - me.z, nx - me.x) / (Math.PI / 4)) + 8) % 8]
+      if (!best.has(dir) || dist < best.get(dir)!.dist) best.set(dir, { dir, at: [nx, nz], dist: Math.round(dist) })
+    }
+  }
+  if (!seen.size) for (const [i, dir] of DIRS.entries()) best.set(dir, { dir, at: [Math.round(me.x + Math.cos(i * Math.PI / 4) * 32), Math.round(me.z + Math.sin(i * Math.PI / 4) * 32)], dist: 32 })
+  return DIRS.flatMap(d => best.has(d) ? [best.get(d)!] : [])
+}
+
 // Remembered blocks within radius of the feet, by type, nearest first.
 export function seenTypes (bot: Bot, radius: number): Map<string, Pos[]> {
   const me = feet(bot)
