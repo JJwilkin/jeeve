@@ -71,6 +71,13 @@ Everything visual lives in `viz/`, its own package, so the agent's runtime takes
 - Name tags are off: the viewer draws them as small black text.
 - The viewer's own zombie and husk models render as a crumpled head, so they're drawn as players wearing the zombie skin with arms out. The skin is cropped to the old 64×32 layout so the viewer mirrors the blank left limbs. Check new mob types on a still before trusting them; slimes are fine.
 - Without `world.mp4`, clips fall back to the flat-colour three.js scene (`viz/src/WorldScene.tsx`).
+- **Why not the real client?** It would look exact, but it ties up Joshua's screen, can't re-render old runs, and is slower and flakier than headless rendering. That makes it a fit for a hand-picked hero clip, not the nightly bench.
+- `npm view` lists prismarine-viewer as 1.21.4 only. The GitHub repo is active and supports 26.1, so check there first.
+
+**Reels and highlight cuts:** `node scripts/reel.ts <list.json> clips/<name>` renders title cards with Remotion (`card-wide` and `card-tall`) and joins them with clips through one ffmpeg concat filter, writing `-16x9` and `-9x16` versions.
+- Each entry is a card (`title`, `subtitle`, `card` seconds), a clip (`dir`, optionally cut to `seconds` from `from`), or both.
+- The lists live in `bench/`, because `clips/` is gitignored.
+- To choose cuts: tile a clip's frames every 5 s (`ffmpeg -vf "fps=1/5,scale=480:-1,tile=4x4"`) and pick moments from the captions in the top bar.
 
 ## First clips (2026-10-12)
 - **Without footage** (`--no-record`): `clips/canopy-2026-10-12T05-13-52-548Z/`. 2B's first trial got `stuck`, its second passed. The 210 s run renders to 104 s.

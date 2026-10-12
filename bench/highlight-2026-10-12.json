@@ -1,0 +1,10 @@
+[
+  { "title": "Jeeve: one night of learning", "subtitle": "A Minecraft agent that writes its own skills, then fixes its own blind spots", "card": 2.5 },
+  { "dir": "clips/orchard-2026-10-12T08-22-01-605Z", "from": 23, "seconds": 11 },
+  { "title": "After one night", "subtitle": "Every failure traced to a gap in what it sees or searches, and fixed in the harness", "card": 2 },
+  { "dir": "clips/forage-2026-10-12T11-29-48-692Z", "from": 15, "seconds": 11 },
+  { "dir": "clips/orchard-2026-10-12T11-29-48-709Z", "from": 22, "seconds": 10 },
+  { "dir": "clips/workshop-2026-10-12T11-29-48-700Z", "from": 23, "seconds": 11 },
+  { "dir": "clips/guard-2026-10-12T11-29-48-715Z", "from": 22, "seconds": 8 },
+  { "title": "138 unattended runs", "subtitle": "58 of the last 59 passed", "card": 3 }
+]

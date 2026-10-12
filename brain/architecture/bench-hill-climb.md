@@ -17,7 +17,14 @@ Three scored scenes, run unattended, and what each round changed. Started with J
   - **correctness:** crafting settles the inventory, the bot's own scaffolding and digs, versioned module names, a plan's program carries across steps.
 - **Medians on random layouts by the end:** orchard (3–5 canopy trees) ~160–200 s; workshop (a different tool each run) ~45 s; guard always passes; forage (trees beyond sight) ~200 s with 18–23 logs.
 - `npm run e2e` passes (62 checks) after the night's changes.
-- Clips, start to end: `clips/reel-16x9.mp4` and `clips/reel-9x16.mp4` (`scripts/reel.ts`), from the notable runs' own clips.
+- **Clips, start to end**, all with real Minecraft textures (re-rendered from the recordings, [[brain-monitor]]), built by `node scripts/reel.ts <list> <out>`:
+  - **The reel** (`clips/reel-16x9.mp4` and `-9x16.mp4`, 11:42; list `bench/reel-2026-10-12.json`): five early or mid-night clips, then the four finals, each after a title card. The early ones are:
+    - the first orchard run;
+    - a crafting failure;
+    - a guard death;
+    - orchard at 142 s;
+    - a random layout from no skills.
+  - **The 60 s highlight for posting** (`clips/highlight-16x9.mp4` and `-9x16.mp4`, 58.5 s; list `bench/highlight-2026-10-12.json`): the first orchard run's failed tries, then cuts from each final, with three short cards.
 
 ## The bench
 - `npm run bench -- <rounds> [scenarios] [--fresh]` (`scripts/bench.ts`). Each scenario in `scripts/clip.ts` runs with `--bench`: no OBS, no client, no render. Runs go in parallel on ports 25571+, each with its own world. One row per run goes to `bench/results.jsonl`: pass, time, 2A calls and seconds, builds and trials, the library it started with, plan steps, look-arounds, deaths, commit.

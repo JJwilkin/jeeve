@@ -94,3 +94,9 @@ Update [[trace-schema]] for every new row.
 - The canopy clip is rendered from a real run, at 16:9 and 9:16, with synced panels, speed-ups and captions.
 - `npm run clip <scenario>` produces it end to end, apart from the camera, if that has to stay manual.
 - An architecture note (e.g. `brain/architecture/brain-monitor.md`) records the design. [[roadmap]] and the index are updated, and this task's `progress` is `done`.
+
+## Outcome (2026-10-12)
+All "done when" items are met; the design is in [[brain-monitor]], and the night's bench in [[bench-hill-climb]].
+- **The camera without a client.** The bench records the world, and clips draw it with real Minecraft textures (prismarine-viewer, headless). Joshua's client and OBS are now only for hand-picked hero shots.
+- **Models settled by trying them.** A Sonnet builder was much worse, and Sonnet as System 2 couldn't direct the builder well, so both stay on Opus. The builder runs at medium effort; System 2 runs high for instructions and low for escalations. The builder now gets the scene in its brief.
+- **Shareable output:** an 11:42 progress reel and a 58.5 s highlight, both 16:9 and 9:16, built from lists in `bench/`.

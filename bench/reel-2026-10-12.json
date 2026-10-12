@@ -1,0 +1,52 @@
+[
+  {
+    "dir": "clips/orchard-2026-10-12T08-22-01-605Z",
+    "title": "One night of Jeeve learning",
+    "subtitle": "138 unattended runs. Each failure was traced to a gap in what it sees, searches or remembers, and fixed in the harness. 125 passed, 58 of the last 59."
+  },
+  {
+    "dir": "clips/orchard-2026-10-12T08-22-01-605Z",
+    "title": "Run 1: from nothing",
+    "subtitle": "Four trees with leaves out of reach. Jeeve has never pillared, so the builder writes the skill in 3 tries. 7 minutes."
+  },
+  {
+    "dir": "clips/workshop-2026-10-12T08-22-01-605Z",
+    "title": "Run 1: crafting breaks",
+    "subtitle": "Back-to-back crafts read a stale inventory: planks became buttons and crafts hung. The wood ran out, and Jeeve gave up."
+  },
+  {
+    "dir": "clips/guard-2026-10-12T08-45-15-117Z",
+    "title": "Round 4: Jeeve dies on guard duty",
+    "subtitle": "It flips between two zombies every half second, so no swing lands. Fixed with a short dwell before switching targets."
+  },
+  {
+    "dir": "clips/orchard-2026-10-12T08-45-15-109Z",
+    "title": "Round 4: skills kept, no restarts",
+    "subtitle": "The pillaring skill from round 1 is reused, and the fast model stops restarting it mid-climb. Four trees in 2:22."
+  },
+  {
+    "dir": "clips/orchard-2026-10-12T08-56-35-185Z",
+    "title": "New layouts: learning again",
+    "subtitle": "A random scene with 5 trees, an empty library and no free blocks. A new skill in 2 tries, and every tree cleared."
+  },
+  {
+    "dir": "clips/forage-2026-10-12T11-29-48-692Z",
+    "title": "Search: trees out of sight",
+    "subtitle": "Every tree starts 40–60 blocks away, beyond what Jeeve can see. It searches outward from where it started, and gets its 16 logs in under 3 minutes."
+  },
+  {
+    "dir": "clips/orchard-2026-10-12T11-29-48-709Z",
+    "title": "Final: a new layout, learned skills",
+    "subtitle": "Random trees, oak and birch, and no free blocks. One tree at a time, with the pillaring skill it learned and no scaffolding left behind. 2:41."
+  },
+  {
+    "dir": "clips/workshop-2026-10-12T11-29-48-700Z",
+    "title": "Final: the workshop in 45 seconds",
+    "subtitle": "Crafting and chest skills from earlier runs, reused: logs, planks, a crafting table, the tool, the chest."
+  },
+  {
+    "dir": "clips/guard-2026-10-12T11-29-48-715Z",
+    "title": "Final: guard duty",
+    "subtitle": "Zombie waves at night. Whoever hits Josh is marked for the fast model, and Josh and Jeeve both make it."
+  }
+]
