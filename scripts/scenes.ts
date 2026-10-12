@@ -32,3 +32,37 @@ export function orchard (command: Command, instructor = 'Josh') {
   command('tp Jeeve 27 -60 -12')
   command(`tp ${instructor} 32 -60 -7`)
 }
+
+// A workshop: two small reachable trees and a chest. Making a pickaxe and storing it chains collect, crafting
+// (a crafting table first) and a chest, which no seed behavior does: 2A has to plan and ask the builder.
+export const WORKSHOP = {
+  trees: [{ x: 31, z: -12 }, { x: 34, z: -16 }],
+  chest: [27, -60, -9] as [number, number, number],
+  instruction: 'make a wooden pickaxe and put it in the chest'
+}
+export function workshop (command: Command, instructor = 'Josh') {
+  command('fill 18 -60 -24 44 -45 0 air')
+  for (const t of WORKSHOP.trees) {
+    command(`fill ${t.x} -60 ${t.z} ${t.x} -57 ${t.z} oak_log`)
+    command(`fill ${t.x - 1} -56 ${t.z - 1} ${t.x + 1} -56 ${t.z + 1} oak_leaves[persistent=true]`)
+  }
+  command(`setblock ${WORKSHOP.chest.join(' ')} chest`)
+  command('tp Jeeve 27 -60 -12')
+  command(`tp ${instructor} 24 -60 -8`)
+}
+
+// Guard duty at night: Josh moves between spots while zombies come in waves. Josh plays in survival here (with
+// resistance, so a wave can't kill him outright), so the zombies go for him and Jeeve has to keep them off.
+export const GUARD = {
+  spots: [[30, -60, -8], [38, -60, -12], [32, -60, -18], [24, -60, -12]] as Array<[number, number, number]>,
+  instruction: 'follow me and keep me safe',
+  waves: 4, waveEveryMs: 25_000
+}
+export function guard (command: Command, instructor = 'Josh') {
+  command('fill 14 -60 -28 48 -45 4 air')
+  command('time set midnight')
+  command(`gamemode survival ${instructor}`)
+  command(`effect give ${instructor} resistance 600 2 true`)
+  command(`tp ${instructor} ${GUARD.spots[0].join(' ')}`)
+  command('tp Jeeve 28 -60 -8')
+}

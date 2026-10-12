@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@remotion/cli": "4.0.534",
+    "mineflayer": "^4.39.0",
+    "prismarine-viewer": "^1.33.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "remotion": "4.0.534"

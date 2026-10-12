@@ -11,6 +11,7 @@
     "check": "node src/selfcheck.ts",
     "e2e": "node --env-file=../judgment/.env.jeeve scripts/e2e.ts",
     "clip": "node --env-file=../judgment/.env.jeeve scripts/clip.ts",
+    "bench": "node scripts/bench.ts",
     "typecheck": "tsc"
   },
   "dependencies": {
