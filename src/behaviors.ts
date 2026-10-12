@@ -263,6 +263,24 @@ export type ApiHost = {
 }
 export type ApiCall = { run_id: string, call: string, line?: number, phase: 'start' | 'end', ok?: boolean, out?: unknown, ms?: number }
 type Xyz = [number, number, number]
+// Wait until the inventory (and any open window) stops changing: 150 ms without a slot update, 1.5 s at most.
+// bot.craft resolves before the server's slot updates for the ingredients arrive, so a craft right after one
+// laid out its grid from stale slots: planks became buttons, and crafts hung for 20 s on an output that never came
+// (workshop bench, 2026-10-12). Every action that moves items waits for this before returning.
+export function settle (bot: Bot) {
+  return new Promise<void>(resolve => {
+    const windows = [bot.inventory, bot.currentWindow].filter(Boolean) as Array<{ on: Function, removeListener: Function }>
+    let done = false
+    let quiet: ReturnType<typeof setTimeout>
+    const finish = () => { if (done) return; done = true; clearTimeout(quiet); clearTimeout(cap); for (const w of windows) w.removeListener('updateSlot', changed); resolve() }
+    const changed = () => { clearTimeout(quiet); quiet = setTimeout(finish, 150) }
+    quiet = setTimeout(finish, 150)
+    const cap = setTimeout(finish, 1500)
+    for (const w of windows) w.on('updateSlot', changed)
+  })
+}
+const MOVES_ITEMS = new Set(['deposit', 'withdraw', 'toss', 'click', 'equip', 'unequip'])
+
 // One run's state: the window it opened (hands own windows; closed when the run ends) and its event listeners.
 type Ctx = { bot: Bot, host: ApiHost, win: any, offs: Set<() => void> }
 type Entry = { ch?: Channel, covers: string[], doc: string, run: (c: Ctx, ...a: any[]) => unknown }
@@ -492,6 +510,7 @@ const ACTIONS: Record<string, Entry> = {
       const recipe = bot.recipesFor(id, null, n, t as any)[0]
       if (!recipe) throw new Error(!t && bot.recipesAll(id, null, false).length === 0 && bot.recipesAll(id, null, true).length ? `${item} needs a crafting table` : `not enough ingredients for ${n} ${item}`)
       await bot.craft(recipe, Math.ceil(n / recipe.result.count), t ?? undefined)
+      await settle(bot)
       return countItem(bot, String(item))
     }
   },
@@ -590,7 +609,7 @@ export function authoredSpec (m: Pick<Module, 'name' | 'description' | 'code' | 
             Promise.resolve().then(() => {
               if (e.ch && !channels.includes(e.ch)) throw new Error(`needs the ${e.ch} channel`)
               return e.run(c, ...args)
-            }).then(resolve, rej)
+            }).then(async out => { if (MOVES_ITEMS.has(name)) await settle(bot); return out }).then(resolve, rej)
           }).then(
             out => { settled(true, out); return out },
             err => { settled(false, String(err.message ?? err)); throw err }
