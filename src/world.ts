@@ -20,14 +20,15 @@ export function blockAt (bot: Bot, p: Pos): string | null {
 }
 
 // Blocks whose name matches a glob, grouped into 26-connected clusters, nearest cluster first.
-// Only blocks the bot can see (one ray cast per block, bot.canSeeBlock): no x-ray (decided 2026-10-12).
+// Only blocks the bot can see (visible(): a ray to a face), no x-ray (decided 2026-10-12).
 export function scan (bot: Bot, q: { match: string, radius?: number }) {
   const radius = Math.min(Math.max(1, Math.round(q.radius ?? 16)), SCAN_LIMITS.radius)
   const re = glob(q.match)
   const ids = bot.registry.blocksArray.filter(b => re.test(b.name)).map(b => b.id)
   const found = ids.length ? bot.findBlocks({ matching: ids, maxDistance: radius, count: SCAN_LIMITS.blocks }) : []
   const truncated = found.length >= SCAN_LIMITS.blocks
-  const blocks = found.map(p => bot.blockAt(p)!).filter(b => b && bot.canSeeBlock(b))
+  const eyes = eyesOf(bot)
+  const blocks = found.map(p => bot.blockAt(p)!).filter(b => b && visible(bot, eyes, b.position))
   return { match: q.match, radius, total: blocks.length, truncated, clusters: clusters(bot, blocks).slice(0, SCAN_LIMITS.clusters) }
 }
 
@@ -108,6 +109,7 @@ const empty = (b: { name: string } | null) => !b || NOTHING.has(b.name)
 // A block is seen when a ray from the eyes reaches the centre of one of its faces that has an empty neighbour and
 // faces the eyes. (bot.canSeeBlock casts one ray at the centre with a range measured to the corner, so blocks below
 // eye level or half hidden read as unseen: the bot "saw" 3 of a tree's 27 leaves, 2026-10-12.)
+const eyesOf = (bot: Bot) => bot.entity.position.offset(0, (bot.entity as { eyeHeight?: number }).eyeHeight ?? 1.62, 0)
 const FACES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
 export function visible (bot: Bot, eyes: Vec3, p: Vec3) {
   for (const [x, y, z] of FACES) {
@@ -129,7 +131,7 @@ export function observe (bot: Bot, far = false) {
   const t0 = performance.now()
   const mem = memory(bot)
   const me = feet(bot)
-  const eyes = bot.entity.position.offset(0, (bot.entity as { eyeHeight?: number }).eyeHeight ?? 1.62, 0)
+  const eyes = eyesOf(bot)
   const r = far ? SEEN.far : SEEN.radius
   const [down, up] = far ? [SEEN.down, SEEN.up] : [SEEN.radius, SEEN.radius]
   const p = new Vec3(0, 0, 0)

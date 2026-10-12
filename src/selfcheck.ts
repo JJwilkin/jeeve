@@ -96,6 +96,16 @@ assert.match(version(DEFAULT_PROGRAM), /^v-[0-9a-f]{8}$/)
   assert.deepEqual(calls, [['a'], ['b', 'c', 'd', 'e']]) // the first trigger starts at once; the rest merge
 }
 
+// A ray cast for fake bots: step along the ray until a non-air block.
+const march = (blockAt: (p: Vec3) => { name: string } | null) => (from: Vec3, dir: Vec3, range: number) => {
+  for (let d = 0; d <= range; d += 0.05) {
+    const q = from.plus(dir.scaled(d)).floored()
+    const b = blockAt(q)
+    if (b && b.name !== 'air') return { position: q, name: b.name }
+  }
+  return null
+}
+
 // One decision end to end with a fake bot and a fake Jev.
 async function decideWith (answers: Record<string, any>, place: [number, number, number] | null = null, cooling?: (option: string) => boolean) {
   const me = { id: 1, position: new Vec3(0, 0, 0), velocity: new Vec3(0, 0, 0), yaw: 0, type: 'player', username: 'Jeeve' }
@@ -104,8 +114,8 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
     entity: me, entities: { 1: me, 2: josh }, health: 20, food: 20, heldItem: null,
     inventory: { items: () => [] },
     blockAt: (p: Vec3) => p.x === 0 && p.y === 0 && p.z === -3 ? { name: 'oak_log', position: p } : null,
-    canSeeBlock: () => true, world: { raycast: () => null }
   }
+  bot.world = { raycast: march(bot.blockAt) }
   observe(bot) // the block view is what the bot has seen
   const started: string[] = []
   const targets: unknown[] = []
@@ -326,33 +336,36 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
       .filter(([, n]) => matching.includes(names.indexOf(n)))
       .map(([k]) => new Vec3(...k.split(',').map(Number) as [number, number, number]))
       .filter(p => p.distanceTo(new Vec3(0, 0, 0)) <= maxDistance),
-    canSeeBlock: (b: { position: Vec3 }) => b.position.x > 0,
-    world: { raycast: () => blocked ? { position: new Vec3(0, 0, 0) } : null } // whether an empty spot's view is blocked
   }
+  // blocked: something stands between the eyes and every spot (to test what happens out of sight)
+  bot.world = { raycast: (from: Vec3, dir: Vec3, range: number) => blocked ? { position: new Vec3(0, 1, 0) } : march(bot.blockAt)(from, dir, range) }
   let blocked = false
-  // Line of sight only: the lone log at x = -6 is hidden (this fake bot sees x > 0).
+  // Line of sight only (a ray to a face): the trunk logs at y = 3 and 4 are inside the canopy and the three leaves
+  // behind the trunk are hidden; the lone log at x = -6 is in plain view.
   const logs = scan(bot, { match: '*_log', radius: 16 })
-  assert.deepEqual(logs.clusters.map(c => [c.count, c.nearest, c.y_rel, c.min, c.max]), [[5, [3, 0, 0], [0, 4], [3, 0, 0], [3, 4, 0]]])
-  assert.equal(logs.total, 5)
+  assert.deepEqual(logs.clusters.map(c => [c.count, c.nearest, c.y_rel, c.min, c.max]), [
+    [3, [3, 0, 0], [0, 2], [3, 0, 0], [3, 2, 0]],
+    [1, [-6, 0, 0], [0, 0], [-6, 0, 0], [-6, 0, 0]]
+  ])
+  assert.equal(logs.total, 4)
   const leaves = scan(bot, { match: 'oak_leaves' })
-  assert.deepEqual([leaves.total, leaves.clusters.length, leaves.clusters[0].y_rel], [12, 1, [3, 5]])
+  assert.deepEqual([leaves.total, leaves.clusters.length, leaves.clusters[0].y_rel], [9, 1, [3, 5]])
   assert.equal(scan(bot, { match: 'diamond_ore' }).total, 0)
   assert.equal(blockAt(bot, [3, 2, 0]), 'oak_log')
 
-  // The block view is what the bot has seen: the lone log at x = -6 is out of sight, and the trunk log at y = 3 is
-  // boxed in by leaves on every side, so neither is there.
+  // The block view is what the bot has seen, the same blocks scan sees.
   observe(bot)
   const notable = notableBlocks(bot, 8, 64)
-  assert.deepEqual(notable.map(n => [n.name, n.count]), [['oak_log', 4], ['oak_leaves', 12]]) // grass (136 seen) is terrain
+  assert.deepEqual(notable.map(n => [n.name, n.count]), [['oak_log', 4], ['oak_leaves', 9]]) // grass is terrain
   // A leaf broken out of sight is still believed there; once the bot sees the spot empty, it's forgotten.
-  world.delete('4,5,0')
+  world.delete('2,3,0')
   blocked = true
   observe(bot)
-  assert.equal(notableBlocks(bot, 8, 64).find(n => n.name === 'oak_leaves')!.count, 12)
+  assert.equal(notableBlocks(bot, 8, 64).find(n => n.name === 'oak_leaves')!.count, 9)
   blocked = false
   observe(bot)
-  assert.equal(notableBlocks(bot, 8, 64).find(n => n.name === 'oak_leaves')!.count, 11)
-  world.set('4,5,0', 'oak_leaves')
+  assert.equal(notableBlocks(bot, 8, 64).find(n => n.name === 'oak_leaves')!.count, 8)
+  world.set('2,3,0', 'oak_leaves')
   observe(bot)
   // cleared: nothing matching the bot has seen is left near the goal's place. False while the tree stands, true once
   // the bot has seen every spot empty.

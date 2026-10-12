@@ -80,6 +80,87 @@
         "errors": 0,
         "maxMs": 0.135
       }
+    },
+    {
+      "kind": "behavior",
+      "name": "clear_floating_leaves_pillar",
+      "description": "Clears a floating leaf cluster (no trunk under it) that is too high to reach: picks the cluster of the target block nearest the bot, stands on the ground under its middle, pillars up with blocks from the inventory (dirt/cobble/planks/logs), breaking every target block in reach at each level, then climbs down by breaking the pillar under itself (filling any gap first, never falling more than 1 block), leaving no placed blocks. Needs a few placeable blocks.",
+      "code": "async (api, target) => {\n  const fl = Math.floor;\n  const S = () => api.self();\n  const key = (x, y, z) => x + ',' + y + ',' + z;\n  const isAir = (n) => !n || n === 'air' || n === 'cave_air';\n  const sc = await api.scan({ match: target.name, radius: 24 });\n  if (!sc || !sc.total) return \"none_found\";\n  const cl = sc.clusters.slice().sort((a, b) => a.dist - b.dist)[0];\n  const tx = Math.round((cl.min[0] + cl.max[0]) / 2), tz = Math.round((cl.min[2] + cl.max[2]) / 2);\n  const x0 = Math.min(cl.min[0] - 1, tx - 3), x1 = Math.max(cl.max[0] + 1, tx + 3);\n  const z0 = Math.min(cl.min[2] - 1, tz - 3), z1 = Math.max(cl.max[2] + 1, tz + 3);\n  let gy = cl.min[1];\n  for (let i = 0; i < 40; i++) { const n = api.blockAt(tx, gy - 1, tz); if (!isAir(n) && n !== target.name) break; gy--; }\n  const ytop = cl.max[1] + 6;\n  const placed = new Set();\n  const skip = new Set();\n  const isT = (x, y, z) => !placed.has(key(x, y, z)) && api.blockAt(x, y, z) === target.name;\n  const remaining = () => {\n    const out = [];\n    for (let y = gy; y <= ytop; y++) for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++)\n      if (isT(x, y, z) && !skip.has(key(x, y, z))) out.push([x, y, z]);\n    return out;\n  };\n  const feet = () => { const p = S().pos; return [fl(p[0]), fl(p[1] + 0.05), fl(p[2])]; };\n  const inReach = (b) => { const p = S().pos; return Math.hypot(b[0] + 0.5 - p[0], b[1] + 0.5 - (p[1] + 1.62), b[2] + 0.5 - p[2]) <= 4.4; };\n  const digOne = async (b) => {\n    const f = feet();\n    if (b[0] === f[0] && b[2] === f[2] && b[1] < f[1]) return false;\n    try { await api.dig(b[0], b[1], b[2]); return true; } catch (e) { skip.add(key(b[0], b[1], b[2])); return false; }\n  };\n  const digReach = async () => {\n    for (let pass = 0; pass < 3; pass++) {\n      const list = remaining().filter(inReach).sort((a, b) => b[1] - a[1]);\n      if (!list.length) return;\n      for (const b of list) if (isT(b[0], b[1], b[2]) && inReach(b)) await digOne(b);\n    }\n  };\n  const pickBlock = () => {\n    const inv = api.inventory();\n    for (const n of ['dirt', 'cobblestone', 'cobbled_deepslate', 'netherrack', 'stone']) if (inv[n]) return n;\n    return Object.keys(inv).find(n => n.endsWith('_planks')) || Object.keys(inv).find(n => n.endsWith('_log'));\n  };\n  const climb = async () => {\n    const [x, y, z] = feet();\n    for (const dy of [2]) {\n      if (!isAir(api.blockAt(x, y + dy, z))) {\n        if (isT(x, y + dy, z)) { if (!(await digOne([x, y + dy, z]))) return false; } else return false;\n      }\n    }\n    for (let attempt = 0; attempt < 4; attempt++) {\n      const blk = pickBlock(); if (!blk) return false;\n      try { await api.equip(blk); } catch (e) { return false; }\n      await api.look(x + 0.5, y - 0.5, z + 0.5);\n      await api.control('jump', true);\n      let ok = false;\n      for (let t = 0; t < 16 && !ok; t++) {\n        await api.wait(1);\n        if (S().pos[1] > y + 1.02) { try { await api.place(x, y, z); ok = true; } catch (e) {} }\n      }\n      await api.control('jump', false);\n      for (let t = 0; t < 20; t++) { await api.wait(1); if (S().on_ground) break; }\n      if (!isAir(api.blockAt(x, y, z))) { placed.add(key(x, y, z)); return true; }\n    }\n    return false;\n  };\n  const descend = async () => {\n    for (let i = 0; i < 60; i++) {\n      const [x, y, z] = feet();\n      if (y <= gy) return true;\n      await digReach();\n      if (isAir(api.blockAt(x, y - 1, z))) { await api.wait(5); continue; }\n      if (y - 2 >= gy - 1 && isAir(api.blockAt(x, y - 2, z))) {\n        const blk = pickBlock(); if (!blk) return false;\n        try { await api.equip(blk); await api.place(x, y - 2, z); placed.add(key(x, y - 2, z)); } catch (e) { return false; }\n        continue;\n      }\n      const k = key(x, y - 1, z);\n      if (!(placed.has(k) || isT(x, y - 1, z))) return false;\n      try { await api.dig(x, y - 1, z); } catch (e) { return false; }\n      placed.delete(k);\n      for (let t = 0; t < 30; t++) { await api.wait(1); if (S().on_ground && S().pos[1] < y - 0.5) break; }\n    }\n    return false;\n  };\n  if (feet()[1] <= gy + 1) {\n    try { await api.goto(tx, gy, tz, 0); } catch (e) { try { await api.goto(tx, gy, tz, 1); } catch (e2) {} }\n    const f = feet();\n    if (f[0] !== tx || f[2] !== tz) {\n      await api.look(tx + 0.5, S().pos[1] + 1.6, tz + 0.5);\n      await api.control('forward', true); await api.wait(5); await api.control('forward', false); await api.wait(5);\n    }\n  }\n  let down = true;\n  for (let round = 0; round < 3; round++) {\n    for (let i = 0; i < 26; i++) {\n      await digReach();\n      const rem = remaining();\n      if (!rem.length) break;\n      const fy = feet()[1];\n      if (!rem.some(b => b[1] >= fy)) break;\n      if (fy >= ytop) break;\n      if (!(await climb())) break;\n    }\n    down = await descend();\n    if (!down) break;\n    await digReach();\n    if (!remaining().length) break;\n  }\n  if (!down || placed.size) return \"stuck\";\n  return remaining().length ? \"stuck\" : \"done\";\n}",
+      "version": 1,
+      "channels": [
+        "legs",
+        "aim",
+        "hands"
+      ],
+      "targets": "block",
+      "timeout_s": 120,
+      "origin": {
+        "session": "jeeve-2026-10-12T08-33-47-761Z",
+        "goal": "g-1: break the tree closest to you, leaves included. The leaves won't decay on their own",
+        "created_at": "2026-10-12T08:36:17.951Z"
+      },
+      "trial": {
+        "target": {
+          "block": "oak_leaves",
+          "count": 15
+        },
+        "end": "done",
+        "ms": 20114
+      }
+    },
+    {
+      "kind": "behavior",
+      "name": "craft_item_from_wood",
+      "description": "Crafts the target item (count) from the inventory, resolving recipes recursively: logs -> planks -> sticks etc. For 3x3 recipes it uses a reachable crafting table within 16 blocks, or crafts one and places it on the ground next to the bot. If logs are missing it chops the trunk of the nearest natural tree (trunk standing on dirt/grass with leaves) reachable from the ground and picks up the drops.",
+      "code": "async (api, target) => {\n  const fl = Math.floor;\n  const inv = () => api.inventory();\n  const have = (n) => inv()[n] || 0;\n  const isLog = (n) => /_(log|stem)$/.test(n);\n  const isAir = (n) => !n || n === 'air' || n === 'cave_air' || n === 'short_grass' || n === 'grass' || n === 'fern';\n  const isDirt = (n) => /^(dirt|grass_block|podzol|coarse_dirt|rooted_dirt|mycelium|moss_block|mud|farmland)$/.test(n || '');\n  const feet = () => { const p = api.self().pos; return [fl(p[0]), fl(p[1] + 0.05), fl(p[2])]; };\n  const woodOf = (n) => n.replace(/_(log|planks|wood|stem|hyphae)$/, '');\n  const tried = new Set();\n  let table = null;\n  const pickup = async () => {\n    for (let k = 0; k < 6; k++) {\n      const me = api.self().pos;\n      const its = api.entities(8).filter(e => e.name === 'item' && Math.abs(e.pos[1] - me[1]) < 3);\n      if (!its.length) return;\n      its.sort((a, b) => Math.hypot(a.pos[0]-me[0], a.pos[2]-me[2]) - Math.hypot(b.pos[0]-me[0], b.pos[2]-me[2]));\n      try { await api.goto(fl(its[0].pos[0]), fl(its[0].pos[1]), fl(its[0].pos[2]), 0); } catch (e) {}\n      await api.wait(6);\n    }\n  };\n  const gather = async (kind, n) => {\n    for (let tree = 0; tree < 4; tree++) {\n      if (have(kind) >= n) return true;\n      const sc = await api.scan({ match: kind, radius: 24 });\n      if (!sc || !sc.total) return false;\n      const cols = new Map();\n      for (const c of sc.clusters) for (const p of c.positions) {\n        const k = p[0] + ',' + p[2];\n        if (cols.has(k) || tried.has(k)) continue;\n        let y = p[1];\n        while (isLog(api.blockAt(p[0], y - 1, p[2]) || '')) y--;\n        if (!isDirt(api.blockAt(p[0], y - 1, p[2]))) { cols.set(k, null); continue; }\n        cols.set(k, [p[0], y, p[2]]);\n      }\n      const me = api.self().pos;\n      const cands = [...cols.entries()].filter(e => e[1]).map(e => e[1])\n        .sort((a, b) => Math.hypot(a[0]-me[0], a[1]-me[1], a[2]-me[2]) - Math.hypot(b[0]-me[0], b[1]-me[1], b[2]-me[2]));\n      let pick = null;\n      for (const c of cands.slice(0, 8)) {\n        tried.add(c[0] + ',' + c[2]);\n        let leaves = false;\n        for (let dy = 2; dy <= 10 && !leaves; dy++) for (let dx = -2; dx <= 2 && !leaves; dx++) for (let dz = -2; dz <= 2; dz++)\n          if ((api.blockAt(c[0]+dx, c[1]+dy, c[2]+dz) || '').endsWith('_leaves')) { leaves = true; break; }\n        if (!leaves) continue;\n        const r = await api.reachable(c[0], c[1], c[2]);\n        if (r.reachable || r.status === 'timeout') { pick = c; break; }\n        await api.wait(1);\n      }\n      if (!pick) return false;\n      const [tx, by, tz] = pick;\n      const logName = api.blockAt(tx, by, tz);\n      try { await api.goto(tx, by, tz, 2); } catch (e) {}\n      const ax = Object.keys(inv()).find(x => x.endsWith('_axe'));\n      if (ax) { try { await api.equip(ax); } catch (e) {} }\n      const digCol = async () => {\n        for (let y = by; y < by + 8; y++) {\n          if (api.blockAt(tx, y, tz) !== logName) { if (y > by + 1) break; else continue; }\n          const p = api.self().pos;\n          if (Math.hypot(tx + .5 - p[0], y + .5 - p[1] - 1.62, tz + .5 - p[2]) > 4.4) continue;\n          try { await api.dig(tx, y, tz); } catch (e) {}\n        }\n      };\n      await digCol();\n      try { await api.goto(tx, by, tz, 0); } catch (e) {}\n      await digCol();\n      await api.wait(10);\n      await pickup();\n    }\n    return have(kind) >= n;\n  };\n  const prefWoods = () => {\n    const s = new Set();\n    for (const k of Object.keys(inv())) if (/_(log|planks)$/.test(k)) s.add(woodOf(k));\n    return s;\n  };\n  const score = (r) => {\n    const pw = prefWoods(); let s = 0;\n    for (const [ing, c] of Object.entries(r.uses)) {\n      if (have(ing) >= c) s += 3; else if (have(ing)) s += 2;\n      if (pw.has(woodOf(ing))) s += 2;\n      if (isLog(ing)) s += 1;\n      if (ing.startsWith('oak_')) s += 0.5;\n    }\n    return s;\n  };\n  const ensureTable = async () => {\n    if (table && api.blockAt(...table) === 'crafting_table') return table;\n    const sc = await api.scan({ match: 'crafting_table', radius: 16 });\n    if (sc && sc.total) {\n      const me = api.self().pos;\n      const ps = sc.clusters.flatMap(c => c.positions).sort((a, b) => Math.hypot(a[0]-me[0], a[1]-me[1], a[2]-me[2]) - Math.hypot(b[0]-me[0], b[1]-me[1], b[2]-me[2]));\n      for (const p of ps.slice(0, 4)) {\n        const r = await api.reachable(p[0], p[1], p[2]);\n        if (r.reachable) { table = p; return p; }\n      }\n    }\n    if (!(await obtain('crafting_table', 1, 1))) return null;\n    const f = feet();\n    const offs = [[2,0],[-2,0],[0,2],[0,-2],[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];\n    for (const dy of [0, -1, 1]) for (const [dx, dz] of offs) {\n      const x = f[0]+dx, y = f[1]+dy, z = f[2]+dz;\n      const below = api.blockAt(x, y-1, z);\n      if (!isAir(api.blockAt(x, y, z)) || isAir(below) || /water|lava|chest/.test(below || '')) continue;\n      try {\n        await api.equip('crafting_table');\n        await api.place(x, y, z);\n        if (api.blockAt(x, y, z) === 'crafting_table') { table = [x, y, z]; return table; }\n      } catch (e) {}\n    }\n    return null;\n  };\n  const tryCraft = async (item, crafts, tbl) => {\n    const before = have(item);\n    for (let a = 0; a < 4; a++) {\n      if (tbl) {\n        try { await api.goto(tbl[0], tbl[1], tbl[2], a < 2 ? 2 : 1); } catch (e) {}\n        try { await api.look(tbl[0] + .5, tbl[1] + .5, tbl[2] + .5); } catch (e) {}\n      }\n      try { await api.craft(item, a === 0 ? crafts : 1, tbl || undefined); } catch (e) {}\n      for (let t = 0; t < 10; t++) { if (have(item) > before) return true; await api.wait(2); }\n      try { if (api.window()) await api.close(); } catch (e) {}\n      await api.wait(5);\n    }\n    return have(item) > before;\n  };\n  const obtain = async (item, n, depth) => {\n    if (depth > 5) return have(item) >= n;\n    for (let it = 0; it < 5; it++) {\n      if (have(item) >= n) return true;\n      if (isLog(item)) return await gather(item, n);\n      const rs = api.recipes(item);\n      if (!rs || !rs.length) return false;\n      const r = rs.slice().sort((a, b) => score(b) - score(a))[0];\n      let tbl = null;\n      if (r.needs_table) { tbl = await ensureTable(); if (!tbl) return false; }\n      const crafts = Math.ceil((n - have(item)) / (r.makes || 1));\n      for (const [ing, c] of Object.entries(r.uses)) {\n        if (!(await obtain(ing, c * crafts, depth + 1))) return false;\n      }\n      if (!Object.entries(r.uses).every(([ing, c]) => have(ing) >= c)) continue;\n      if (!(await tryCraft(item, crafts, tbl))) return false;\n    }\n    return have(item) >= n;\n  };\n  const want = target.count || 1;\n  const ok = await obtain(target.name, want, 0);\n  if (ok) return 'done';\n  if (!api.recipes(target.name).length && !isLog(target.name)) return 'none_found';\n  return 'stuck';\n}",
+      "version": 1,
+      "channels": [
+        "legs",
+        "aim",
+        "hands"
+      ],
+      "targets": "item",
+      "timeout_s": 120,
+      "origin": {
+        "session": "jeeve-2026-10-12T08-33-47-967Z",
+        "goal": "g-1: make a wooden pickaxe and put it in the chest",
+        "created_at": "2026-10-12T08:36:10.014Z"
+      },
+      "trial": {
+        "target": {
+          "item": "wooden_pickaxe",
+          "count": 1
+        },
+        "end": "done",
+        "ms": 3508
+      }
+    },
+    {
+      "kind": "behavior",
+      "name": "deposit_pickaxe_in_chest",
+      "description": "Walks to the nearest reachable chest (within 16 blocks), opens it, deposits only the wooden_pickaxe(s) from the inventory (keeps everything else), and closes the chest. Never breaks the chest.",
+      "code": "async (api, target) => {\n  const item = 'wooden_pickaxe';\n  if (!(api.inventory()[item] > 0)) return 'done';\n  const sc = await api.scan({ match: target.name || 'chest', radius: 16 });\n  if (!sc || !sc.total) return 'none_found';\n  const me = api.self().pos;\n  const ps = sc.clusters.flatMap(c => c.positions).sort((a, b) => Math.hypot(a[0]-me[0], a[1]-me[1], a[2]-me[2]) - Math.hypot(b[0]-me[0], b[1]-me[1], b[2]-me[2]));\n  for (const p of ps.slice(0, 5)) {\n    const d = Math.hypot(p[0]+.5-me[0], p[1]+.5-me[1]-1.6, p[2]+.5-me[2]);\n    if (d > 3.5) {\n      const r = await api.reachable(p[0], p[1], p[2]);\n      if (!r.reachable && r.status !== 'timeout') continue;\n      try { await api.goto(p[0], p[1], p[2], 2); } catch (e) {}\n    }\n    for (let a = 0; a < 3; a++) {\n      try {\n        await api.look(p[0]+.5, p[1]+.5, p[2]+.5);\n        await api.open(p[0], p[1], p[2]);\n        await api.deposit(item);\n        await api.wait(3);\n      } catch (e) { await api.wait(5); }\n      try { if (api.window()) await api.close(); } catch (e) {}\n      if (!(api.inventory()[item] > 0)) return 'done';\n    }\n  }\n  return 'stuck';\n}",
+      "version": 1,
+      "channels": [
+        "legs",
+        "aim",
+        "hands"
+      ],
+      "targets": "block",
+      "timeout_s": 40,
+      "origin": {
+        "session": "jeeve-2026-10-12T08-33-47-967Z",
+        "goal": "g-1: make a wooden pickaxe and put it in the chest",
+        "created_at": "2026-10-12T08:36:38.670Z"
+      },
+      "trial": {
+        "target": {
+          "block": "chest",
+          "count": 1
+        },
+        "end": "done",
+        "ms": 451
+      }
     }
   ]
 }
