@@ -197,6 +197,7 @@ The agent should get better over time and start each run from modules that have 
 - its kind, name, description, code and version;
 - its **origin**: the session, and the goal it was written for;
 - its trial result;
+- for a behavior, 2B's proposed `usage` (guidance for the fast model), which 2A sees in its module list;
 - a `disabled` reason, if it broke at runtime.
 
 **How it's used:**
@@ -207,7 +208,7 @@ The agent should get better over time and start each run from modules that have 
 - **The e2e uses a scratch library** (`traces/e2e-module-library.json`), so test runs don't rewrite the real one. It checks that a fresh registry reloads the check System 2 wrote during the run.
 - **Override the path** with `JEEVE_MODULE_LIBRARY` or `moduleLibrary`.
 
-**Not yet:** an outer-loop step that promotes or retires modules based on outcomes. For now, curation is a person reading the diff.
+**Proposals, not yet decisions:** `npm run curate` has 2B propose retiring and merging behaviors from their traces, as a diff for review ([[orchestrator-and-builder]] → "The between-episode loop"). A person still applies it. Promoting or retiring on outcomes alone waits for stage 4's outcome signal.
 
 ## Threats (2026-10-11)
 Hostility isn't a list of mobs. Mineflayer's `hostile` type is a hint, and it misses slimes (typed `mob`). What counts is being hit: Mineflayer reads the attacker from the 1.20+ `damage_event`, so the runtime records it and makes it visible.

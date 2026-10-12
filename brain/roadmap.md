@@ -63,7 +63,7 @@ All three instructions pass, and so do a live guard veto and the local API. Syst
 - ~~the full player action API~~ ([[full-player-action-api]], done 2026-10-11: System 2 wrote crafting and chest behaviors live, on every Mineflayer action, [[behaviors-and-guards]] → "The player action API");
 - guards chosen per context by the runtime (an arena vs. a co-op server), when a context needs one ([[behaviors-and-guards]] → "The player action API");
 - ~~System 2A (orchestrator) / 2B (builder) split~~ ([[system-2a-2b]], done 2026-10-11 → [[orchestrator-and-builder]]: 2A asks for behaviors with a pass check it writes, 2B builds them on the Vercel AI SDK in trial windows a code gate grants);
-- 2B's between-episode loop: library curation, retiring behaviors, trace mining (designed in [[orchestrator-and-builder]], not built);
+- ~~2B's between-episode loop~~ (done 2026-10-11: `npm run curate` proposes keep, retire or merge for each library behavior, plus lessons citing trace ids, as a diff for review; [[orchestrator-and-builder]] → "The between-episode loop");
 - ~~"defend me" fixes~~: done 2026-10-11. Damage is attributed to its source, a fast health drop bypasses the no-repeat window, and the e2e fails on any death and has a slime scenario ([[system-1]] → "Threats", [[system-2]] → Open questions);
 - lessons that outlive their goal;
 - judges and the outer loop (stage 4);

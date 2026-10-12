@@ -104,7 +104,7 @@ Decided with Joshua while working on [[runtime-authored-behaviors]]. Code is in 
 **Library and versioning.**
 - Behaviors persist in `modules/library.json` beside checks and watches, with their channels, target type, time limit, trial result and origin. At startup they join `BEHAVIORS`.
 - `behavior.*` spans carry `jeeve.behavior.version` and, for authored runs, `jeeve.behavior.detail` (the error and the last actions).
-- **Retiring:** 3 runs in a row that end in `error` or `timeout` disable a behavior. It stays allowed, so programs still validate, but it's no longer offered, and `module_disabled` escalates. A new version from System 2 replaces it. Curation is git, as for checks.
+- **Retiring:** 3 runs in a row that end in `error` or `timeout` disable a behavior. It stays allowed, so programs still validate, but it's no longer offered, and `module_disabled` escalates. A new version from System 2 replaces it. Curation is git, as for checks: `npm run curate` proposes retirements and merges for review ([[orchestrator-and-builder]] → "The between-episode loop").
 
 **First results (e2e, 2026-10-11).** A 6-log trunk under a 3×3×3 canopy of persistent leaves, all out of reach from the ground. Josh says "break that whole tree, leaves included".
 - **Run 1:** System 2 first tried `collect`. On the second `stuck` it wrote `pillar_and_break`.
