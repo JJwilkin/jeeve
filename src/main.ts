@@ -107,7 +107,9 @@ export async function startAgent (opts: AgentOptions) {
     if (leaf) escalate('module_disabled', { module: m.id, reason }, leaf)
   }, library)
   const libraryLoad = modules.load()
-  const lookup = (name: string) => modules.get(name)
+  // Modules are listed to 2A by id (clear_tall_tree@2); it names them that way, so a version suffix is accepted anywhere.
+  const bare = (name: string) => name.replace(/@\d+$/, '')
+  const lookup = (name: string) => modules.get(bare(name))
   // The shared block view (src/world.ts), who code may whisper to, and each authored action as a trace row.
   const world: ApiHost = { blockAt, scan, reachable, allowed: opts.allowed, onCall: c => recorder.jsonl({ kind: 'api_call', ...c, out: short(c.out) }) }
   // Behaviors from the library join the seed set; Jev sees them wherever System 2's program allows them.
@@ -527,25 +529,29 @@ export async function startAgent (opts: AgentOptions) {
     }
     if (d.goal_action === 'renew') goal.started = Date.now()
     if (d.program) {
-      const base = goal.program ?? goals.program() ?? DEFAULT_PROGRAM
+      // While a plan runs, the program belongs to the instruction's goal, so it carries across steps (each step
+      // started back on the default program, and 2A set the same one again per tree).
+      const owner = goal !== top && top.plan ? top : goal
+      const base = owner.program ?? goals.program() ?? DEFAULT_PROGRAM
       const next: Program = {
         ...base,
         parent: version(base),
         reason: d.note,
         guidance: d.program.guidance ?? base.guidance,
-        allowed_behaviors: d.program.allowed_behaviors ?? base.allowed_behaviors,
+        allowed_behaviors: d.program.allowed_behaviors?.map(bare) ?? base.allowed_behaviors,
         triggers: {
           ...base.triggers,
           heartbeat_ms: Math.min(5000, Math.max(LIMITS.minIntervalMs, d.program.heartbeat_ms ?? base.triggers.heartbeat_ms)),
-          watch: (d.program.watch ?? base.triggers.watch ?? []).filter(n => {
+          watch: (d.program.watch?.map(bare) ?? base.triggers.watch ?? []).filter(n => {
             const ok = modules.get(n)?.kind === 'watch'
             if (!ok) problems.push(`no registered watch module named ${n}`)
             return ok
           })
         }
       }
-      try { validate(next); goal.program = next } catch (err) {
+      try { validate(next); owner.program = next } catch (err) {
         recorder.record('program', { attrs: { 'jeeve.program.version': version(next), 'jeeve.program.activation': 'failed_check', 'jeeve.program.cites': cite }, output: { error: String(err) } })
+        problems.push(`program refused: ${String(err)}`) // told at once, not found out a minute later
       }
     }
     if (d.push_child) {
@@ -577,6 +583,7 @@ export async function startAgent (opts: AgentOptions) {
   let requestCount = 0
 
   function request (r: RequestDraft, goal: Goal, cite: string): string | null {
+    r = { ...r, pass_when: bare(r.pass_when ?? '') }
     const t = r.trial ?? {}
     if (modules.get(r.pass_when)?.kind !== 'check') return `request refused: pass_when names no registered check module (${r.pass_when})`
     if (r.targets === 'entity' ? !findEntity(t.entity ?? null) : !t[r.targets]) return `request refused: trial target not found (${JSON.stringify(t)})`
