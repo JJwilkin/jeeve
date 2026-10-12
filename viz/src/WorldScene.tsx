@@ -49,23 +49,26 @@ function Body ({ e }: { e: Entity }) {
   )
 }
 
-function Camera ({ at, facing }: { at: number[], facing: number[] }) {
+// follow: a third-person camera behind and above Jeeve, for scenes too wide for one shot (forage).
+function Camera ({ at, facing, follow }: { at: number[], facing: number[], follow?: number[] }) {
   const { camera } = useThree()
   useLayoutEffect(() => {
-    camera.position.set(at[0], at[1], at[2])
-    camera.lookAt(facing[0], facing[1], facing[2])
+    const [p, f] = follow ? [[follow[0], follow[1] + 9, follow[2] + 13], [follow[0], follow[1] + 1, follow[2]]] : [at, facing]
+    camera.position.set(p[0], p[1], p[2])
+    camera.lookAt(f[0], f[1], f[2])
     camera.updateProjectionMatrix()
-  }, [camera, at, facing])
+  }, [camera, at, facing, follow?.[0], follow?.[1], follow?.[2]])
   return null
 }
 
-export function WorldScene ({ blocks, entities, camera }: { blocks: Block[], entities: Entity[], camera: { at: number[], facing: number[] } }) {
+export function WorldScene ({ blocks, entities, camera }: { blocks: Block[], entities: Entity[], camera: { at: number[], facing: number[], follow?: boolean } }) {
+  const jeeve = camera.follow ? entities.find(e => e.username === 'Jeeve')?.pos : undefined
   return (
     <>
       <color attach='background' args={['#9cc8f0']} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[30, 60, 20]} intensity={1.1} />
-      <Camera at={camera.at} facing={camera.facing} />
+      <Camera at={camera.at} facing={camera.facing} follow={jeeve} />
       <Blocks blocks={blocks} />
       {entities.map(e => <Body key={e.id} e={e} />)}
     </>

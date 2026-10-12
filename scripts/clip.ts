@@ -25,13 +25,13 @@ type Ctx = { josh: Bot, agent: Awaited<ReturnType<typeof startAgent>>, command: 
 // goal runs until then). during: what the scene does meanwhile (waves, Josh moving). verify: the outcome, judged
 // from the world by Josh, never from the agent's own claims. view: the box the world recorder keeps (the camera).
 type Scenario = {
-  setup: (command: (c: string) => void) => void, camera: { at: Xyz, facing: Xyz }, view: { min: Xyz, max: Xyz },
+  setup: (command: (c: string) => void) => void, camera: { at: Xyz, facing: Xyz, follow?: boolean }, view: { min: Xyz, max: Xyz },
   instructions: string[], timeoutMs: number, during?: (ctx: Ctx) => Promise<void>, verify: (ctx: Ctx) => Promise<{ pass: boolean, detail: string }>
 }
 const SEED = Number(process.env.JEEVE_SEED ?? Date.now() % 1_000_000)
 const GUARD_WAVE_MS = 25_000
 // A scenario from a generated scene: setup builds it, the camera and the recorded box frame it.
-function fromScene (scene: Scene, o: Pick<Scenario, 'timeoutMs' | 'verify' | 'during'> & { setup?: (command: (c: string) => void) => void, area?: { min: Xyz, max: Xyz }, camera?: { at: Xyz, facing: Xyz } }): Scenario {
+function fromScene (scene: Scene, o: Pick<Scenario, 'timeoutMs' | 'verify' | 'during'> & { setup?: (command: (c: string) => void) => void, area?: { min: Xyz, max: Xyz }, camera?: Scenario['camera'] }): Scenario {
   const area = o.area ?? AREA
   return {
     setup: command => { build(command, scene, 'Josh', area); o.setup?.(command) },
@@ -76,7 +76,7 @@ const SCENARIOS: Record<string, Scenario> = {
   }),
   // forage: "get me 16 logs" with every tree beyond sight: search. Scored on what Jeeve holds.
   forage: fromScene(forageScene(SEED), {
-    timeoutMs: 10 * 60_000, area: FORAGE_AREA, camera: { at: [0, 6, 78], facing: [0, -60, 0] },
+    timeoutMs: 10 * 60_000, area: FORAGE_AREA, camera: { at: [0, 6, 78], facing: [0, -60, 0], follow: true },
     verify: async ({ agent }) => {
       const n = agent.bot.inventory.items().filter(i => i.name.endsWith('_log')).reduce((s, i) => s + i.count, 0)
       return { pass: n >= 16, detail: `Jeeve holds ${n} logs` }
