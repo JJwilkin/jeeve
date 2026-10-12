@@ -83,7 +83,16 @@ It never gets the goal text, which is the player's raw instruction.
 - **Library poisoning.** A registered behavior persists in `modules/library.json`. `npm run curate` proposes retirements and merges, but a person still reads the diff before anything changes.
 
 ## The between-episode loop (built 2026-10-11)
-Designed with Joshua, then built as a follow-up. `npm run curate` (`-- --days 7 --library <file> --out curation`) runs it after an episode. It's a 2B run with no request and no body. Nothing is applied without review until stage 4 gives an outcome signal to trust.
+Designed with Joshua, then built as a follow-up. `npm run curate` (`-- --days 7 --sessions <globs> --library <file> --out curation`) runs it after an episode. It's a 2B run with no request and no body. Nothing is applied without review until stage 4 gives an outcome signal to trust.
+
+**Decided with Joshua (2026-10-11):**
+- **Offline only.** Curation runs between episodes, and its proposals are reviewed in git. It isn't a background loop during play: how to fold it into the live agent is still open.
+- **No one global library, no one set of lessons.** Different use cases will want different optimizations, e.g. a PvP arena vs. an assistant in someone's world. So:
+  - every proposal and lesson is tagged with the **contexts** its evidence came from;
+  - curate runs over a **chosen subset of sessions** (`--sessions`) and a chosen library file (`--library`).
+
+  That keeps per-use-case libraries possible later. Profiles aren't built now; the door is just left open.
+- **A context is `<label>@<server>`.** The label is `JEEVE_CONTEXT` (or the agent's `context` option; the e2e sets `e2e`). The server is host:port. Both go into the `episode_start` carry-over, so each session says what it was for. Sessions from before this read `unlabelled@unknown server`. A goal type isn't recorded as such; the goals each behavior served are listed with their text.
 
 **Code reads the facts first** (`gather` in `src/curate.ts`), with virtual SQL ([[trace-schema]]). For each library behavior, it looks only at the sessions where *that version* was in use: the session it was born in (its `origin`), plus every session that logged it as `loaded`. The e2e starts each run from an empty scratch library, so `pillar_up_and_clear@1` names different code in different sessions. Scoping by session keeps their runs apart. Per behavior:
 - **picked runs** by `end_reason`, and trial runs (`decided_by builder:*`) counted separately;
@@ -92,14 +101,16 @@ Designed with Joshua, then built as a follow-up. `npm run curate` (`-- --days 7 
 - its **`module_disabled` events**;
 - **goals that completed or failed** while it was allowed (a `program` manifest active in the goal's lifetime listed it) or while it ran.
 
+Each behavior's facts also list its contexts. The model is told not to retire or merge across contexts on the strength of one context alone.
+
 The model gets these facts and the library code, plus `run_sql` to read more. It ends with one `submit_curation`:
 - **keep**, **retire**, or **merge** for every behavior. A merge is a new general version, written in the same call;
-- **lessons** that outlive their goal, each citing trace, span or run ids and carrying an expiry date. This is [[system-2]]'s rule for kept lessons.
+- **lessons** that outlive their goal, each citing trace, span or run ids and carrying an expiry date. This is [[system-2]]'s rule for kept lessons. Each lesson also says where it holds (`applies_to`, the model's words), and code adds the contexts of the sessions its evidence came from.
 
 **What it writes** (`curation/<time>/`; `propose` in `src/curate.ts`):
-- **`library.json`**: the proposed library. Retired and merged-away behaviors are removed; git history keeps them. A merge is added as the next version of its name, with no `trial`, because a rewrite can't be trialled without a body. A merge whose code doesn't compile, or that replaces a behavior not in the library, is dropped, and what it would have replaced stays.
+- **`library.json`**: the proposed library. Retired and merged-away behaviors are removed; git history keeps them. A merge is added as the next version of its name, with no `trial`, because a rewrite can't be trialled without a body. Its `origin.contexts` lists the contexts of what it replaces and of its evidence. A merge whose code doesn't compile, or that replaces a behavior not in the library, is dropped, and what it would have replaced stays.
 - **`library.diff`**: a unified diff on the library's own path. `git apply` applies it after review.
-- **`review.md`**: one row per behavior with its decision, picked runs, goals, the reason and the evidence, plus each merge's code. An evidence id that never appeared in a query result is flagged "not in the queried traces", so an invented id is visible.
+- **`review.md`**: one row per behavior with its contexts, its decision, picked runs, goals, the reason and the evidence, plus each merge's code. An evidence id that never appeared in a query result is flagged "not in the queried traces", so an invented id is visible.
 - **`lessons.md`**: the lessons, with their evidence and expiry.
 
 **Traced** as a `curate` root span in a session of its own (`curate-<time>`), with the AI SDK's spans under it, as for `builder`.
@@ -117,6 +128,7 @@ The model gets these facts and the library code, plus `run_sql` to read more. It
   - **Merged 5 into 2:** `craft_item@2`, which checks the inventory instead of trusting `craft()`'s return, and a `deposit_in_chest@2` that takes an item glob.
   - **Kept 2:** the tree behaviors with a real `done` run.
   - **Every decision cites run or trace ids,** and every cited id was in a query result. The diff applied cleanly to the library.
+- **Scoped to the 10-12 sessions** (`--sessions 'jeeve-2026-10-12*'`): the first try still showed 2B the behaviors no chosen session had used, and it retired two of them with no evidence from that subset. That's the cross-use-case leak the decision above rules out. Now a behavior with no chosen session gets no facts, isn't shown to 2B, can't be retired or merged, and `review.md` lists it as out of scope. The rerun left 4 untouched, retired 2 and kept 4. Every context read `unlabelled@unknown server`, since those sessions predate the label.
 - **One lesson was an artifact of the test:** "check the library before requesting a capability", drawn from the same three goals being rebuilt run after run. That's the e2e starting from an empty library, which the curator couldn't know. Lessons need a reviewer for exactly this.
 
 ## Tracing

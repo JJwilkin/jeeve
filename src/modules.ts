@@ -17,7 +17,8 @@ export type ModuleKind = 'check' | 'watch' | 'behavior'
 export type ModuleSource = { kind: ModuleKind, name: string, description: string, code: string, channels?: string[], targets?: 'block' | 'entity' | 'item', timeout_s?: number, usage?: string }
 export type Snapshot = Record<string, unknown>
 export type Stats = { calls: number, errors: number, totalMs: number, maxMs: number, lastError?: string }
-export type Origin = { session: string, goal: string, created_at: string }
+// contexts: for a curated merge, the use cases its evidence came from (src/curate.ts).
+export type Origin = { session: string, goal: string, created_at: string, contexts?: string[] }
 // run is the predicate; a behavior module never runs as one (it starts through src/behaviors.ts).
 export type Module = ModuleSource & { version: number, id: string, run: (s: Snapshot) => boolean, stats: Stats, disabled?: string, origin?: Origin, trial?: Trial | BehaviorTrial }
 // One library entry: the latest version of a module, as written to the library file.

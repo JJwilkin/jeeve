@@ -2,6 +2,8 @@
 // builder run with no request and no body. It reads the module library and what recent sessions did with each
 // behavior (virtual SQL), and proposes keep / retire / merge plus lessons with cited trace ids. Nothing is
 // applied: the output is a library diff and a lessons file for a person to review (scripts/curate.ts).
+// Use cases stay apart: it can run over a chosen subset of sessions, and every proposal and lesson is tagged with
+// the contexts (the episode's label and server) its evidence came from. There is no one global library by design.
 import { OpenTelemetry } from '@ai-sdk/otel'
 import { generateText, jsonSchema, stepCountIs, tool, type LanguageModel } from 'ai'
 import { trace, type Span } from '@opentelemetry/api'
@@ -17,7 +19,7 @@ type Count = Record<string, number>
 // What the traces say about one library behavior, only from sessions where this version was in use (loaded at
 // startup, or born there): e2e runs start from scratch libraries, so a name@version can mean other code elsewhere.
 export type Facts = {
-  id: string, sessions: string[],
+  id: string, sessions: string[], contexts: string[],
   picked: Count, // runs the fast model chose, by end_reason
   trial_runs: Count, // runs that were trials (decided_by builder:<request>)
   failures: { session: string, trace_id: string, span_id: string, run_id: string, end: string, detail: string }[], // the last 10
@@ -31,22 +33,35 @@ const quote = (xs: Iterable<string>) => [...xs].map(x => `'${x.replace(/['\\]/g,
 const OK_ENDS = new Set(['done', 'goal_closed', 'replaced', 'stopped', 'place_changed', 'target_dead'])
 const ENDED = new Set(['completed', 'failed', 'abandoned'])
 
-// Every id in a result row: what a cited lesson or decision can be checked against.
-function remember (seen: Set<string>, rows: Row[]) {
-  for (const r of rows) for (const v of Object.values(r)) if (typeof v === 'string' && /^(r-\d+|[0-9a-f]{16}|[0-9a-f]{32})$/.test(v)) seen.add(v)
+// What evidence points at: every id seen in a result row → its session (what a citation is checked against), and
+// each session → its context, "<label>@<server>" from the episode_start carry-over.
+export type Evidence = { ids: Map<string, string>, contexts: Map<string, string> }
+export const newEvidence = (): Evidence => ({ ids: new Map(), contexts: new Map() })
+const contextOf = (ev: Evidence, session: string) => ev.contexts.get(session) ?? 'unlabelled@unknown server'
+const contextsOf = (ev: Evidence, sessions: Iterable<string>) => [...new Set([...sessions].filter(Boolean).map(s => contextOf(ev, s)))].sort()
+
+function remember (ev: Evidence, rows: Row[]) {
+  for (const r of rows) {
+    for (const v of Object.values(r)) if (typeof v === 'string' && /^(r-\d+|[0-9a-f]{16}|[0-9a-f]{32})$/.test(v) && !ev.ids.get(v)) ev.ids.set(v, r.session ?? r.session_id ?? '')
+  }
   return rows
 }
 
-export async function gather (sql: Sql, library: Stored[], days: number, seen: Set<string>): Promise<Facts[]> {
+// sessions: globs over session ids (e.g. "jeeve-2026-10-12*"); only these are read. A behavior with no chosen session
+// gets no facts: it's out of scope, so this run can't retire or merge it.
+export async function gather (sql: Sql, library: Stored[], o: { days: number, sessions?: string[] }, ev: Evidence): Promise<Facts[]> {
   const behaviors = library.filter(m => m.kind === 'behavior')
   if (!behaviors.length) return []
-  const q = async (s: string) => remember(seen, (await sql(s)).rows)
-  const since = `started_at > now() - INTERVAL ${Math.floor(days)} DAY`
+  const q = async (s: string) => remember(ev, (await sql(s)).rows)
+  const only = (o.sessions ?? []).map(g => new RegExp(`^${g.split('*').map(p => p.replace(/\W/g, '\\$&')).join('.*')}$`))
+  const chosen = (session: string) => !only.length || only.some(re => re.test(session))
+  const since = `started_at > now() - INTERVAL ${Math.floor(o.days)} DAY`
   const ids = behaviors.map(m => `${m.name}@${m.version}`)
   const loaded = await q(`SELECT session_id AS session, attributes['jeeve.module.id'] AS id FROM telemetry.spans WHERE span_name = 'module' AND attributes['jeeve.module.activation'] = 'loaded' AND attributes['jeeve.module.id'] IN (${quote(ids)}) AND ${since} GROUP BY session, id`)
-  const inUse = new Map(behaviors.map(m => [`${m.name}@${m.version}`, new Set([...(m.origin ? [m.origin.session] : []), ...loaded.filter(r => r.id === `${m.name}@${m.version}`).map(r => r.session)])]))
+  const inUse = new Map(behaviors.map(m => [`${m.name}@${m.version}`, new Set([...(m.origin ? [m.origin.session] : []), ...loaded.filter(r => r.id === `${m.name}@${m.version}`).map(r => r.session)].filter(chosen))]))
   const scope = `session_id IN (${quote(new Set([...inUse.values()].flatMap(s => [...s])))}) AND ${since}`
-  const [runs, trials, builds, requests, disabled, goals, programs] = await Promise.all([
+  const [episodes, runs, trials, builds, requests, disabled, goals, programs] = await Promise.all([
+    q(`SELECT session_id AS session, input FROM telemetry.spans WHERE span_name = 'carry_over' AND input LIKE '%"episode_start"%' AND ${scope}`),
     q(`SELECT session_id AS session, trace_id, span_id, started_at, attributes['jeeve.behavior.name'] AS name, attributes['jeeve.behavior.version'] AS version, attributes['jeeve.behavior.run_id'] AS run_id, attributes['jeeve.behavior.end_reason'] AS end_reason, attributes['jeeve.behavior.decided_by'] AS decided_by, substring(attributes['jeeve.behavior.detail'], 1, 400) AS detail FROM telemetry.spans WHERE startsWith(span_name, 'behavior.') AND attributes['jeeve.behavior.name'] IN (${quote(behaviors.map(m => m.name))}) AND attributes['jeeve.behavior.end_reason'] != 'cut' AND ${scope} ORDER BY started_at LIMIT 5000`),
     q(`SELECT session_id AS session, trace_id, span_id, attributes['jeeve.request.id'] AS request, attributes['jeeve.module.id'] AS id, attributes['jeeve.trial.end'] AS end_reason, attributes['jeeve.trial.passed'] AS passed, attributes['jeeve.trial.preempted'] AS preempted FROM telemetry.spans WHERE span_name = 'trial' AND attributes['jeeve.module.id'] IN (${quote(ids)}) AND ${scope}`),
     q(`SELECT session_id AS session, trace_id, attributes['jeeve.request.id'] AS request, attributes['jeeve.builder.status'] AS status, attributes['jeeve.builder.trials'] AS trials, attributes['jeeve.builder.latency_ms'] AS latency_ms FROM telemetry.spans WHERE span_name = 'builder' AND ${scope}`),
@@ -57,6 +72,7 @@ export async function gather (sql: Sql, library: Stored[], days: number, seen: S
     q(`SELECT session_id AS session, started_at, output FROM telemetry.spans WHERE span_name = 'program' AND attributes['jeeve.program.activation'] = 'ok' AND (${behaviors.map(m => `output LIKE '%"${m.name}"%'`).join(' OR ')}) AND ${scope}`)
   ])
   const json = (s: string) => { try { return JSON.parse(s) } catch { return {} } }
+  for (const e of episodes) { const c = json(e.input); ev.contexts.set(e.session, `${c.context ?? 'unlabelled'}@${c.server ?? 'unknown server'}`) }
   const allowedAt = programs.map(p => ({ session: p.session, started_at: p.started_at, allowed: (json(p.output).manifest?.allowed_behaviors ?? []) as string[] }))
   const needs = new Map(requests.map(r => [`${r.session}|${r.request}`, String(json(r.input).need ?? '')]))
   // Goal lifetimes: pushed → completed, failed or abandoned, per session.
@@ -66,7 +82,7 @@ export async function gather (sql: Sql, library: Stored[], days: number, seen: S
     else if (ENDED.has(g.transition)) { const s = spans.findLast(s => s.session === g.session && s.goal === g.goal && !s.to); if (s) s.to = g }
   }
   const tally = (rs: Row[]) => rs.reduce<Count>((c, r) => ({ ...c, [r.end_reason]: (c[r.end_reason] ?? 0) + 1 }), {})
-  return behaviors.map(m => {
+  return behaviors.filter(m => inUse.get(`${m.name}@${m.version}`)!.size).map(m => {
     const id = `${m.name}@${m.version}`
     const used = inUse.get(id)!
     const mine = runs.filter(r => r.name === m.name && Number(r.version) === m.version && used.has(r.session))
@@ -74,7 +90,7 @@ export async function gather (sql: Sql, library: Stored[], days: number, seen: S
     const myTrials = trials.filter(t => t.id === id && used.has(t.session))
     const requested = new Set(myTrials.map(t => `${t.session}|${t.request}`))
     return {
-      id, sessions: [...used],
+      id, sessions: [...used], contexts: contextsOf(ev, used),
       picked: tally(picked),
       trial_runs: tally(mine.filter(r => r.decided_by?.startsWith('builder:'))),
       failures: picked.filter(r => !OK_ENDS.has(r.end_reason)).slice(-10).map(r => ({ session: r.session, trace_id: r.trace_id, span_id: r.span_id, run_id: r.run_id, end: r.end_reason, detail: r.detail })),
@@ -96,7 +112,7 @@ export async function gather (sql: Sql, library: Stored[], days: number, seen: S
 
 export type Decision = { behavior: string, action: 'keep' | 'retire' | 'merge', reason: string, evidence: string[] }
 export type Merge = { name: string, description: string, code: string, channels: string[], targets: 'block' | 'entity' | 'item', timeout_s: number, usage: string, replaces: string[], reason: string, evidence: string[] }
-export type Lesson = { lesson: string, evidence: string[], expires: string }
+export type Lesson = { lesson: string, evidence: string[], expires: string, applies_to: string }
 export type Proposal = { decisions: Decision[], merges: Merge[], lessons: Lesson[], summary: string }
 
 const ids = { type: 'array', items: { type: 'string' }, description: 'Trace, span or run ids from the evidence' }
@@ -125,8 +141,11 @@ const SUBMIT = {
     lessons: {
       type: 'array',
       items: {
-        type: 'object', additionalProperties: false, required: ['lesson', 'evidence', 'expires'],
-        properties: { lesson: { type: 'string' }, evidence: ids, expires: { type: 'string', description: 'A date (YYYY-MM-DD) after which it needs fresh evidence' } }
+        type: 'object', additionalProperties: false, required: ['lesson', 'evidence', 'expires', 'applies_to'],
+        properties: {
+          lesson: { type: 'string' }, evidence: ids, expires: { type: 'string', description: 'A date (YYYY-MM-DD) after which it needs fresh evidence' },
+          applies_to: { type: 'string', description: 'Where it holds, in your words: the kind of goal, server or mode. Code adds the contexts its evidence came from.' }
+        }
       }
     },
     summary: { type: 'string', description: 'Two or three sentences for the reviewer.' }
@@ -141,6 +160,8 @@ Decide for every behavior:
 - merge: it nearly duplicates another library behavior; write one general version that replaces them (in merges). Only merge when the merged code is clearly at least as good as each one it replaces: it can't be trialled now, so it is trialled in the next episode.
 A trial that passed as goal_closed means the goal completed while it ran, not that the behavior did the work; a behavior that only ever passed that way is less proven.
 
+Each behavior's facts name the contexts it was used in (<label>@<server>). Different use cases (a PvP arena, an assistant in someone's world) may want different behaviors, so don't retire or merge across contexts on the strength of one context alone, and say in a lesson where it holds.
+
 Then lessons: what these traces teach that should outlive the goal that produced them (about behaviors, the api, trials, or the world), each citing the trace, span or run ids that show it, with an expiry date. Few and specific beats many and vague. No lessons is fine.
 
 Nothing you propose is applied: a person reviews it as a git diff. Use run_sql to read more (a failed run's full jeeve.behavior.detail, a trial span's output) when the facts aren't enough, then call submit_curation once.
@@ -149,14 +170,14 @@ Behaviors are code: \`async (api, target) => ...\` returning "done", "stuck" or 
 ${API_DOC}`
 
 // One 2B run over the facts. parent: the `curate` span; the AI SDK's spans go under it, as in build().
-export async function curate (library: Stored[], facts: Facts[], sql: Sql, seen: Set<string>, parent: Span, session: string, model: LanguageModel): Promise<Proposal | null> {
+export async function curate (library: Stored[], facts: Facts[], sql: Sql, ev: Evidence, parent: Span, session: string, model: LanguageModel): Promise<Proposal | null> {
   let proposal: Proposal | null = null
   const tools = {
     run_sql: tool({
       description: "Run one read-only SELECT over the traces (telemetry.spans; span attributes are in attributes['jeeve.*']).",
       inputSchema: jsonSchema<{ query: string }>({ type: 'object', additionalProperties: false, required: ['query'], properties: { query: { type: 'string' } } }),
       execute: async ({ query }) => {
-        try { return JSON.stringify(remember(seen, (await sql(query)).rows)).slice(0, 20_000) } catch (err) { return `error: ${(err as Error).message}` }
+        try { return JSON.stringify(remember(ev, (await sql(query)).rows)).slice(0, 20_000) } catch (err) { return `error: ${(err as Error).message}` }
       }
     }),
     submit_curation: tool({
@@ -166,7 +187,7 @@ export async function curate (library: Stored[], facts: Facts[], sql: Sql, seen:
     })
   }
   const brief = {
-    library: library.filter(m => m.kind === 'behavior').map(m => ({ id: `${m.name}@${m.version}`, description: m.description, usage: m.usage ?? null, channels: m.channels, targets: m.targets, timeout_s: m.timeout_s, origin: m.origin, trial: m.trial, code: m.code })),
+    library: library.filter(m => facts.some(f => f.id === `${m.name}@${m.version}`)).map(m => ({ id: `${m.name}@${m.version}`, description: m.description, usage: m.usage ?? null, channels: m.channels, targets: m.targets, timeout_s: m.timeout_s, origin: m.origin, trial: m.trial, code: m.code })),
     facts
   }
   const judgment = JudgmentTracerProvider.getInstance()
@@ -187,49 +208,52 @@ export async function curate (library: Stored[], facts: Facts[], sql: Sql, seen:
 
 // The proposal as files for review. Retired and merged-away behaviors leave the library; a merge adds a new
 // version with no trial result. A merge whose code doesn't compile is dropped, and what it replaces stays.
-export function propose (library: Stored[], proposal: Proposal, o: { session: string, seen: Set<string>, facts: Facts[], now: string }) {
+export function propose (library: Stored[], proposal: Proposal, o: { session: string, ev: Evidence, facts: Facts[], now: string }) {
   // The brief lists behaviors as name@version; decisions and merges may name them either way.
   const bare = (n: string) => n.split('@')[0]
   const p = { ...proposal, decisions: proposal.decisions.map(d => ({ ...d, behavior: bare(d.behavior) })), merges: proposal.merges.map(mg => ({ ...mg, replaces: mg.replaces.map(bare) })) }
-  const names = new Set(library.filter(m => m.kind === 'behavior').map(m => m.name))
+  const names = new Set(o.facts.map(f => f.id.split('@')[0])) // only behaviors in scope can be retired or merged away
   const rejected: string[] = []
   const merges = p.merges.filter(mg => {
     const unknown = mg.replaces.filter(n => !names.has(n))
     try {
-      if (unknown.length) throw new Error(`replaces behaviors not in the library: ${unknown.join(', ')}`)
+      if (unknown.length) throw new Error(`replaces behaviors not in this run's scope: ${unknown.join(', ')}`)
       compileBehavior({ kind: 'behavior', ...mg })
       return true
     } catch (err) { rejected.push(`${mg.name}: ${(err as Error).message}`); return false }
   })
+  const evidenceContexts = (xs: string[]) => contextsOf(o.ev, xs.map(x => o.ev.ids.get(x) ?? ''))
   const leaving = new Set([...p.decisions.filter(d => d.action === 'retire' && names.has(d.behavior)).map(d => d.behavior), ...merges.flatMap(mg => mg.replaces)])
   const modules: Stored[] = library.filter(m => m.kind !== 'behavior' || !leaving.has(m.name))
   for (const mg of merges) {
     const { replaces, reason, evidence, ...src } = mg
     const version = Math.max(0, ...library.filter(m => m.name === mg.name).map(m => m.version)) + 1
-    modules.push({ kind: 'behavior', ...src, version, origin: { session: o.session, goal: `curate: merge of ${replaces.join(', ')}`, created_at: o.now } })
+    const contexts = [...new Set([...o.facts.filter(f => replaces.includes(f.id.split('@')[0])).flatMap(f => f.contexts), ...evidenceContexts(evidence)])].sort()
+    modules.push({ kind: 'behavior', ...src, version, origin: { session: o.session, goal: `curate: merge of ${replaces.join(', ')}`, created_at: o.now, contexts } })
   }
   modules.sort((a, b) => a.name.localeCompare(b.name))
 
-  const cite = (xs: string[]) => xs.length ? xs.map(x => o.seen.has(x) ? `\`${x}\`` : `\`${x}\` (not in the queried traces)`).join(', ') : '(none)'
+  const cite = (xs: string[]) => xs.length ? xs.map(x => o.ev.ids.has(x) ? `\`${x}\`` : `\`${x}\` (not in the queried traces)`).join(', ') : '(none)'
   const counts = (c: Count) => Object.entries(c).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'
   const decided = new Map(p.decisions.map(d => [d.behavior, d]))
   const review = [
     `# Library curation ${o.now}`, '', `Session \`${o.session}\`. Proposed only: nothing was applied. Apply with \`git apply\` on library.diff, or copy library.json over the library.`, '', p.summary, '',
-    '| Behavior | Decision | Picked runs | Goals (allowed or ran) | Why | Evidence |', '|---|---|---|---|---|---|',
+    '| Behavior | Contexts | Decision | Picked runs | Goals (allowed or ran) | Why | Evidence |', '|---|---|---|---|---|---|---|',
     ...o.facts.map(f => {
       const name = f.id.split('@')[0]
       const d = decided.get(name)
       const into = merges.find(mg => mg.replaces.includes(name))
       const action = into ? `merge → ${into.name}` : leaving.has(name) ? 'retire' : 'keep'
       const goals = f.goals.map(g => `${g.goal} ${g.outcome}`).join(', ') || 'none'
-      return `| ${f.id} (${f.sessions.length} session${f.sessions.length === 1 ? '' : 's'}) | ${action}${d && !action.startsWith(d.action) ? ` (proposed ${d.action})` : ''} | ${counts(f.picked)} | ${goals} | ${(d?.reason ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ')} | ${cite(d?.evidence ?? [])} |`
+      return `| ${f.id} (${f.sessions.length} session${f.sessions.length === 1 ? '' : 's'}) | ${f.contexts.join(', ')} | ${action}${d && !action.startsWith(d.action) ? ` (proposed ${d.action})` : ''} | ${counts(f.picked)} | ${goals} | ${(d?.reason ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ')} | ${cite(d?.evidence ?? [])} |`
     }),
-    ...merges.flatMap(mg => ['', `## Merge: ${mg.name} (untrialled; replaces ${mg.replaces.join(', ')})`, '', mg.reason, '', `Evidence: ${cite(mg.evidence)}`, '', `Usage: ${mg.usage}`, '', '```js', mg.code, '```']),
+    ...(names.size < library.filter(m => m.kind === 'behavior').length ? ['', `Out of scope (no chosen session used them), left as they are: ${library.filter(m => m.kind === 'behavior' && !names.has(m.name)).map(m => `${m.name}@${m.version}`).join(', ')}.`] : []),
+    ...merges.flatMap(mg => ['', `## Merge: ${mg.name} (untrialled; replaces ${mg.replaces.join(', ')})`, '', mg.reason, '', `Contexts: ${modules.find(m => m.name === mg.name)!.origin!.contexts!.join(', ') || 'none'}`, '', `Evidence: ${cite(mg.evidence)}`, '', `Usage: ${mg.usage}`, '', '```js', mg.code, '```']),
     ...(rejected.length ? ['', '## Merges dropped', '', ...rejected.map(r => `- ${r}`)] : [])
   ].join('\n') + '\n'
   const lessons = [
-    `# Lessons ${o.now}`, '', `From curation session \`${o.session}\`. Proposed: each cites its evidence and expires ([[system-2]] → "Lessons kept past their goal").`, '',
-    ...(p.lessons.length ? p.lessons.map(l => `- ${l.lesson}\n  - evidence: ${cite(l.evidence)}\n  - expires: ${l.expires}`) : ['(none)'])
+    `# Lessons ${o.now}`, '', `From curation session \`${o.session}\`. Proposed: each cites its evidence, names the contexts that evidence came from, and expires ([[system-2]] → "Lessons kept past their goal").`, '',
+    ...(p.lessons.length ? p.lessons.map(l => `- ${l.lesson}\n  - applies to: ${l.applies_to}\n  - contexts: ${evidenceContexts(l.evidence).join(', ') || 'none'}\n  - evidence: ${cite(l.evidence)}\n  - expires: ${l.expires}`) : ['(none)'])
   ].join('\n') + '\n'
   return { library: JSON.stringify({ modules }, null, 2) + '\n', review, lessons }
 }

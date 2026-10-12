@@ -33,7 +33,7 @@ await server.ready
 
 const LIBRARY = `traces/e2e-module-library-${PORT}.json` // a scratch library, so test runs don't rewrite modules/library.json
 if (existsSync(LIBRARY)) rmSync(LIBRARY)
-const agent = await startAgent({ port: PORT, allowed: ['Josh'], apiPort: API, moduleLibrary: LIBRARY })
+const agent = await startAgent({ port: PORT, allowed: ['Josh'], apiPort: API, moduleLibrary: LIBRARY, context: 'e2e' })
 const josh = mineflayer.createBot({ username: 'Josh', auth: 'offline', host: 'localhost', port: PORT })
 await Promise.all([new Promise<void>(r => agent.bot.once('spawn', () => r())), new Promise<void>(r => josh.once('spawn', () => r()))])
 const whispers: string[] = []

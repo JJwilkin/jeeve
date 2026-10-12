@@ -29,6 +29,7 @@ export type AgentOptions = {
   project?: string // Judgment project for traces
   system2?: boolean // default: on when ANTHROPIC_API_KEY is set
   moduleLibrary?: string // where modules System 2 writes persist across runs
+  context?: string // what this episode is for (e.g. e2e, pvp-arena), traced so curation can keep use cases apart; default JEEVE_CONTEXT
   ask?: Ask
 }
 
@@ -671,7 +672,7 @@ export async function startAgent (opts: AgentOptions) {
       recorder.windowEvent('vetoed', { channel, reason })
       channels.veto(channel, reason)
     })
-    recorder.openWindow({ reason: 'episode_start', bot: bot.username, modules: libraryLoad })
+    recorder.openWindow({ reason: 'episode_start', bot: bot.username, server: `${opts.host ?? 'localhost'}:${opts.port ?? 25565}`, context: opts.context ?? process.env.JEEVE_CONTEXT ?? null, modules: libraryLoad })
     for (const id of libraryLoad.loaded) recorder.record('module', { attrs: { 'jeeve.module.id': id, 'jeeve.module.activation': 'loaded' } })
     activate(DEFAULT_PROGRAM, 'episode start')
     console.log(`[jeeve] module library ${library}: ${libraryLoad.loaded.length} loaded${libraryLoad.skipped.length ? `, skipped ${libraryLoad.skipped.join('; ')}` : ''}`)
