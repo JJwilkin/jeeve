@@ -57,9 +57,24 @@ const metadata: CalculateMetadataFunction<Props> = async ({ props }) => {
   return { durationInFrames: Math.max(1, Math.ceil(duration(segs) / 1000 * FPS)), props: { ...props, clip, segs } }
 }
 
+// A title card between clips in a progress reel (scripts/reel.ts): what changed, in a line or two.
+type CardProps = { title: string, subtitle: string, layout: Layout }
+function Card ({ title, subtitle, layout }: CardProps) {
+  const frame = useCurrentFrame()
+  const tall = layout === 'tall'
+  return (
+    <AbsoluteFill style={{ background: '#0b0e14', color: '#e6e9ef', fontFamily: "Inter, -apple-system, 'Helvetica Neue', Arial, sans-serif", justifyContent: 'center', alignItems: 'center', padding: tall ? 80 : 160, opacity: Math.min(1, frame / 8) }}>
+      <div style={{ fontSize: tall ? 84 : 76, fontWeight: 800, textAlign: 'center', lineHeight: 1.15 }}>{title}</div>
+      <div style={{ fontSize: tall ? 44 : 38, color: '#8b93a6', marginTop: 36, textAlign: 'center', lineHeight: 1.35, maxWidth: 1400 }}>{subtitle}</div>
+    </AbsoluteFill>
+  )
+}
+
 const Root = () => <>
   {(['wide', 'tall'] as const).map(layout =>
     <Composition key={layout} id={layout} component={Clip} width={SIZE[layout].w} height={SIZE[layout].h} fps={FPS} durationInFrames={1} defaultProps={{ layout }} calculateMetadata={metadata} />)}
+  {(['wide', 'tall'] as const).map(layout =>
+    <Composition key={`card-${layout}`} id={`card-${layout}`} component={Card} width={SIZE[layout].w} height={SIZE[layout].h} fps={FPS} durationInFrames={FPS * 3} defaultProps={{ layout, title: '', subtitle: '' }} />)}
 </>
 
 registerRoot(Root)
