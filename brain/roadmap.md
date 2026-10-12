@@ -62,7 +62,8 @@ All three instructions pass, and so do a live guard veto and the local API. Syst
 - ~~perception as tools~~: done 2026-10-11. System 2 looks with `scan` and `reachable` ([[perception]]); next is block states and more consistent batching of looks;
 - ~~the full player action API~~ ([[full-player-action-api]], done 2026-10-11: System 2 wrote crafting and chest behaviors live, on every Mineflayer action, [[behaviors-and-guards]] → "The player action API");
 - guards chosen per context by the runtime (an arena vs. a co-op server), when a context needs one ([[behaviors-and-guards]] → "The player action API");
-- System 2A (orchestrator) / 2B (builder) split ([[system-2a-2b]], task);
+- ~~System 2A (orchestrator) / 2B (builder) split~~ ([[system-2a-2b]], done 2026-10-11 → [[orchestrator-and-builder]]: 2A asks for behaviors with a pass check it writes, 2B builds them on the Vercel AI SDK in trial windows a code gate grants);
+- 2B's between-episode loop: library curation, retiring behaviors, trace mining (designed in [[orchestrator-and-builder]], not built);
 - "defend me" fixes: attribute damage to its source, let a fast health drop bypass the no-repeat window, fail the e2e on any death ([[system-1]] and [[system-2]] → Open questions);
 - lessons that outlive their goal;
 - judges and the outer loop (stage 4);

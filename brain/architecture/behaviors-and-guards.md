@@ -43,6 +43,8 @@ The library isn't fixed. When System 2 finds a missing capability ("I need to ri
 5. **Version:** every behavior is versioned, so a trace shows which version ran.
 
 ### How it's built (2026-10-11)
+*Refined by [[orchestrator-and-builder]]:* the builder (System 2B) now writes and trials behaviors, at 2A's request. `pass_when` is required, and it's 2A's check, not the writer's. Trials wait for a window that a code gate grants when nothing threatens the bot. Below, "System 2 writes" means 2B, and "System 2 adds it to `allowed_behaviors`" means 2A. The API docs are `API_DOCS` in `src/behaviors.ts`.
+
 Decided with Joshua while working on [[runtime-authored-behaviors]]. Code is in `src/behaviors.ts` (`authoredSpec`, the action API), `src/modules.ts` (sandbox, library) and `src/main.ts` (trials).
 
 **Writing.** System 2 calls a `write_behavior` tool next to `submit_decision`. It isn't a `submit_decision` field, because one more strict object made the API reject the grammar as too large. A behavior is:

@@ -2,7 +2,7 @@
 date: 2026-10-11
 tags: [task, system-2, architecture, harness]
 status: active
-progress: todo
+progress: doing
 ---
 # Task: split System 2 into an orchestrator (2A) and a builder (2B)
 

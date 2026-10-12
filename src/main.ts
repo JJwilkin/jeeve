@@ -1,19 +1,22 @@
 // Jeeve client: joins a server like a player, takes instructions (whispers or a local API), keeps the goal
-// tree, runs System 1 on Jev under a program System 2 (Claude) shapes, and traces everything to Judgment.
+// tree, runs System 1 on Jev under a program System 2A (Claude) shapes, has System 2B build the behaviors 2A
+// asks for, and traces everything to Judgment.
 import { createServer, type Server } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import mineflayer from 'mineflayer'
 import pf from 'mineflayer-pathfinder'
 import collectblock from 'mineflayer-collectblock'
 import { Judgeval } from 'judgeval'
+import type { Span } from '@opentelemetry/api'
 import { authoredSpec, BEHAVIORS, CHANNELS, Channels, type ApiHost, type Spec } from './behaviors.ts'
+import { build, BUILDER_MODEL, type BehaviorDraft, type BuildResult, type CapabilityRequest, type TrialReport, type TrialTarget } from './builder.ts'
 import { coalescing, makeDecider, type Ask } from './decide.ts'
 import { inventoryCounts, newHandles, rawSnapshot, type Directive } from './encoder.ts'
 import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal } from './goals.ts'
 import { guardedMovements, installGuards } from './guards.ts'
-import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type BehaviorTrial, type ModuleSource, type Snapshot } from './modules.ts'
+import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type ModuleSource, type Snapshot } from './modules.ts'
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
-import { makeSystem2, type BehaviorDraft, type Decision, type Perceive } from './system2.ts'
+import { makeSystem2, type Decision, type RequestDraft } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
 import { blockAt, reachable, scan, type Pos } from './world.ts'
 
@@ -32,6 +35,9 @@ export type AgentOptions = {
 const WINDOW_MS = 60_000
 const NO_REPEAT_MS = 30_000
 const EVENT_WINDOW_MS = 5_000
+// A trial window opens only while nothing threatens the bot: no hostile this close, no damage this recently.
+// The same test pre-empts a running trial; past maxPreempts the trial goes back to 2B as pre-empted.
+const TRIAL_WINDOW = { hostileWithin: 8, quietMs: 5_000, maxPreempts: 3 }
 
 export async function startAgent (opts: AgentOptions) {
   const project = opts.project ?? process.env.JEEVE_PROJECT ?? 'jeeve-dev'
@@ -95,6 +101,7 @@ export async function startAgent (opts: AgentOptions) {
   function afterGoalChange (closed: Goal) {
     recorder.goalPath = goals.pathText()
     channels.stopStalePlace(goals.place())
+    dropStaleRequests()
     if (!closed.parent) {
       directive = null
       channels.stop(CHANNELS, 'goal_closed')
@@ -235,14 +242,14 @@ export async function startAgent (opts: AgentOptions) {
   // ---- System 2: one call in flight, escalations merged, no repeats within 30 s ----
   // Its perception calls are traced as `perceive` spans under the open system2 span.
   let system2Span: ReturnType<Recorder['open']> | undefined
-  const perceive: Perceive = async (tool, input) => {
+  const perceive = async (tool: string, input: Record<string, unknown>, parent: Span | undefined = system2Span) => {
     const t0 = performance.now()
     let out: unknown
     try {
       out = tool === 'scan' ? scan(bot, input as Parameters<typeof scan>[1]) : tool === 'reachable' ? await reachable(bot, input.position as Pos) : { error: `unknown tool ${tool}` }
     } catch (err) { out = { error: String(err) } }
     recorder.record('perceive', {
-      parent: system2Span,
+      parent,
       attrs: {
         'jeeve.perceive.tool': tool, 'jeeve.perceive.query': JSON.stringify(input), 'jeeve.perceive.mode': tool === 'scan' ? (input.los ? 'los' : 'xray') : undefined,
         'jeeve.perceive.latency_ms': +(performance.now() - t0).toFixed(1), 'jeeve.perceive.result_bytes': JSON.stringify(out).length
@@ -254,7 +261,7 @@ export async function startAgent (opts: AgentOptions) {
   const useSystem2 = opts.system2 ?? !!process.env.ANTHROPIC_API_KEY
   const system2 = useSystem2
     ? makeSystem2({
-      perceive,
+      perceive: (tool, input) => perceive(tool, input),
       sql: judgeval ? q => judgeval.sql(q) : undefined,
       schema: judgeval ? await judgeval.discoverSchema().catch(() => undefined) : undefined,
       effort: trigger => trigger.includes('instruction') ? 'medium' : 'low'
@@ -271,7 +278,7 @@ export async function startAgent (opts: AgentOptions) {
     note(`escalation: ${reason}`)
     recorder.stats.escalations.push(reason)
     const key = `${reason}|${goal.id}|${version(program)}`
-    if (jevDoubtDuringTrial(reason) || (reason !== 'instruction' && reason !== 'behavior_trial' && Date.now() - (lastSent.get(key) ?? 0) < NO_REPEAT_MS)) {
+    if (jevDoubtDuringTrial(reason) || (reason !== 'instruction' && reason !== 'capability_result' && Date.now() - (lastSent.get(key) ?? 0) < NO_REPEAT_MS)) {
       recorder.jsonl({ kind: 'escalation_suppressed', reason, goal: goal.id })
       return
     }
@@ -297,6 +304,7 @@ export async function startAgent (opts: AgentOptions) {
       program: { version: version(program), guidance: program.guidance, allowed_behaviors: program.allowed_behaviors, heartbeat_ms: program.triggers.heartbeat_ms },
       fast_model_view: lastView,
       modules: modules.list(),
+      requests: requests.map(r => ({ id: r.id, goal: r.goal.id, need: r.need, status: windowAsk?.req === r ? 'waiting_for_trial_window' : trial?.ask?.req === r ? 'trialling' : r.status })),
       recent_events: recentFor(30_000),
       window: { session_id: session, previous_trace_id: recorder.prevTraceId, summary_so_far: recorder.summary() }
     }
@@ -340,10 +348,10 @@ export async function startAgent (opts: AgentOptions) {
       goal.log.push(module ? `registered ${module.id} (true on ${trial.trues}/${trial.states} recent states)` : `module ${src.name} refused: ${trial.error}`)
       if (!module) problems.push(`module ${src.name} refused: ${trial.error}`)
     }
-    // After modules, so a trial's pass_when can name a check registered in this decision.
-    for (const b of d.new_behaviors ?? []) {
-      const problem = startTrial(b, goal, cite)
-      goal.log.push(problem ?? `trial started: ${b.name}`)
+    // After modules, so a request's pass_when can name a check registered in this decision.
+    for (const r of d.requests ?? []) {
+      const problem = request(r, goal, cite)
+      goal.log.push(problem ?? `capability requested: ${r.need}`)
       if (problem) problems.push(problem)
     }
     const check = (spec: CheckSpec, g: Goal) => {
@@ -404,11 +412,85 @@ export async function startAgent (opts: AgentOptions) {
     if (problems.length) escalate('module_failed', { problems }, goal)
   }
 
-  // ---- behaviors System 2 writes: one live trial at a time, under guards, pinned against Jev ----
-  // Pass: the run returns "done", or the goal it was written for completes while it runs. Either way the
-  // result, with the error and the last actions, goes back to System 2 as a behavior_trial escalation.
+  // ---- capability requests: 2A asks, 2B builds (src/builder.ts), one build at a time, in this process ----
+  // A request lives as long as its goal is on the active path; one per goal, a newer one replaces it.
+  type Req = CapabilityRequest & { goal: Goal, status: 'queued' | 'building', abort: AbortController, span: { trace_id: string, span_id: string } }
+  let requests: Req[] = []
+  let requestCount = 0
+
+  function request (r: RequestDraft, goal: Goal, cite: string): string | null {
+    const t = r.trial ?? {}
+    if (modules.get(r.pass_when)?.kind !== 'check') return `request refused: pass_when names no registered check module (${r.pass_when})`
+    if (r.targets === 'entity' ? !findEntity(t.entity ?? null) : !t[r.targets]) return `request refused: trial target not found (${JSON.stringify(t)})`
+    for (const old of requests.filter(q => q.goal === goal)) cancelRequest(old, 'replaced by a newer request')
+    const req: Req = { id: `c-${++requestCount}`, need: r.need, constraints: r.constraints ?? [], targets: r.targets, trial: t, pass_when: r.pass_when, goal, status: 'queued', abort: new AbortController(), span: { trace_id: '', span_id: '' } }
+    const span_id = recorder.record('request', {
+      attrs: { 'jeeve.request.id': req.id, 'jeeve.goal.id': goal.id, 'jeeve.program.cites': cite },
+      input: { need: req.need, constraints: req.constraints, targets: req.targets, trial: t, pass_when: req.pass_when }
+    })
+    req.span = { trace_id: recorder.window ? recorder.ids(recorder.window).trace_id : '', span_id }
+    requests.push(req)
+    note(`capability request ${req.id}: ${req.need}`)
+    const root = goals.path()[0]
+    if (root?.from?.via === 'whisper') bot.whisper(root.from.player, `working on it: learning a new behavior for "${root.text}"`)
+    pumpRequests()
+    return null
+  }
+
+  function cancelRequest (req: Req, why: string) {
+    requests = requests.filter(r => r !== req)
+    note(`capability request ${req.id} cancelled: ${why}`)
+    req.abort.abort(why) // the builder's loop and a waiting trial stop; a running trial is stopped below
+    // A trial still passes if the goal it serves completed while it ran.
+    if (trial?.ask?.req === req) channels.stop(trial.spec.channels, req.goal.status === 'completed' ? 'goal_closed' : 'cancelled')
+  }
+
+  const dropStaleRequests = () => {
+    for (const r of requests) if (r.goal.status !== 'active' && r.goal.status !== 'suspended') cancelRequest(r, `goal ${r.goal.status}`)
+  }
+
+  function pumpRequests () {
+    const req = requests.find(r => r.status === 'queued')
+    if (stopped || !req || requests.some(r => r.status === 'building')) return
+    req.status = 'building'
+    const t0 = Date.now()
+    const span = recorder.openTrace('builder', {
+      'jeeve.request.id': req.id, 'jeeve.request.span_id': req.span.span_id, 'jeeve.request.trace_id': req.span.trace_id,
+      'jeeve.goal.id': req.goal.id, 'jeeve.builder.model': BUILDER_MODEL
+    }, req.span.trace_id ? [{ context: { traceId: req.span.trace_id, spanId: req.span.span_id, traceFlags: 1 } }] : [])
+    const check = modules.get(req.pass_when)!
+    // Only 2A's structured words reach 2B, never the instruction's text (brain/architecture/system-2.md → "2A and 2B").
+    const brief = {
+      request: { id: req.id, need: req.need, constraints: req.constraints, targets: req.targets, trial: req.trial },
+      pass_when: { id: check.id, description: check.description, code: check.code },
+      library: [...modules.modules.values()].filter(m => m.kind === 'behavior').map(m => ({ id: m.id, description: m.description, channels: m.channels, targets: m.targets, disabled: m.disabled ?? null, code: m.code })),
+      self: rawSnapshot(bot).self
+    }
+    console.log(`[builder] ${req.id} started: ${req.need}`)
+    build(req, brief, { trial: (d, _r, signal) => trialPort(d, req, signal, span), perceive: (tool, input) => perceive(tool, input, span) }, req.abort.signal, span, session)
+      .catch((err): BuildResult => ({ request: req.id, status: 'failed', reason: req.abort.signal.aborted ? `cancelled: ${req.abort.signal.reason}` : String(err), attempts: [] }))
+      .then(result => {
+        const cancelled = req.abort.signal.aborted
+        recorder.finish(span, 'builder', {
+          attrs: { 'jeeve.builder.status': cancelled && result.status !== 'registered' ? 'cancelled' : result.status, 'jeeve.builder.trials': result.attempts.length, 'jeeve.builder.latency_ms': Date.now() - t0 },
+          input: brief, output: result
+        })
+        requests = requests.filter(r => r !== req)
+        console.log(`[builder] ${req.id} ${result.status}${cancelled ? ` (request dropped: ${req.abort.signal.reason})` : ''} after ${((Date.now() - t0) / 1000).toFixed(0)} s, ${result.attempts.length} trials${result.status === 'registered' ? `: ${result.behavior}` : ''}`)
+        req.goal.log.push(`builder ${req.id}: ${result.status === 'registered' ? `registered ${result.behavior}` : `failed: ${result.reason}`}`)
+        if (!cancelled) escalate('capability_result', result, req.goal)
+        pumpRequests()
+      })
+  }
+
+  // ---- trials: one live run at a time, under guards, pinned against Jev, in a window code grants ----
+  // Pass: the run returns "done" and its pass_when check holds a few ticks later, or the goal it serves completes
+  // while it runs. The result, with the error and the last actions, goes back to whoever asked (2B's trial tool).
   type RunDetail = { error?: string, actions: unknown[] }
-  type TrialRun = { src: ModuleSource, spec: Spec, passWhen: string | null, version: number, goal: Goal | null, target: unknown, t0: number, done?: (r: BehaviorTrial & { passed: boolean }) => void }
+  type WindowAsk = { draft: BehaviorDraft, req: Req, parent: Span, preempted: number, resolve: (r: TrialReport) => void }
+  type TrialRun = { src: ModuleSource, spec: Spec, passWhen: string | null, version: number, goal: Goal | null, target: unknown, t0: number, runId?: string, ask?: WindowAsk, done?: (r: TrialReport) => void }
+  let windowAsk: WindowAsk | null = null // a draft waiting for a trial window
+  let lastDamage = 0
   const findEntity = (name: string | null) => {
     if (!name) return null
     const e = bot.players[name]?.entity ?? Object.values(bot.entities)
@@ -416,28 +498,74 @@ export async function startAgent (opts: AgentOptions) {
       .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
     return e ?? null
   }
+  // ponytail: "hostile" is Mineflayer's entity type (slimes are "mob"); recent damage catches what it misses.
+  const threatened = () => Date.now() - lastDamage < TRIAL_WINDOW.quietMs ||
+    Object.values(bot.entities).some(e => e.type === 'hostile' && e.position.distanceTo(bot.entity.position) <= TRIAL_WINDOW.hostileWithin)
 
-  function startTrial (n: BehaviorDraft, goal: Goal | null, cite: string, done?: TrialRun['done']): string | null {
+  // 2B's trial tool. Shape problems come back at once; otherwise the draft waits for a window.
+  function trialPort (draft: BehaviorDraft, req: Req, signal: AbortSignal, parent: Span) {
+    return new Promise<TrialReport>((resolve, reject) => {
+      const refuse = (error: string) => resolve({ behavior: draft.name, passed: false, end: 'refused', ms: 0, error, preempted: 0 })
+      if (draft.targets !== req.targets) return refuse(`targets must be "${req.targets}", as the request says`)
+      try { compileBehavior({ kind: 'behavior', ...draft }) } catch (err) { return refuse(String(err)) }
+      windowAsk = { draft, req, parent, preempted: 0, resolve }
+      note(`trial window requested for ${draft.name}`)
+      signal.addEventListener('abort', () => { if (windowAsk?.req === req) { windowAsk = null; reject(new Error('cancelled')) } }, { once: true })
+    })
+  }
+
+  // Every 250 ms: pre-empt a running trial if something threatens the bot, or open a window if nothing does.
+  function tickTrialWindow () {
+    if (trial?.ask && threatened()) {
+      trial.ask.preempted++
+      recorder.windowEvent('trial_preempted', { request: trial.ask.req.id, behavior: trial.src.name })
+      note(`trial of ${trial.src.name} pre-empted: the bot is threatened`)
+      return channels.stop(trial.spec.channels, 'preempted')
+    }
+    const ask = windowAsk
+    if (!ask || trial || threatened()) return
+    windowAsk = null
+    recorder.windowEvent('trial_window', { request: ask.req.id, behavior: ask.draft.name })
+    note(`trial window granted to ${ask.draft.name}`)
+    const problem = startTrial(ask.draft, {
+      target: ask.req.trial, passWhen: ask.req.pass_when, goal: ask.req.goal, decidedBy: `builder:${ask.req.id}`, ask,
+      done: r => {
+        if (r.end === 'preempted' && ask.preempted < TRIAL_WINDOW.maxPreempts && !ask.req.abort.signal.aborted) { windowAsk = ask; return } // back in line
+        recorder.record('trial', {
+          parent: ask.parent,
+          attrs: {
+            'jeeve.request.id': ask.req.id, 'jeeve.module.id': r.behavior, 'jeeve.behavior.run_id': r.run_id,
+            'jeeve.trial.end': r.end, 'jeeve.trial.passed': r.passed, 'jeeve.trial.preempted': ask.preempted
+          },
+          input: ask.draft, output: r
+        })
+        ask.resolve({ ...r, preempted: ask.preempted })
+      }
+    })
+    if (problem) ask.resolve({ behavior: ask.draft.name, passed: false, end: 'refused', ms: 0, error: problem, preempted: ask.preempted })
+  }
+
+  function startTrial (n: BehaviorDraft, o: { target: TrialTarget | null, passWhen: string | null, goal: Goal | null, decidedBy: string, ask?: WindowAsk, done?: TrialRun['done'] }): string | null {
     const src: ModuleSource = { kind: 'behavior', name: n.name, description: n.description, code: n.code, channels: n.channels, targets: n.targets, timeout_s: n.timeout_s }
     let problem: string | null = null
     try { compileBehavior(src) } catch (err) { problem = `behavior ${n.name} refused: ${String(err)}` }
-    const t = n.trial
+    const t = o.target
     const thing = src.targets === 'block' ? t?.block : t?.item
     const target = !t ? null : src.targets === 'entity' ? findEntity(t.entity ?? null) : thing ? { name: thing, count: t.count ?? 1 } : null
     if (!problem && trial) problem = `behavior ${n.name}: the trial of ${trial.src.name} is still running`
     if (!problem && !target) problem = `behavior ${n.name}: trial target not found (${JSON.stringify(t)})`
-    const passWhen = t?.pass_when || null
-    if (!problem && passWhen && modules.get(passWhen)?.kind !== 'check') problem = `behavior ${n.name}: pass_when names no registered check module (${passWhen})`
+    if (!problem && o.passWhen && modules.get(o.passWhen)?.kind !== 'check') problem = `behavior ${n.name}: pass_when names no registered check module (${o.passWhen})`
     const version = modules.nextVersion(n.name)
     recorder.record('module', {
-      attrs: { 'jeeve.module.id': `${n.name}@${version}`, 'jeeve.module.kind': 'behavior', 'jeeve.module.activation': problem ? 'failed_trial' : 'trial_started', 'jeeve.program.cites': cite },
+      attrs: { 'jeeve.module.id': `${n.name}@${version}`, 'jeeve.module.kind': 'behavior', 'jeeve.module.activation': problem ? 'failed_trial' : 'trial_started', 'jeeve.program.cites': o.decidedBy },
       input: src, output: problem ? { error: problem } : { target: t }
     })
     if (problem) return problem
     const spec = authoredSpec({ ...src, version }, world)
-    trial = { src, spec, passWhen, version, goal, target: t, t0: Date.now(), done }
+    trial = { src, spec, passWhen: o.passWhen, version, goal: o.goal, target: t, t0: Date.now(), ask: o.ask, done: o.done }
     note(`trial of ${n.name}@${version} started`)
-    channels.set(`${n.name}:trial`, n.name, target as never, `system2:${cite}`, { spec, pinned: true })
+    channels.set(`${n.name}:trial`, n.name, target as never, o.decidedBy, { spec, pinned: true })
+    if (trial) trial.runId = channels.slots[spec.channels[0] as keyof typeof channels.slots]?.runId
     return null
   }
 
@@ -456,7 +584,7 @@ export async function startAgent (opts: AgentOptions) {
     const claimFails = end === 'done' && t.passWhen && !modules.get(t.passWhen)?.run(judged)
     if (claimFails) detail = { ...detail, actions: detail?.actions ?? [], error: `returned done, but pass_when ${t.passWhen} is false on ${JSON.stringify({ self: judged.self, blocks: judged.blocks })}` }
     const passed = (end === 'done' && !claimFails) || (end === 'goal_closed' && t.goal?.status === 'completed')
-    const result: BehaviorTrial = { target: t.target, end, ms: Date.now() - t.t0, ...(detail?.error ? { error: detail.error } : {}) }
+    const result = { target: t.target, end, ms: Date.now() - t.t0, ...(detail?.error ? { error: detail.error } : {}) }
     const id = `${t.src.name}@${t.version}`
     if (passed) {
       modules.addBehavior(t.src, t.version, result, { session, goal: t.goal ? `${t.goal.id}: ${t.goal.text}` : 'operator', created_at: new Date().toISOString() })
@@ -464,19 +592,19 @@ export async function startAgent (opts: AgentOptions) {
       authoredFailures.delete(t.src.name)
     }
     recorder.record('module', {
-      attrs: { 'jeeve.module.id': id, 'jeeve.module.kind': 'behavior', 'jeeve.module.activation': passed ? 'ok' : 'failed_trial' },
+      attrs: { 'jeeve.module.id': id, 'jeeve.module.kind': 'behavior', 'jeeve.module.activation': passed ? 'ok' : end === 'preempted' ? 'preempted' : 'failed_trial' },
       input: t.src, output: { trial: result, actions: detail?.actions }
     })
     note(`trial of ${id} ${passed ? 'passed' : `failed: ${end}`}`)
-    console.log(`[behavior] trial of ${id} ${passed ? 'passed' : 'failed'}: ${end}${detail?.error ? ` (${detail.error})` : ''}`)
+    console.log(`[behavior] trial of ${id} ${passed ? 'passed' : end === 'preempted' ? 'pre-empted' : 'failed'}: ${end}${detail?.error ? ` (${detail.error})` : ''}`)
     t.goal?.log.push(`trial of ${id} ${passed ? 'passed: registered' : `failed: ${end}`}`)
-    t.done?.({ ...result, passed })
-    if (t.goal) escalate('behavior_trial', { behavior: id, passed, ...result, actions: detail?.actions, self: rawSnapshot(bot).self }, t.goal)
+    t.done?.({ behavior: id, run_id: t.runId, passed, end, ms: result.ms, error: detail?.error, actions: detail?.actions, self: judged.self, preempted: 0 })
   }
 
   // ---- instructions: whispers from allowed players, or the local API ----
   function instruct (text: string, from: { player: string, via: 'whisper' | 'api' }) {
     const { root, abandoned } = goals.instruction(text, from, bot)
+    dropStaleRequests()
     channels.stopStalePlace(null) // other behaviors keep running while System 2 reads the instruction
     for (const g of abandoned) recorder.record('goal', { attrs: { 'jeeve.goal.id': g.id, 'jeeve.goal.transition': 'abandoned' }, output: { summary: g.summary } })
     recorder.goalPath = goals.pathText()
@@ -547,6 +675,7 @@ export async function startAgent (opts: AgentOptions) {
       hostileNear = near
       if (++ticks % 5 !== 0) return
       goals.tick(bot) // checks every 250 ms
+      tickTrialWindow()
       // Watch modules wake Jev when they turn true (rising edge only).
       const watch = program.triggers.watch ?? []
       if (!watch.length) return
@@ -562,6 +691,7 @@ export async function startAgent (opts: AgentOptions) {
 
   bot.on('entityHurt', e => {
     if (e === bot.entity) {
+      lastDamage = Date.now()
       note('took damage')
       recorder.windowEvent('damage', { health: bot.health })
       if (fires('damage_taken')) wake('damage_taken')
@@ -585,6 +715,7 @@ export async function startAgent (opts: AgentOptions) {
   let stopped = false
   async function stop () {
     stopped = true
+    for (const r of requests) r.abort.abort('episode_end')
     if (heartbeat) clearInterval(heartbeat)
     api?.close()
     channels.stop(CHANNELS, 'episode_end')
@@ -592,8 +723,8 @@ export async function startAgent (opts: AgentOptions) {
     bot.quit()
   }
   // Trial a behavior outside any goal (the e2e's guard fixture uses the same pipeline System 2 does).
-  const trialBehavior = (n: BehaviorDraft) => new Promise<BehaviorTrial & { passed: boolean }>((resolve, reject) => {
-    const problem = startTrial(n, null, 'operator', resolve)
+  const trialBehavior = (n: BehaviorDraft) => new Promise<TrialReport>((resolve, reject) => {
+    const problem = startTrial(n, { target: n.trial ?? null, passWhen: n.trial?.pass_when ?? null, goal: null, decidedBy: 'operator', done: resolve })
     if (problem) reject(new Error(problem))
   })
   return { bot, channels, goals, modules, recorder, stop, trialBehavior, traceFile: recorder.file, session }

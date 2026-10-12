@@ -115,6 +115,9 @@ export class Recorder {
   // A span left open while work happens under it (a System 2 call); end it with finish().
   open (name: string, attrs: Attrs = {}) { return this.start(name, attrs, this.window) }
 
+  // A trace of its own in this session, for work that outlives windows (a 2B build). Links point at its cause.
+  openTrace (name: string, attrs: Attrs, links: Link[] = []) { return this.start(name, attrs, null, links) }
+
   finish (span: Span, name: string, o: Finish): string {
     if (o.attrs) span.setAttributes(clean(o.attrs))
     if (o.kind) Tracer.setSpanKind(o.kind, span)
