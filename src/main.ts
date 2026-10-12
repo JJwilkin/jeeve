@@ -19,7 +19,7 @@ import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type ModuleSource, type
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
 import { makeSystem2, type Decision, type RequestDraft } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
-import { blockAt, observe, reachable, scan, seenMap, seenTypes, type Pos } from './world.ts'
+import { blockAt, observe, placedStanding, reachable, scan, seenMap, seenTypes, type Pos } from './world.ts'
 
 export type AgentOptions = {
   host?: string
@@ -257,11 +257,14 @@ export async function startAgent (opts: AgentOptions) {
     // the next tree's logs before this one was done (orchard clip, 2026-10-12).
     if (check?.spec.module === 'authored' || check?.spec.module === 'cleared') {
       const code = check.spec.module === 'authored' ? lookup(check.spec.name ?? '')?.code ?? '' : ''
+      const at = goals.place()
+      // A cleared step also waits on the bot's own scaffolding there, so Jev is offered that too.
+      const own = new Set(placedStanding(bot).map(p => p.join(',')))
+      const scaffold = check.spec.module === 'cleared' && !!at && (seenTypes(bot, 24).get(block) ?? []).some(p => own.has(p.join(',')) && Math.abs(p[0] - at[0]) <= PLACE_RADIUS && Math.abs(p[2] - at[2]) <= PLACE_RADIUS)
       const named = check.spec.module === 'cleared'
         ? (check.spec.match ?? '*').split(',').some(m => glob(m.trim()).test(block))
         : code.includes(block) || code.includes(`_${block.split('_').at(-1)}`)
-      if (!named) return 0
-      const at = goals.place()
+      if (!named && !scaffold) return 0
       const me = bot.entity.position
       const r = program.encoder.params.block_radius
       return (seenTypes(bot, 24).get(block) ?? []).filter(p => at
