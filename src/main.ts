@@ -19,7 +19,7 @@ import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type ModuleSource, type
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
 import { makeSystem2, type Decision, type RequestDraft } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
-import { blockAt, explored, frontier, observe, placedStanding, reachable, scan, seenMap, seenTypes, type Pos } from './world.ts'
+import { blockAt, explored, frontier, noteDug, observe, placedStanding, reachable, scan, seenMap, seenTypes, type Pos } from './world.ts'
 
 export type AgentOptions = {
   host?: string
@@ -356,6 +356,7 @@ export async function startAgent (opts: AgentOptions) {
       },
       escalate: (reason, detail) => { const leaf = goals.leaf(); if (leaf) escalate(reason, detail, leaf) },
       cooling: option => Date.now() - (failedAt.get(option) ?? 0) < FAILED_COOLDOWN_MS,
+      threatened: () => threatened(),
       ask: opts.ask
     })
     wake = coalescing(decide, LIMITS.minIntervalMs)
@@ -918,6 +919,7 @@ export async function startAgent (opts: AgentOptions) {
     }
   })
   bot.on('entityDead', e => { if (e.type === 'player' && e.username) noteDeath(e.username) })
+  bot.on('diggingCompleted', b => noteDug(bot, [b.position.x, b.position.y, b.position.z]))
   bot.on('chat', (username, message) => { if (username !== bot.username) recorder.windowEvent('chat', { from: username, message }) })
   bot.on('death', () => {
     note('died')

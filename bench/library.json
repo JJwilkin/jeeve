@@ -85,25 +85,6 @@
       "idle_rounds": 1
     },
     {
-      "kind": "watch",
-      "name": "hostile_near_josh_or_bot",
-      "description": "A hostile mob is within 10 blocks of Josh or of the bot",
-      "code": "(s) => { const H = ['zombie','zombie_villager','husk','drowned','skeleton','stray','wither_skeleton','spider','cave_spider','creeper','witch','pillager','vindicator','evoker','ravager','vex','slime','magma_cube','phantom','silverfish','endermite','blaze','ghast','hoglin','zoglin','piglin_brute','guardian','elder_guardian','warden','bogged','breeze']; const josh = s.entities.find(e => e.username === 'Josh'); for (const e of s.entities) { if (e.type === 'player') continue; if (!(e.type === 'hostile' || H.includes(e.name))) continue; if (dist(e.pos, s.self.pos) <= 10) return true; if (josh && dist(e.pos, josh.pos) <= 10) return true; } return false; }",
-      "version": 1,
-      "origin": {
-        "session": "jeeve-2026-10-12T09-12-54-474Z",
-        "goal": "g-1: follow me and keep me safe",
-        "created_at": "2026-10-12T09:13:14.467Z"
-      },
-      "trial": {
-        "states": 29,
-        "trues": 17,
-        "errors": 0,
-        "maxMs": 0.168
-      },
-      "idle_rounds": 0
-    },
-    {
       "kind": "behavior",
       "name": "craft_and_deposit_wooden_shovel",
       "description": "Crafts exactly one wooden shovel (chops nearby logs if wood is short, makes planks, one batch of sticks, finds or places a crafting table) and then walks to the nearest container of the target block type, opens it, deposits only the wooden_shovel, and closes it. Does not place a new container.",
@@ -129,7 +110,7 @@
         "end": "done",
         "ms": 6032
       },
-      "idle_rounds": 2
+      "idle_rounds": 4
     },
     {
       "kind": "behavior",
@@ -157,7 +138,7 @@
         "end": "done",
         "ms": 5146
       },
-      "idle_rounds": 0
+      "idle_rounds": 2
     },
     {
       "kind": "check",
@@ -205,7 +186,7 @@
         "end": "done",
         "ms": 2096
       },
-      "idle_rounds": 1
+      "idle_rounds": 0
     },
     {
       "kind": "behavior",
@@ -232,46 +213,26 @@
         "end": "done",
         "ms": 608
       },
-      "idle_rounds": 1
-    },
-    {
-      "kind": "check",
-      "name": "has_wooden_sword",
-      "description": "At least one wooden_sword in inventory",
-      "code": "(s) => (s.inventory.wooden_sword || 0) >= 1",
-      "version": 1,
-      "origin": {
-        "session": "jeeve-2026-10-12T11-09-29-897Z",
-        "goal": "g-4: craft one wooden sword",
-        "created_at": "2026-10-12T11:11:18.166Z"
-      },
-      "trial": {
-        "states": 31,
-        "trues": 0,
-        "errors": 0,
-        "maxMs": 0.113
-      },
-      "used_at": "2026-10-12T11:11:46.757Z",
       "idle_rounds": 0
     },
     {
       "kind": "check",
       "name": "sword_deposited",
-      "description": "Sword crafted (sticks left over) and no wooden_sword in inventory, bot within 4 blocks of a seen chest",
-      "code": "(s) => { const c = (s.blocks.chest||[])[0]; return !s.inventory.wooden_sword && (s.inventory.stick||0) > 0 && !!c && dist(s.self.pos, c) <= 4; }",
-      "version": 1,
+      "description": "No wooden_sword in inventory, sticks held (sword was crafted), bot within 6 blocks of a seen chest",
+      "code": "(s) => { if ((s.inventory.wooden_sword||0) > 0) return false; if ((s.inventory.stick||0) < 1) return false; const c = s.blocks.chest || []; return c.some(p => dist(p, s.self.pos) <= 6); }",
+      "version": 2,
       "origin": {
-        "session": "jeeve-2026-10-12T11-09-29-897Z",
-        "goal": "g-1: make a wooden sword and put it in the chest",
-        "created_at": "2026-10-12T11:10:23.441Z"
+        "session": "jeeve-2026-10-12T11-22-10-657Z",
+        "goal": "g-4: put the wooden sword in the chest",
+        "created_at": "2026-10-12T11:23:19.214Z"
       },
       "trial": {
         "states": 31,
-        "trues": 0,
+        "trues": 31,
         "errors": 0,
-        "maxMs": 0.112
+        "maxMs": 0.178
       },
-      "used_at": "2026-10-12T11:12:25.668Z",
+      "used_at": "2026-10-12T11:23:34.750Z",
       "idle_rounds": 0
     }
   ]

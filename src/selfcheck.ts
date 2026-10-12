@@ -109,7 +109,7 @@ const march = (blockAt: (p: Vec3) => { name: string } | null) => (from: Vec3, di
 }
 
 // One decision end to end with a fake bot and a fake Jev.
-async function decideWith (answers: Record<string, any>, place: [number, number, number] | null = null, cooling?: (option: string) => boolean, slots: Record<string, unknown> = {}) {
+async function decideWith (answers: Record<string, any>, place: [number, number, number] | null = null, cooling?: (option: string) => boolean, slots: Record<string, unknown> = {}, threatened = false) {
   const me = { id: 1, position: new Vec3(0, 0, 0), velocity: new Vec3(0, 0, 0), yaw: 0, type: 'player', username: 'Jeeve' }
   const josh = { id: 2, position: new Vec3(0, 0, -5), velocity: new Vec3(0, 0, 0), type: 'player', username: 'Josh', height: 1.8 }
   const bot: any = {
@@ -138,6 +138,7 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
     remaining: () => 10,
     wanted: () => [],
     cooling,
+    threatened: () => threatened,
     ask: async (state, questions) => { seen = { state, questions }; return { model: 'fake', answers } }
   })
   await decide(['test'])
@@ -174,6 +175,9 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   const tree = { key: 'clear_tall_tree:oak_log(5)', behavior: 'clear_tall_tree', status: 'running', channels: ['legs', 'aim', 'hands'], startedAt: 0 }
   const body = await decideWith({ body: { choice: 'keep_current', confidence: 0.9 }, legs: { choice: 'navigate:E0', confidence: 0.9 }, escalate: { noul: 0.1 } }, null, undefined, { legs: tree, aim: tree, hands: tree })
   assert.equal(body.trace.output.applied.legs, 'held')
+  // ...unless the bot is under threat: then a channel's answer (fight back) wins.
+  const hit = await decideWith({ body: { choice: 'keep_current', confidence: 0.9 }, legs: { choice: 'navigate:E0', confidence: 0.9 }, escalate: { noul: 0.1 } }, null, undefined, { legs: tree, aim: tree, hands: tree }, true)
+  assert.notEqual(hit.trace.output.applied.legs, 'held')
 }
 {
   // A whole-body start wins its channels for this call; per-channel answers are overridden.

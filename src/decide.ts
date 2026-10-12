@@ -56,6 +56,7 @@ export type DecideCtx = {
   record: (span: { attrs: Record<string, string | number | boolean | undefined>, input: unknown, output: unknown, llm?: Record<string, unknown> }) => string
   escalate: (reason: string, detail: unknown) => void
   cooling?: (option: string) => boolean // an option that just failed (none_found, stuck) on this target sits out a while
+  threatened?: () => boolean // hurt lately or a hostile close: channels may override a whole-body behavior
   ask?: Ask
 }
 
@@ -106,8 +107,9 @@ export function makeDecider (ctx: DecideCtx) {
       if (q.claims.some(c => claimed.has(c))) { applied[id] = 'overridden'; continue }
       if (q.claims.some(c => ctx.channels.slots[c]?.pinned && ctx.channels.slots[c]?.status === 'running')) { applied[id] = 'pinned'; continue } // a trial runs
       // A whole-body behavior that's running is the body question's to change: a channel's own answer (walk the legs
-      // to the place) stopped a tree skill 9 times in one orchard run.
-      if (a.choice !== 'keep_current' && q.claims.some(c => { const s = ctx.channels.slots[c]; return s?.status === 'running' && s.channels.length > q.claims.length })) { applied[id] = 'held'; continue }
+      // to the place) stopped a tree skill 9 times in one orchard run. Not while the bot is under threat: then the
+      // hands' "attack it" must win (held, a collect kept going under a zombie until Jeeve died, e2e 2026-10-12).
+      if (a.choice !== 'keep_current' && !ctx.threatened?.() && q.claims.some(c => { const s = ctx.channels.slots[c]; return s?.status === 'running' && s.channels.length > q.claims.length })) { applied[id] = 'held'; continue }
       const [status, act] = plan(ctx, q, a.choice, options[id][a.choice])
       applied[id] = status
       if (act) actions.push(act)

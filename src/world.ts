@@ -180,6 +180,9 @@ export function observe (bot: Bot, far = false) {
 // birch-log pillar blocks left (orchard bench, 2026-10-12).
 const placedBy = new WeakMap<Bot, Set<string>>()
 export const notePlaced = (bot: Bot, p: Pos) => { let s = placedBy.get(bot); if (!s) placedBy.set(bot, s = new Set()); s.add(p.join(',')) }
+// A block the bot dug itself is gone, whether or not it can see the spot: a log broken inside a canopy stayed in
+// memory forever (its empty spot is hidden by leaves), and the goal could never close (e2e 2026-10-12).
+export const noteDug = (bot: Bot, p: Pos) => { memory(bot).delete(p.join(',')); placedBy.get(bot)?.delete(p.join(',')) }
 // The bot's placed blocks it still believes are there (in the seen memory, which drops a spot once it's seen empty).
 export function placedStanding (bot: Bot): Pos[] {
   const mem = memory(bot)
