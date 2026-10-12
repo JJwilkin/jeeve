@@ -8,7 +8,7 @@ import type { CapabilityRequest } from './builder.ts'
 import type { CheckSpec } from './goals.ts'
 import { MODULE_LIMITS, type ModuleSource } from './modules.ts'
 
-export const MODEL = process.env.JEEVE_SYSTEM2_MODEL ?? 'claude-opus-5-5'
+export const MODEL = process.env.JEEVE_SYSTEM2_MODEL ?? 'claude-sonnet-5-5'
 const MAX_TURNS = 4
 
 export type Decision = {
