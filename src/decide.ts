@@ -50,6 +50,7 @@ export type DecideCtx = {
   directive: () => Directive | null
   events: () => string[]
   attackers?: Attackers
+  guarding?: () => { name: string, attackers: Attackers } | undefined // the player the goal protects, and who hurt them
   remaining: (block: string) => number // what's left of the goal's count for a block type
   wanted: () => Thing[] // the item the goal still needs, if its check names one (item targets)
   record: (span: { attrs: Record<string, string | number | boolean | undefined>, input: unknown, output: unknown, llm?: Record<string, unknown> }) => string
@@ -67,7 +68,7 @@ export function makeDecider (ctx: DecideCtx) {
   return async function decideOnce (reasons: string[]) {
     const t0 = Date.now()
     const raw = rawSnapshot(ctx.bot)
-    const enc = encode(ctx.bot, { handles: ctx.handles, directive: ctx.directive(), channels: ctx.channels.describe(), events: ctx.events(), attackers: ctx.attackers })
+    const enc = encode(ctx.bot, { handles: ctx.handles, directive: ctx.directive(), channels: ctx.channels.describe(), events: ctx.events(), attackers: ctx.attackers, guarding: ctx.guarding?.() })
     const encodeMs = Date.now() - t0
     if (encodeMs > LIMITS.encodeMs) console.warn(`[decide] encoder took ${encodeMs} ms (budget ${LIMITS.encodeMs})`)
     const state = { guidance: ctx.program.guidance, ...enc.state }

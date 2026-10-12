@@ -43,8 +43,10 @@ const IGNORED_TYPES = new Set(['object', 'orb', 'projectile', 'other', 'global']
 // ponytail: 10 s memory is a guess; tune it from traces.
 export type Attackers = Map<number, number> // entity id → when it last hurt the bot
 export const attacking = (attackers: Attackers | undefined, id: number) => Date.now() - (attackers?.get(id) ?? -Infinity) < 10_000
-export const describeEntity = (e: Entity, attackingMe = false) =>
-  `${e.type === 'player' ? `player ${e.username}` : `${e.name ?? 'unknown'}${e.type === 'hostile' ? ' (hostile)' : ''}`}${attackingMe ? ' (attacking you)' : ''}`
+// attackingWho: the player the bot protects, when this entity hurt them lately (guard bench: Josh was hit every second
+// for 30 s while Jev stayed on a zombie walking away; nothing said which one was hitting him).
+export const describeEntity = (e: Entity, attackingMe = false, attackingWho?: string) =>
+  `${e.type === 'player' ? `player ${e.username}` : `${e.name ?? 'unknown'}${e.type === 'hostile' ? ' (hostile)' : ''}`}${attackingMe ? ' (attacking you)' : ''}${attackingWho ? ` (attacking ${attackingWho})` : ''}`
 
 export type Directive = { text: string, from: string, at: number, inventory: Record<string, number>, goal?: string | null, place?: Pos | null }
 export type Encoded = {
@@ -78,7 +80,7 @@ function describeBlocks (bot: Bot, radius: number, rareMax: number, cap: number)
 
 export function makeEgocentric (params: { entity_cap: number, radius: number, block_radius: number, block_cap: number, rare_max: number }) {
   const lastDistance = new Map<number, { d: number, t: number }>()
-  return function encode (bot: Bot, ctx: { handles: Handles, directive: Directive | null, channels: Record<string, string>, events: string[], attackers?: Attackers }): Encoded {
+  return function encode (bot: Bot, ctx: { handles: Handles, directive: Directive | null, channels: Record<string, string>, events: string[], attackers?: Attackers, guarding?: { name: string, attackers: Attackers } }): Encoded {
     const me = bot.entity
     const now = Date.now()
     const near = Object.values(bot.entities)
@@ -93,7 +95,7 @@ export function makeEgocentric (params: { entity_cap: number, radius: number, bl
       const held = e.heldItem?.name
       return {
         id: handleFor(ctx.handles, e.id),
-        what: describeEntity(e, attacking(ctx.attackers, e.id)),
+        what: describeEntity(e, attacking(ctx.attackers, e.id), ctx.guarding && attacking(ctx.guarding.attackers, e.id) ? ctx.guarding.name : undefined),
         where: `${distanceBucket(d)}, ${direction(e.position.x - me.position.x, e.position.z - me.position.z, me.yaw)}`,
         motion: motionBucket(closing),
         ...(held ? { held } : {})

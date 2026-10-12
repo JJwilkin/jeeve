@@ -210,6 +210,9 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   const bot: any = { entity: me, entities: { 1: me, 2: slime(2), 3: slime(3) }, health: 20, food: 20, heldItem: null, inventory: { items: () => [] }, blockAt: () => null }
   const encoded = makeEgocentric(DEFAULT_PROGRAM.encoder.params)(bot, { handles: newHandles(), directive: null, channels: {}, events: [], attackers: new Map([[2, Date.now()], [3, Date.now() - 60_000]]) })
   assert.deepEqual((encoded.state.entities as any[]).map(e => e.what), ['slime (attacking you)', 'slime']) // the hit a minute ago is forgotten
+  // The player the goal protects counts too: who hit them lately is marked.
+  const guarded = makeEgocentric(DEFAULT_PROGRAM.encoder.params)(bot, { handles: newHandles(), directive: null, channels: {}, events: [], guarding: { name: 'Josh', attackers: new Map([[3, Date.now()]]) } })
+  assert.deepEqual((guarded.state.entities as any[]).map(e => e.what), ['slime', 'slime (attacking Josh)'])
 }
 
 // navigate walks to a place by x and z only: the block System 2 named may be up in a canopy.

@@ -85,6 +85,9 @@ export async function startAgent (opts: AgentOptions) {
   let lastView: unknown = null
   const handles = newHandles()
   const attackers: Attackers = new Map()
+  const ownerAttackers: Attackers = new Map() // who hurt the player the goal serves, and when
+  const ownerHits: number[] = []
+  let ownerHurtSent = 0
   // Health over the last 5 s, so a fast drop can bypass the no-repeat window (see escalate()).
   const healthLog: Array<{ t: number, hp: number }> = []
   // ponytail: 4 HP in 5 s is a guess (run jeeve-2026-10-11T16-36-51-167Z lost 2 HP every 0.5 s); tune from traces.
@@ -332,6 +335,7 @@ export async function startAgent (opts: AgentOptions) {
   function wireDecider () {
     const decide = makeDecider({
       bot, program, handles, channels, remaining, wanted, attackers,
+      guarding: () => { const p = goals.path()[0]?.from?.player; return p ? { name: p, attackers: ownerAttackers } : undefined },
       directive: () => directive && { ...directive, goal: goalLine(), place: goals.place() },
       events: () => recentFor(EVENT_WINDOW_MS),
       record: span => {
@@ -425,7 +429,7 @@ export async function startAgent (opts: AgentOptions) {
     const key = `${reason}|${goal.id}|${version(program)}`
     // A fast health drop bypasses the window: in run jeeve-2026-10-11T16-36-51-167Z it suppressed every jev_escalate
     // while slimes took health from 11 to 1.
-    const bypass = reason === 'instruction' || reason === 'capability_result' || fallingFast()
+    const bypass = reason === 'instruction' || reason === 'capability_result' || reason === 'owner_hurt' || fallingFast()
     // 2A answered this kind of escalation for this goal with "no change" lately: it's quiet for a while (see below).
     const hushed = (quiet.get(`${reason}|${goal.id}`)?.until ?? 0) > Date.now()
     if (jevDoubtDuringTrial(reason) || (!bypass && (hushed || Date.now() - (lastSent.get(key) ?? 0) < NO_REPEAT_MS))) {
@@ -858,7 +862,7 @@ export async function startAgent (opts: AgentOptions) {
     let progressAt = Date.now()
     const watching = new Map<string, boolean>()
     bot.on('physicsTick', () => {
-      const near = Object.values(bot.entities).some(e => (e.type === 'hostile' || attacking(attackers, e.id)) && e.position.distanceTo(bot.entity.position) <= program.triggers.hostile_within)
+      const near = Object.values(bot.entities).some(e => (e.type === 'hostile' || attacking(attackers, e.id) || attacking(ownerAttackers, e.id)) && e.position.distanceTo(bot.entity.position) <= program.triggers.hostile_within)
       if (near && !hostileNear) { note('hostile mob within range'); if (fires('hostile_near')) wake('hostile_near') }
       hostileNear = near
       if (++ticks % 5 !== 0) return
@@ -901,8 +905,16 @@ export async function startAgent (opts: AgentOptions) {
       recorder.windowEvent('damage', { health: bot.health, source: from })
       if (fires('damage_taken')) wake('damage_taken')
     } else if (e.type === 'player' && e.username === goals.path()[0]?.from?.player) {
-      note(`${e.username} took damage`)
-      recorder.windowEvent('owner_damage', { player: e.username })
+      // The player the goal serves is treated like the bot: who hit them is marked for Jev, and repeated hits escalate.
+      if (source) ownerAttackers.set(source.id, Date.now())
+      const from = source ? `${handleFor(handles, source.id)} (${describeEntity(source)})` : undefined
+      note(from ? `${e.username} took damage from ${from}` : `${e.username} took damage`)
+      recorder.windowEvent('owner_damage', { player: e.username, source: from })
+      ownerHits.push(Date.now())
+      while (ownerHits.length && Date.now() - ownerHits[0] > 5000) ownerHits.shift()
+      if (fires('damage_taken')) wake('owner_damage')
+      const leaf = goals.leaf()
+      if (leaf && ownerHits.length >= 3 && Date.now() - ownerHurtSent > 10_000) { ownerHurtSent = Date.now(); escalate('owner_hurt', { player: e.username, hits_in_5s: ownerHits.length, from }, leaf) }
     }
   })
   bot.on('entityDead', e => { if (e.type === 'player' && e.username) noteDeath(e.username) })
