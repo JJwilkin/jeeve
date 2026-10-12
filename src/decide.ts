@@ -54,8 +54,12 @@ export type DecideCtx = {
   wanted: () => Thing[] // the item the goal still needs, if its check names one (item targets)
   record: (span: { attrs: Record<string, string | number | boolean | undefined>, input: unknown, output: unknown, llm?: Record<string, unknown> }) => string
   escalate: (reason: string, detail: unknown) => void
+  cooling?: (option: string) => boolean // an option that just failed (none_found, stuck) on this target sits out a while
   ask?: Ask
 }
+
+// An option's target without its count, so "collect:oak_leaves(9)" and "(8)" are the same target.
+export const optionTarget = (key: string) => key.replace(/\(\d+\)$/, '')
 
 export function makeDecider (ctx: DecideCtx) {
   const encode = ENCODERS[ctx.program.encoder.module](ctx.program.encoder.params)
@@ -75,6 +79,7 @@ export function makeDecider (ctx: DecideCtx) {
     for (const [id, q] of Object.entries(ctx.program.questions)) {
       if (q.type === 'noul') { questions[id] = { type: 'noul', instructions: q.instructions }; continue }
       options[id] = optionsFor(q.claims, ctx.program.allowed_behaviors, enc, running(ctx, q), ctx.remaining, ctx.wanted())
+      for (const k of Object.keys(options[id])) if (ctx.cooling?.(optionTarget(k))) delete options[id][k]
       // Shuffled per call and traced: Jev leans toward early options on close calls.
       optionOrder[id] = shuffled(Object.keys(options[id])).slice(0, LIMITS.options)
       questions[id] = { type: 'choice', instructions: q.instructions, criteria: Object.fromEntries(optionOrder[id].map(k => [k, options[id][k].desc])) }

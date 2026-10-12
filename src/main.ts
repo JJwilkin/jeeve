@@ -11,7 +11,7 @@ import { Judgeval } from 'judgeval'
 import type { Span } from '@opentelemetry/api'
 import { authoredSpec, BEHAVIORS, CHANNELS, Channels, type ApiHost, type Spec } from './behaviors.ts'
 import { build, BUILDER_MODEL, type BehaviorDraft, type BuildResult, type CapabilityRequest, type TrialReport, type TrialTarget } from './builder.ts'
-import { coalescing, makeDecider, type Ask } from './decide.ts'
+import { coalescing, makeDecider, optionTarget, type Ask } from './decide.ts'
 import { attacking, describeEntity, handleFor, inventoryCounts, newHandles, rawSnapshot, type Attackers, type Directive } from './encoder.ts'
 import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal } from './goals.ts'
 import { guardedMovements, installGuards } from './guards.ts'
@@ -39,6 +39,10 @@ const EVENT_WINDOW_MS = 5_000
 // A trial window opens only while nothing threatens the bot: no hostile this close, no damage this recently.
 // The same test pre-empts a running trial; past maxPreempts the trial goes back to 2B as pre-empted.
 const TRIAL_WINDOW = { hostileWithin: 8, quietMs: 5_000, maxPreempts: 3 }
+// A behavior that ended none_found or stuck isn't offered on that target again for this long. Without it Jev restarted
+// an authored behavior that ended none_found on its target about 100 times in 20 s (orchard clip, 2026-10-12).
+// ponytail: one fixed cooldown; per-behavior backoff if traces show it's too long or too short.
+const FAILED_COOLDOWN_MS = 10_000
 // Trace rows stay small: long outputs (a scan, an event's data) are cut.
 const short = (v: unknown, max = 500) => { const s = JSON.stringify(v); return s && s.length > max ? s.slice(0, max) + '…' : v }
 
@@ -80,6 +84,7 @@ export async function startAgent (opts: AgentOptions) {
   let watchdog = { decides: 0, errors: 0, previous: null as Program | null }
   const fires = (event: string) => program.triggers.events.includes(event.split(' ')[0])
   const failures = new Map<string, number>() // per goal: stuck / none_found count
+  const failedAt = new Map<string, number>() // option target → when a run on it last ended none_found or stuck
 
   // ---- modules System 2 writes: trialled on recent real states, disabled after repeated errors ----
   const recentStates: Snapshot[] = [] // raw snapshots from recent decide calls, for trials
@@ -130,6 +135,7 @@ export async function startAgent (opts: AgentOptions) {
     }),
     end: (slot, reason) => {
       recorder.endBehavior(slot.runId, reason, slot.run.detail?.())
+      if ((reason === 'none_found' || reason === 'stuck') && !slot.pinned) failedAt.set(optionTarget(slot.key), Date.now())
       if (slot.pinned) return finishTrial(reason, slot.run.detail?.() as RunDetail | undefined) // only trials are pinned
       // An authored behavior that keeps failing (its own error or time limit) is disabled, as checks are.
       const m = modules.get(slot.behavior)
@@ -237,6 +243,7 @@ export async function startAgent (opts: AgentOptions) {
         return recorder.record('decide', { attrs: span.attrs, input: span.input, output: span.output, kind: 'llm', llm: span.llm })
       },
       escalate: (reason, detail) => { const leaf = goals.leaf(); if (leaf) escalate(reason, detail, leaf) },
+      cooling: option => Date.now() - (failedAt.get(option) ?? 0) < FAILED_COOLDOWN_MS,
       ask: opts.ask
     })
     wake = coalescing(decide, LIMITS.minIntervalMs)

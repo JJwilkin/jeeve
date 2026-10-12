@@ -97,7 +97,7 @@ assert.match(version(DEFAULT_PROGRAM), /^v-[0-9a-f]{8}$/)
 }
 
 // One decision end to end with a fake bot and a fake Jev.
-async function decideWith (answers: Record<string, any>, place: [number, number, number] | null = null) {
+async function decideWith (answers: Record<string, any>, place: [number, number, number] | null = null, cooling?: (option: string) => boolean) {
   const me = { id: 1, position: new Vec3(0, 0, 0), velocity: new Vec3(0, 0, 0), yaw: 0, type: 'player', username: 'Jeeve' }
   const josh = { id: 2, position: new Vec3(0, 0, -5), velocity: new Vec3(0, 0, 0), type: 'player', username: 'Josh', height: 1.8 }
   const bot: any = {
@@ -123,6 +123,7 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
     directive: () => ({ text: 'collect 10 logs', from: 'Josh', at: 0, inventory: {}, place }), events: () => [],
     remaining: () => 10,
     wanted: () => [],
+    cooling,
     ask: async (state, questions) => { seen = { state, questions }; return { model: 'fake', answers } }
   })
   await decide(['test'])
@@ -148,6 +149,9 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.equal(r.trace.attrs['jeeve.decide.trigger'], 'test')
   assert.ok(JSON.parse(r.trace.attrs['jeeve.decide.raw_state']).entities.length === 1)
   assert.deepEqual(r.escalations, ['low_confidence'])
+  // An option whose last run on that target failed (none_found, stuck) sits out: collect isn't offered on oak_log.
+  const cool = await decideWith({ body: { choice: 'keep_current', confidence: 0.9 }, escalate: { noul: 0.1 } }, null, o => o === 'collect:oak_log')
+  assert.deepEqual(keys(cool.seen.questions.body.criteria), ['keep_current'])
 }
 {
   // A whole-body start wins its channels for this call; per-channel answers are overridden.
