@@ -51,6 +51,9 @@ const PLACE_RADIUS = 3
 const STEP_REVIEW_MS = 30_000
 // A goal with nothing running on the body this long escalates as idle (forage: 520 s idle with 2A never called).
 const IDLE_MS = 30_000
+// A goal whose progress (e.g. logs gathered) hasn't moved this long escalates as stalled, busy or not: a forage run
+// followed a scripted player who never moved for 10 min, waiting to be led to trees.
+const STALL_MS = 60_000
 // Trace rows stay small: long outputs (a scan, an event's data) are cut.
 const short = (v: unknown, max = 500) => { const s = JSON.stringify(v); return s && s.length > max ? s.slice(0, max) + '…' : v }
 
@@ -836,6 +839,8 @@ export async function startAgent (opts: AgentOptions) {
     let hostileNear = false
     let ticks = 0
     let lastBusy = Date.now()
+    let progressSeen = ''
+    let progressAt = Date.now()
     const watching = new Map<string, boolean>()
     bot.on('physicsTick', () => {
       const near = Object.values(bot.entities).some(e => (e.type === 'hostile' || attacking(attackers, e.id)) && e.position.distanceTo(bot.entity.position) <= program.triggers.hostile_within)
@@ -846,6 +851,11 @@ export async function startAgent (opts: AgentOptions) {
       if (CHANNELS.some(c => channels.slots[c]?.status === 'running') || system2Span) lastBusy = Date.now()
       const idleLeaf = goals.leaf()
       if (idleLeaf && Date.now() - lastBusy > IDLE_MS) { lastBusy = Date.now(); escalate('idle', { idle_s: IDLE_MS / 1000 }, idleLeaf) }
+      // Progress is the root's own measure when it has one (inventory_delta), else which step is running.
+      const root = goals.path()[0]
+      const now = root ? JSON.stringify([root.id, root.done_when?.progress?.(bot) ?? null, idleLeaf?.id]) : ''
+      if (now !== progressSeen) { progressSeen = now; progressAt = Date.now() }
+      else if (root && Date.now() - progressAt > STALL_MS) { progressAt = Date.now(); escalate('stalled', { stalled_s: STALL_MS / 1000, progress: root.done_when?.progress?.(bot) ?? null }, idleLeaf ?? root) }
       goals.tick(bot) // checks every 250 ms
       tickTrialWindow()
       // Watch modules wake Jev when they turn true (rising edge only).
