@@ -26,6 +26,11 @@ Three scored scenes, run unattended, and what each round changed. Started with J
 | 1 | 6825298 | PASS 422 s (built `clear_tree_pillar`, 3 trials, 246 s) | FAIL 238 s: crafts turned planks into buttons and hung 20 s; trials used up the wood | PASS 125 s | Baseline: plans, seen memory, look-to-confirm, empty library |
 | 2 | 27be657 | PASS 246 s (reused the skill) | PASS 173 s (built craft and deposit skills) | PASS 125 s | Crafting settles the inventory; shared library seeded from round 1 |
 | 3 | 4c91e84 | PASS 313 s, body idle 145 s, 3 of 4 trees unseen when planning | **PASS 69 s** (both skills reused) | PASS 125 s, Jeeve 10 HP | Face-ray visibility, far look, ground by shape |
+| 4 | 33511ad | **PASS 142 s** | PASS 47 s | **FAIL**: Jeeve died (started at 10 HP; target flip-flop) | No restart thrash |
+| 5 | c5369e7 | PASS 147 s, idle 26 s | PASS 65 s | PASS (Josh lost 13) | Target-switch dwell; runs start at full health; 2A's `survey` |
+| 6 | c5369e7 | PASS 133 s, idle 17 s | PASS 66 s | PASS | — |
+
+From round 7 the scenes are randomized per run (seeded: 3–5 trees of oak or birch, trunks 5–7, at random spots; workshop trees and chest at random spots; 3–5 guard waves; no free building blocks), and the library starts fresh, so what's measured is generalization, not one layout. `bench/library-fixed-scenes.json` keeps what rounds 1–6 learned.
 
 ## Gaps found, and the harness fix for each
 1. **Crafting corrupted the inventory** (round 1). `bot.craft` resolves before the server's slot updates arrive, so back-to-back crafts laid out grids from stale slots: buttons instead of sticks, and 20 s hangs. Reproduced against the server in isolation. **Fix:** every item-moving action waits for the inventory to settle (`settle()`, `src/behaviors.ts`).
@@ -35,6 +40,10 @@ Three scored scenes, run unattended, and what each round changed. Started with J
 5. **2A's map merged the ground into the trees.** The partly seen grass floor came under the 512-block terrain cutoff and swallowed every tree touching it. **Fix:** ground is told by shape (most of a type on one height level, over a wide area), not by count.
 6. **Option thrash** (round 2). An option's count is part of its key (`clear_tree_pillar:oak_log(5)`). When the count dropped, Jev saw a "new" option and restarted the running skill: 18 restarts on one tree. **Fix:** the running option under any count stays `keep_current`.
 7. **Occluded search** (round 3). From the start spot, the first tree hides the other three, so 2A planned for one tree. Seeing farther can't fix that; moving can. **Fix:** a `survey` tool for 2A: Jeeve walks a loop 6 blocks around where it stands, looking, and 2A gets the updated map. Search is 2A's choice, like `scan`.
+
+8. **Target flip-flop** (round 4). With two zombies close, Jev switched attack targets every 0.5 s for 7 s, so no swing landed, and Jeeve died. 2A's guidance ("keep the current target") didn't hold. **Fix:** a behavior just started can't be swapped for the same behavior on another target within 1.5 s (`LIMITS.switchDwellMs`), unless it ended: hysteresis in the control loop, not a strategy rule.
+9. **Bench hygiene** (round 4). A bench port's world persists between rounds, and with it the players' health and hunger: Jeeve started guard at 10 HP. **Fix:** every run heals and feeds both players first.
+10. **2A didn't need `survey` on the fixed orchard** (rounds 5–6: 0 calls). The first instruction needs only the nearest tree, and by the second the far look had found the rest. It stays a tool 2A picks when a goal is out of view.
 
 ## Open
 - **Trials still consume materials** ([[orchestrator-and-builder]] → Open questions). Workshop round 1 burned its wood on failed trials.
