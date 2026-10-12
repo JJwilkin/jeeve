@@ -32,7 +32,18 @@ export function makeWorld (rows: WorldRow[]) {
   const code = (name: string) => { let k = palette.indexOf(name); if (k < 0) k = palette.push(name) - 1; return k }
   const empty = (x: number, y: number, z: number) => !inBox(x, y, z) || AIR.has(palette[grid[index(x, y, z)]])
 
-  function blocksAt (t: number): Block[] {
+  // Every non-air block at t (the truth, for comparing with what Jeeve believed).
+  function allAt (t: number): Block[] {
+    advance(t)
+    const out: Block[] = []
+    for (let x = x0; x < x0 + nx; x++) for (let y = y0; y < y0 + ny; y++) for (let z = z0; z < z0 + nz; z++) {
+      const name = palette[grid[index(x, y, z)]]
+      if (!AIR.has(name)) out.push({ name, pos: [x, y, z] })
+    }
+    return out
+  }
+
+  function advance (t: number) {
     let n = changes.findIndex(c => c.t > t)
     if (n < 0) n = changes.length
     if (n < applied) { grid = Int32Array.from(base!.cells); applied = 0 }
@@ -40,6 +51,10 @@ export function makeWorld (rows: WorldRow[]) {
       const c = changes[applied]
       if (inBox(c.pos[0], c.pos[1], c.pos[2])) grid[index(c.pos[0], c.pos[1], c.pos[2])] = code(c.name)
     }
+  }
+
+  function blocksAt (t: number): Block[] {
+    advance(t)
     if (cache?.applied === applied) return cache.blocks
     const out: Block[] = []
     for (let x = x0; x < x0 + nx; x++) for (let y = y0; y < y0 + ny; y++) for (let z = z0; z < z0 + nz; z++) {
@@ -63,7 +78,7 @@ export function makeWorld (rows: WorldRow[]) {
     })
   }
 
-  return { camera: base.camera, blocksAt, entitiesAt, start: base.t }
+  return { camera: base.camera, blocksAt, allAt, entitiesAt, start: base.t }
 }
 
 // Block colours: a flat look, no textures. Unknown names get a stable grey.

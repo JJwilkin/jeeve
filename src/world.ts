@@ -99,17 +99,39 @@ export async function reachable (bot: Bot, p: Pos, timeoutMs = 1000) {
 // observe() runs every 250 ms. Each block within SEEN.radius that has an empty neighbour and that a ray from the
 // eyes reaches is remembered with when it was seen; a remembered block whose spot the bot now sees empty, or as
 // something else, is updated. Blocks out of sight stay as last seen: what Jeeve believes, not what the server says.
-export const SEEN = { radius: 8, keepWithin: 48 }
+export const SEEN = { radius: 8, far: 24, down: 6, up: 16, common: 512, keepWithin: 48, warnMs: 60 }
 type Seen = { name: string, pos: Pos, t: number }
 const memories = new WeakMap<Bot, Map<string, Seen>>()
 const memory = (bot: Bot) => { let m = memories.get(bot); if (!m) memories.set(bot, m = new Map()); return m }
 const empty = (b: { name: string } | null) => !b || NOTHING.has(b.name)
 
-export function observe (bot: Bot) {
+// A block is seen when a ray from the eyes reaches the centre of one of its faces that has an empty neighbour and
+// faces the eyes. (bot.canSeeBlock casts one ray at the centre with a range measured to the corner, so blocks below
+// eye level or half hidden read as unseen: the bot "saw" 3 of a tree's 27 leaves, 2026-10-12.)
+const FACES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
+export function visible (bot: Bot, eyes: Vec3, p: Vec3) {
+  for (const [x, y, z] of FACES) {
+    const face = p.offset(0.5 + x * 0.5, 0.5 + y * 0.5, 0.5 + z * 0.5)
+    const d = face.minus(eyes)
+    if (d.x * x + d.y * y + d.z * z >= 0) continue // the face looks away from the eyes
+    if (!empty(bot.blockAt(p.offset(x, y, z)))) continue // covered by a neighbour
+    const range = d.norm()
+    const hit = bot.world.raycast(eyes, d.scaled(1 / range), range + 0.05)
+    if (hit && (hit as unknown as { position: Vec3 }).position.equals(p)) return true
+  }
+  return false
+}
+
+// near: every block within SEEN.radius, every 250 ms. far (every 2 s): out to SEEN.far horizontally and SEEN.up above
+// the feet, skipping types with more than SEEN.common blocks there (ground, air), so a tree across the field is seen
+// without walking over to it. A wider look finds what an objective needs; the near one keeps what's close current.
+export function observe (bot: Bot, far = false) {
+  const t0 = performance.now()
   const mem = memory(bot)
   const me = feet(bot)
   const eyes = bot.entity.position.offset(0, (bot.entity as { eyeHeight?: number }).eyeHeight ?? 1.62, 0)
-  const r = SEEN.radius
+  const r = far ? SEEN.far : SEEN.radius
+  const [down, up] = far ? [SEEN.down, SEEN.up] : [SEEN.radius, SEEN.radius]
   const p = new Vec3(0, 0, 0)
   const now = Date.now()
   // An empty spot is seen when a ray from the eyes to its centre hits nothing on the way.
@@ -118,19 +140,26 @@ export function observe (bot: Bot) {
     const range = eyes.distanceTo(to)
     return !bot.world.raycast(eyes, to.minus(eyes).normalize(), range - 0.5)
   }
-  for (let dx = -r; dx <= r; dx++) {
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dz = -r; dz <= r; dz++) {
-        p.set(me.x + dx, me.y + dy, me.z + dz)
-        const key = `${p.x},${p.y},${p.z}`
-        const b = bot.blockAt(p)
-        if (empty(b)) { if (mem.has(key) && seesEmpty(p)) mem.delete(key); continue }
-        const open = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].some(([x, y, z]) => empty(bot.blockAt(p.offset(x, y, z))))
-        if (open && bot.canSeeBlock(b!)) mem.set(key, { name: b!.name, pos: [p.x, p.y, p.z], t: now })
-      }
+  const each = (f: (name: string | null, key: string) => void) => {
+    for (let dx = -r; dx <= r; dx++) for (let dy = -down; dy <= up; dy++) for (let dz = -r; dz <= r; dz++) {
+      p.set(me.x + dx, me.y + dy, me.z + dz)
+      f(bot.blockAt(p)?.name ?? null, `${p.x},${p.y},${p.z}`)
     }
   }
+  const common = new Set<string>()
+  if (far) {
+    const n = new Map<string, number>()
+    each(name => { if (name) n.set(name, (n.get(name) ?? 0) + 1) })
+    for (const [name, c] of n) if (c > SEEN.common) common.add(name)
+  }
+  each((name, key) => {
+    if (!name || NOTHING.has(name)) { if (mem.has(key) && seesEmpty(p)) mem.delete(key); return }
+    if (common.has(name)) return
+    if (visible(bot, eyes, p)) mem.set(key, { name, pos: [p.x, p.y, p.z], t: now })
+  })
   if (mem.size > 20_000) for (const [k, v] of mem) if (Math.abs(v.pos[0] - me.x) + Math.abs(v.pos[2] - me.z) > SEEN.keepWithin) mem.delete(k)
+  const ms = performance.now() - t0
+  if (ms > SEEN.warnMs) console.warn(`[world] observe${far ? ' (far)' : ''} took ${ms.toFixed(0)} ms`)
 }
 
 // Remembered blocks within radius of the feet, by type, nearest first.
@@ -148,11 +177,19 @@ export function seenTypes (bot: Bot, radius: number): Map<string, Pos[]> {
 }
 
 // The map System 2 gets with every call: what the bot has seen within radius, as clusters (a tree is one cluster of
-// logs and leaves), terrain left out (types with more than MAP_LIMITS.common there). Positions are dropped; bounds,
-// counts and heights stay.
-export const MAP_LIMITS = { radius: 32, common: 512, clusters: 12 }
+// logs and leaves), ground left out. Positions are dropped; bounds, counts and heights stay.
+// Ground is told by shape, not by name or count: a type with most of its blocks on one height level over a wide
+// area (a floor of grass, sand or stone). A count cutoff alone kept the partly seen grass floor of the orchard, and
+// it swallowed every tree that touched it.
+export const MAP_LIMITS = { radius: 32, common: 512, clusters: 12, groundMin: 48, groundShare: 0.8 }
+const isGround = (ps: Pos[]) => {
+  if (ps.length < MAP_LIMITS.groundMin) return false
+  const byY = new Map<number, number>()
+  for (const p of ps) byY.set(p[1], (byY.get(p[1]) ?? 0) + 1)
+  return Math.max(...byY.values()) / ps.length >= MAP_LIMITS.groundShare
+}
 export function seenMap (bot: Bot, radius = MAP_LIMITS.radius) {
-  const blocks = [...seenTypes(bot, radius).entries()].filter(([, ps]) => ps.length <= MAP_LIMITS.common)
+  const blocks = [...seenTypes(bot, radius).entries()].filter(([, ps]) => ps.length <= MAP_LIMITS.common && !isGround(ps))
     .flatMap(([name, ps]) => ps.map(p => ({ name, position: new Vec3(p[0], p[1], p[2]) })))
   return clusters(bot, blocks).slice(0, MAP_LIMITS.clusters).map(({ positions: _, ...c }) => c)
 }

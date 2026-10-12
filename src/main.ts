@@ -804,7 +804,7 @@ export async function startAgent (opts: AgentOptions) {
       if (near && !hostileNear) { note('hostile mob within range'); if (fires('hostile_near')) wake('hostile_near') }
       hostileNear = near
       if (++ticks % 5 !== 0) return
-      observe(bot) // the seen memory first, so checks judge what's in sight now
+      observe(bot, ticks % 40 === 0) // the seen memory first, so checks judge what's in sight now; a far look every 2 s
       goals.tick(bot) // checks every 250 ms
       tickTrialWindow()
       // Watch modules wake Jev when they turn true (rising edge only).
