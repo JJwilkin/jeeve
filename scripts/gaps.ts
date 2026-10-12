@@ -60,6 +60,17 @@ for (const r of trace.filter(r => r.kind === 'system2' && r.input?.seen_map)) {
   say(`- ${sec(r.t)} ${trig}:${unseen.length ? ` **unseen** ${unseen.map(label).join('; ')}.` : ''}${stale.length ? ` **stale** ${stale.map(label).join('; ')}.` : ''}${off.length ? ` **counts off** ${off.join('; ')}.` : ''}`)
 }
 
+// Search: when each object (a truth cluster at the start) first showed up in 2A's map.
+say()
+say('## Search: when each object first showed up in 2A\'s map')
+{
+  const calls = trace.filter(r => r.kind === 'system2' && r.input?.seen_map)
+  for (const c of truthClusters(clip.start)) {
+    const first = calls.find(r => (r.input.seen_map as Cluster[]).some(s => overlaps(s, c)))
+    say(`- ${label(c)}: ${first ? `known at ${sec(first.t)}` : '**never seen**'}`)
+  }
+}
+
 say()
 say('## Goals closed vs. the world')
 const pushed = new Map(trace.filter(r => r.kind === 'goal' && r.attrs?.['jeeve.goal.transition'] === 'pushed').map(r => [r.attrs['jeeve.goal.id'], r.input]))
