@@ -27,7 +27,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[runtime-authored-behaviors]] (done → [[behaviors-and-guards]]): System 2 writes, trials and registers new behaviors (first case: pillaring to reach leaves), on the shared block view from [[perception]]
 - [[perception-tools]] (done → [[perception]]): System 2 asks for detail (scan, reachable) instead of guessing from buckets; owns the block view; exact counts and heights in the summary
 - [[full-player-action-api]] (done → [[behaviors-and-guards]]): give code System 2 writes every action a player has (craft, containers, attack, use, eat, chat…), keeping no raw bot, guards and channels
-- [[system-2a-2b]] (todo): split System 2 into an orchestrator (2A, custom loop) and a builder (2B, Vercel AI SDK; Luna later) that talk through capability requests and trial windows
+- [[system-2a-2b]] (done → [[orchestrator-and-builder]]): split System 2 into an orchestrator (2A, custom loop) and a builder (2B, Vercel AI SDK; Luna later) that talk through capability requests and trial windows
 
 ### Architecture
 - [[overview]]: what we build vs. what the agent discovers, the discovery loop, fast and slow thinking, goals and time as one hierarchy, open questions
@@ -36,6 +36,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[seed-behaviors]]: the M1 seed set wrapping mineflayer plugins (behaviors claim channel sets, so M1 asks one joint `body` choice), guards, and the three instructions walked end to end
 - [[trace-schema]]: one session per episode, one trace per window (root ends last), span kinds and `jeeve.*` attributes, judgeval-js ingest (<1 s to queryable), virtual SQL queries System 2 runs, volume
 - [[system-2]]: the goal tree (one writer, program versions stack with goals), instruction intake by whisper and local API, success checks as code modules, escalations, program changes scoped by goal, window summaries written by code
+- [[orchestrator-and-builder]]: System 2 split in two: 2A runs the game (custom loop), 2B builds behaviors (Vercel AI SDK); capability requests with 2A's pass check, trial windows a code gate grants and pre-empts, 2B's own traces linked to the request, the between-episode loop (designed)
 - [[behaviors-and-guards]]: the deterministic layer: the behavior contract, layered behaviors, safety guards, behaviors System 2 writes at runtime (sandbox, live trials, library), and the player action API: every Mineflayer action, menus on hands, events, item targets, chat policy
 - [[perception]]: perception as tools: `scan` and `reachable` for System 2 (traced as `perceive` spans), one read-only query layer (`src/world.ts`) shared with modules and authored behaviors, exact counts and heights in the summary, x-ray vs. line of sight
 - [[learning]]: decision: context only, no training. Live and cross-episode loops, per-minute traces linked by lineage, agentic search over past traces

@@ -11,6 +11,9 @@ import worldLoader from 'prismarine-world'
 import chunkLoader from 'prismarine-chunk'
 import { readFileSync } from 'node:fs'
 import { API_ACTIONS, API_COVERS, API_DOC, API_READS, authoredSpec, BEHAVIORS, Channels, NOT_MAPPED } from './behaviors.ts'
+import { trace } from '@opentelemetry/api'
+import { MockLanguageModelV4 } from 'ai/test'
+import { build, type CapabilityRequest } from './builder.ts'
 import { coalescing, makeDecider } from './decide.ts'
 import { direction, distanceBucket, makeEgocentric, newHandles, rawSnapshot } from './encoder.ts'
 import { blockAt, notableBlocks, reachable, scan } from './world.ts'
@@ -373,6 +376,17 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
     await new Promise(res => setTimeout(res, 50))
     assert.equal(ended, false)
   }
+  // A run whose actions keep failing at once still yields to the event loop, so timers (its time limit, the
+  // heartbeat, guards) still run. Settling in microtasks starved them: a Sonnet-written craft loop froze the agent.
+  {
+    let ticked = false
+    const r = startBehavior('async (api) => { for (;;) { try { await api.wait(1) } catch (e) {} } }', null, {
+      reads: [], actions: ['wait'], read: () => null, act: async () => { throw new Error('no') }, end: () => {}
+    })
+    await new Promise(res => setTimeout(() => { ticked = true; res(null) }, 30))
+    r.cancel()
+    assert.ok(ticked)
+  }
   const shape = { kind: 'behavior' as const, name: 'pillar', description: 'pillar up', code: 'async (api, t) => "done"', channels: ['legs', 'aim', 'hands'], targets: 'block' as const, timeout_s: 30 }
   compileBehavior(shape)
   compileBehavior({ ...shape, channels: ['hands'] })
@@ -444,6 +458,25 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.deepEqual(opts['make_it:wooden_pickaxe(1)'], { desc: 'Craft 1 wooden_pickaxe', behavior: 'make_it', block: { name: 'wooden_pickaxe', count: 1 } })
   assert.deepEqual(Object.keys(optionsFor(['hands'], ['make_it'], { entities: [], blocks: [], place: null }, null, () => 0)), ['keep_current'])
   delete BEHAVIORS.make_it
+}
+
+// The builder (2B): it trials what it writes and stops once a trial passes; it never grades its own work.
+{
+  const draft = (code: string) => ({ name: 'reach_up', description: 'build up to a block', code, channels: ['legs', 'aim', 'hands'], targets: 'block', timeout_s: 30, usage: 'pick it for blocks out of reach' })
+  const turn = (input: object, id: string) => ({
+    content: [{ type: 'tool-call' as const, toolCallId: id, toolName: 'write_behavior', input: JSON.stringify(input) }],
+    finishReason: { unified: 'tool-calls' as const, raw: undefined }, usage: { inputTokens: {}, outputTokens: {} } as any, warnings: []
+  })
+  const model = new MockLanguageModelV4({ doGenerate: [turn(draft('async () => "stuck"'), 'a'), turn(draft('async () => "done"'), 'b'), turn(draft('async () => "done"'), 'c')] })
+  const req: CapabilityRequest = { id: 'c-1', need: 'break blocks out of reach', constraints: [], targets: 'block', trial: { block: 'oak_leaves', count: 9 }, pass_when: 'no_leaves' }
+  const trials: string[] = []
+  const result = await build(req, { request: req }, {
+    // The runtime runs the trial and judges it with the request's pass_when: here, code that returns "done" passes.
+    trial: async d => { trials.push(d.code); const ok = d.code.includes('done'); return { behavior: `${d.name}@${trials.length}`, passed: ok, end: ok ? 'done' : 'stuck', ms: 1, preempted: 0 } },
+    perceive: async () => ({})
+  }, new AbortController().signal, trace.getTracer('selfcheck').startSpan('builder'), 's', model)
+  assert.equal(trials.length, 2) // stopped after the passing trial
+  assert.deepEqual(result.status === 'registered' && [result.behavior, result.usage, result.attempts.map(a => a.end)], ['reach_up@2', 'pick it for blocks out of reach', ['stuck', 'done']])
 }
 
 console.log('selfcheck ok')

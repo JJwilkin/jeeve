@@ -1,10 +1,12 @@
-// System 2: a Claude call per instruction or escalation (brain/architecture/system-2.md).
+// System 2A, the orchestrator: a Claude call per instruction or escalation (brain/architecture/system-2.md).
 // It reads the goal path, the program and recent events, may query its own traces with SQL,
-// and ends by calling `submit_decision`. Code applies the decision.
+// and ends by calling `submit_decision`. Code applies the decision. New behaviors it asks of the builder
+// (System 2B, src/builder.ts) with request_capability; it never writes behavior code itself.
 import Anthropic from '@anthropic-ai/sdk'
-import { API_DOC, BEHAVIORS } from './behaviors.ts'
+import { BEHAVIORS } from './behaviors.ts'
+import type { CapabilityRequest } from './builder.ts'
 import type { CheckSpec } from './goals.ts'
-import { BEHAVIOR_ENDINGS, MODULE_LIMITS, type ModuleSource } from './modules.ts'
+import { MODULE_LIMITS, type ModuleSource } from './modules.ts'
 
 export const MODEL = process.env.JEEVE_SYSTEM2_MODEL ?? 'claude-opus-5-5'
 const MAX_TURNS = 4
@@ -17,10 +19,10 @@ export type Decision = {
   program: { guidance: string | null, allowed_behaviors: string[] | null, heartbeat_ms: number | null, watch: string[] | null } | null
   new_modules: ModuleSource[]
   message: string | null
-  new_behaviors?: BehaviorDraft[] // from write_behavior calls, attached by code
+  requests?: RequestDraft[] // from request_capability calls, attached by code
 }
-// A behavior as written with write_behavior (not strict, so every field is checked when it's compiled).
-export type BehaviorDraft = Omit<ModuleSource, 'kind'> & { trial?: { block?: string | null, item?: string | null, count?: number | null, entity?: string | null, pass_when?: string | null } | null }
+// A capability request as 2A writes it (not strict: code checks it); code adds the id and the goal.
+export type RequestDraft = Omit<CapabilityRequest, 'id'>
 
 const nullable = (type: string, extra: Record<string, unknown> = {}) => ({ type: [type, 'null'], ...extra })
 const CHECK = {
@@ -80,8 +82,8 @@ const TOOLS: Anthropic.Tool[] = [
           properties: {
             watch: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }], description: 'Names of watch modules that wake the fast model when they turn true. null keeps the current list.' },
             guidance: nullable('string', { description: 'Full replacement guidance for the fast model. Concrete and short.' }),
-            // No enum: behaviors you write join the list once their trial passes, and validation checks names.
-            allowed_behaviors: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }], description: 'Seed behaviors, or ones you wrote whose trial passed.' },
+            // No enum: behaviors the builder writes join the list once their trial passes, and validation checks names.
+            allowed_behaviors: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }], description: 'Seed behaviors, or ones the builder wrote whose trial passed.' },
             heartbeat_ms: nullable('integer', { description: 'How often the fast model re-decides without an event (200–5000).' })
           }
         },
@@ -137,35 +139,32 @@ const PERCEPTION: Anthropic.Tool[] = [
 const PERCEIVE = `You can look at the world with scan and reachable. Your context only has a coarse summary of nearby blocks (fast_model_view.blocks), so look before you set a count or a check that depends on blocks, or before you judge whether something can be reached. Each tool call costs a turn of a few seconds, so make every look you need in the same turn (several tool calls at once), then decide.`
 
 // Its own tool, not a submit_decision field: one more strict object makes the grammar too large for the API.
-const WRITE_BEHAVIOR: Anthropic.Tool = {
-  name: 'write_behavior',
-  description: 'Write a new behavior (or a new version of one you wrote). It is compiled when your decision is applied, then trialled live once on the trial target. Call it before or together with submit_decision.',
+const REQUEST_CAPABILITY: Anthropic.Tool = {
+  name: 'request_capability',
+  description: 'Ask the builder (System 2B) for a new behavior. It writes and trials it in the background, which takes minutes; you keep running the game meanwhile. The result comes back as a capability_result escalation. Call it before or together with submit_decision.',
   input_schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['name', 'description', 'code', 'channels', 'targets', 'timeout_s', 'trial'],
+    required: ['need', 'constraints', 'targets', 'trial', 'pass_when'],
     properties: {
-      name: { type: 'string', description: 'snake_case' },
-      description: { type: 'string', description: 'What it does, as the fast model will read it; the target is appended.' },
-      code: { type: 'string', description: `async (api, target) => one of ${BEHAVIOR_ENDINGS.join(', ')}` },
-      channels: { type: 'array', items: { type: 'string', enum: ['legs', 'aim', 'hands'] }, description: 'One channel, or all three.' },
-      targets: { type: 'string', enum: ['block', 'entity', 'item'] },
-      timeout_s: { type: 'integer', description: `Time limit per run, 1–${MODULE_LIMITS.behaviorTimeoutS}` },
+      need: { type: 'string', description: 'What the behavior must do, in general terms and your own words (e.g. "break blocks that are out of reach from the ground by building up next to them"). Never paste a player\'s message.' },
+      constraints: { type: 'array', items: { type: 'string' }, description: 'Limits it must respect, e.g. "only build with blocks already in the inventory". Can be empty.' },
+      targets: { type: 'string', enum: ['block', 'entity', 'item'], description: 'What a run of it is aimed at: a block, an entity, or an item to make or fetch (the fast model is offered an item behavior for the item an inventory_delta goal still needs).' },
       trial: {
         type: 'object', additionalProperties: false,
         properties: {
           block: { type: 'string', description: 'block name, for targets "block"' },
           item: { type: 'string', description: 'item name, for targets "item"' },
           count: { type: 'integer' },
-          entity: { type: 'string', description: 'player name or mob type, for targets "entity"' },
-          pass_when: { type: 'string', description: 'Name of a check module (registered earlier, or in new_modules of this decision) that must be true when the run returns "done". Without it, "done" alone passes.' }
+          entity: { type: 'string', description: 'player name or mob type, for targets "entity"' }
         }
-      }
+      },
+      pass_when: { type: 'string', description: 'Required. Name of a check module (registered earlier, or in new_modules of this decision) that tests in the world what a trial on this target should have done. The builder can\'t change it.' }
     }
   }
 }
 
-const SYSTEM = `You are System 2 of Jeeve, a Minecraft bot that joins servers as a normal player and takes instructions from players.
+const SYSTEM = `You are System 2A, the orchestrator of Jeeve, a Minecraft bot that joins servers as a normal player and takes instructions from players.
 
 You are the slow planner. A fast decision model (System 1, "Jev") picks a behavior per channel several times a second under a program you shape: guidance text, the allowed behaviors and how often it re-decides. Deterministic code runs the behaviors and safety guards. You are called when an instruction arrives or something escalates. The bot never waits for you: it keeps acting on the current program while you think.
 
@@ -180,10 +179,7 @@ When no built-in check can express a goal, write one. Put a module in new_module
 s = { t, self: { pos: [x, y, z], yaw, health, food, held, below }, entities: [{ id, name, type, username, pos, vel }], inventory: { item_name: count }, blocks: { block_name: [[x, y, z], ...nearest 8] /* only types that are rare (64 or fewer) within 8 blocks of the bot's feet in every direction */ }, world: { time_of_day /* 0-24000 ticks; night is about 13000-23000 */, is_day, raining } }
 A type missing from s.blocks may just be out of that view (the bot walked off, or the canopy is more than 8 up), so a "none left" check must also require the bot to be within a few blocks of the place. Helpers: dist(a, b) for positions, count(s, "*_log") for inventory globs. Modules are pure: no I/O, no state between calls, no eval. They must finish in under ${MODULE_LIMITS.budgetMs} ms, and they run several times a second. Before registering, a module is trialled on recent real snapshots and refused if it throws or returns a non-boolean. A refusal comes back to you as an escalation. Modules you registered earlier are listed in your context, so reuse them by name.
 
-When no behavior can do what a goal needs, write one with the write_behavior tool. Its code is an async function expression \`async (api, target) => ...\` that returns ${BEHAVIOR_ENDINGS.map(e => `"${e}"`).join(', ')} (or throws). It claims channels (one of legs, aim, hands, or all three), and takes a "block" target ({ name, count }), an "item" target ({ name, count }: something to make or fetch; the fast model is offered it for the item an inventory_delta goal still needs) or an "entity" target ({ id, name, type, username, pos }). It has a time limit. It never touches the bot directly: the api has every action a player has, and is all it has. Positions are absolute [x, y, z] (block coordinates, y up; the bot stands in the block above the one under its feet), and names are Minecraft ids (oak_planks, crafting_table).
-${API_DOC}
-Each action needs the channel it drives. A window (chest, crafting table, furnace…) belongs to the hands: it stays open across awaits until close() or the run ends. Your code gets about 20 ms of computation between awaits; keep loops short and await between them. Scans and blockAt see blocks the bot placed itself, too. Safety guards check movement, digging and placing: a vetoed call rejects with "vetoed: <reason>". Catch it to try another way, or let it end the run as "vetoed". Other refusals reject with their reason too. The bot can reach blocks about 4.5 blocks from its eyes (eyes are 1.6 above its feet).
-A new behavior is tried once, live, on the trial target you give (trial.block, trial.item or trial.entity), and Jev can't interrupt it. A behavior's own "done" is only its claim: give the trial a pass_when check that tests the result in the world, or a run that did half the job passes. Make pass_when test what the behavior was asked to do to its trial target (e.g. no leaves left near the spot), not the whole goal: side effects such as the blocks it built with don't make it fail. Its result comes back to you as a behavior_trial escalation, with the error and its last actions if it failed. Only once its trial has passed can you add it to program.allowed_behaviors, so the fast model can pick it. Behaviors you wrote earlier are listed in your context; reuse them. Behaviors are plain code with no knowledge built in, so write general ones (e.g. "pillar up next to a block until it is in reach, then break it"), not ones tied to one spot.
+When no allowed behavior can do what a goal needs, ask the builder (System 2B) for one with request_capability. You describe the need and its constraints, and name the trial target. You also write its pass check yourself: a check module (in new_modules of the same decision) that tests in the world what a run on the trial target should have done, e.g. no oak_leaves left within a few blocks of the spot, with the bot near it. The builder writes the code, waits for the runtime to grant a trial window (only while no hostile is near and the bot hasn't been hurt for a few seconds; a threat pre-empts a running trial), trials it, and fixes it from the evidence, which can take minutes. Code tells the player you're working on it. Meanwhile you keep running the game: keep the goal moving with what's allowed, and let the fast model fight anything that threatens the bot. Requests in flight are listed in your context (requests). One request per goal: a new one replaces the old, and a request is dropped when its goal closes. Its result comes back as a capability_result escalation: if it's registered, add it to program.allowed_behaviors and write guidance for it (the builder proposes some as usage; you decide). If it failed, read its attempts and decide whether to ask again differently or fail the goal. Only a behavior whose trial passed can be allowed. Behaviors written earlier are in your context (modules); reuse them by name.
 
 On a new instruction: set the goal's done_when (or null if open-ended), escalate_if conditions, and a budget (closed goals) or review interval (open-ended goals). Adjust the program only if the default guidance is not enough. On an escalation: read what happened and decide whether to change the program, fail the goal (with a message saying why), push a sub-goal, or carry on (goal_action "none", everything else null).
 
@@ -191,13 +187,13 @@ Keep program changes small and concrete; they last only while the goal is active
 
 // Jeeve's own span vocabulary (brain/architecture/trace-schema.md), so queries don't burn turns on discovery.
 const TRACES = `Your traces (Judgment virtual SQL, project-scoped). One session per episode (session_id), one trace per window.
-Span names: window, carry_over, system2, perceive (your scan/reachable calls, children of the system2 span), program, decide, goal, module, behavior.<name> (navigate, follow, track, attack_when_ready, collect, and behaviors you wrote).
+Span names: window, carry_over, system2, perceive (your scan/reachable calls, children of the system2 span, or of a builder span), program, decide, goal, module, request (a capability request you made), builder (the builder's work on one request: a trace of its own, jeeve.request.id; its trial spans carry jeeve.behavior.run_id), behavior.<name> (navigate, follow, track, attack_when_ready, collect, and behaviors the builder wrote).
 Columns: span_name, session_id, trace_id, started_at, input, output, attributes (Map(String,String)), events_json.
 Keys: jeeve.window_index, jeeve.prev_trace_id, jeeve.goal.path, jeeve.goal.id, jeeve.goal.transition, jeeve.program.version,
 jeeve.program.because, jeeve.decide.trigger, jeeve.decide.changed, jeeve.decide.escalate, jeeve.decide.latency_ms, jeeve.decide.raw_state,
 jeeve.behavior.name, jeeve.behavior.params, jeeve.behavior.run_id, jeeve.behavior.end_reason (done, stuck, none_found, target_dead,
 target_lost, vetoed, replaced, stopped, cut, goal_closed, place_changed, death; authored behaviors also error, timeout), jeeve.behavior.decided_by
-(a decide span, or system2:<span> for a trial), jeeve.behavior.version, jeeve.behavior.detail (authored: error and last actions),
+(a decide span, or builder:<request id> for a trial), jeeve.behavior.version, jeeve.behavior.detail (authored: error and last actions),
 jeeve.module.id, jeeve.module.kind, jeeve.module.activation (ok, failed_trial, trial_started, loaded, disabled), jeeve.system2.trigger, jeeve.perceive.tool, jeeve.perceive.query, jeeve.perceive.mode (xray, los).
 Window events (events_json on window spans): death, damage, owner_damage, vetoed, chat.`
 
@@ -213,7 +209,7 @@ export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, sche
   return async function call (trigger: string, context: Record<string, unknown>): Promise<System2Result> {
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: JSON.stringify({ trigger, ...context }) }]
     const sqls: string[] = []
-    const behaviors: BehaviorDraft[] = []
+    const requests: RequestDraft[] = []
     let usage: Anthropic.Beta.BetaUsage | null = null
     let model = MODEL
     for (let turn = 1; turn <= MAX_TURNS; turn++) {
@@ -225,21 +221,21 @@ export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, sche
         output_config: { effort: opts.effort(trigger) },
         system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
         // The last turn offers only submit_decision, so a call always ends in a decision.
-        tools: [...(turn < MAX_TURNS ? tools : TOOLS.slice(0, 1)), WRITE_BEHAVIOR],
+        tools: [...(turn < MAX_TURNS ? tools : TOOLS.slice(0, 1)), REQUEST_CAPABILITY],
         messages
       } as Anthropic.Beta.MessageCreateParamsNonStreaming)
       usage = res.usage
       model = res.model
       if (res.stop_reason === 'refusal') return { decision: null, model, usage, turns: turn, sql: sqls, refusal: true }
       const calls = res.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use')
-      for (const c of calls) if (c.name === 'write_behavior') behaviors.push(c.input as BehaviorDraft)
+      for (const c of calls) if (c.name === 'request_capability') requests.push(c.input as RequestDraft)
       const submit = calls.find(c => c.name === 'submit_decision')
-      if (submit) return { decision: { ...submit.input as Decision, new_behaviors: behaviors }, model, usage, turns: turn, sql: sqls, refusal: false }
+      if (submit) return { decision: { ...submit.input as Decision, requests }, model, usage, turns: turn, sql: sqls, refusal: false }
       if (!calls.length) break
       messages.push({ role: 'assistant', content: res.content })
       // Tool calls in one turn run in parallel: a turn costs seconds, a look costs milliseconds.
       const results = await Promise.all(calls.map(async (c): Promise<Anthropic.Beta.BetaToolResultBlockParam> => {
-        if (c.name === 'write_behavior') return { type: 'tool_result', tool_use_id: c.id, content: 'Queued: compiled and trialled when your decision is applied.' }
+        if (c.name === 'request_capability') return { type: 'tool_result', tool_use_id: c.id, content: 'Queued: sent to the builder when your decision is applied.' }
         try {
           let out: unknown
           if (c.name === 'run_sql') {

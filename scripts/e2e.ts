@@ -97,10 +97,92 @@ await until('"collect 10 logs": System 2 sets inventory_delta(*_log, 10)', () =>
 await until('"collect 10 logs": 10 logs in inventory', () => logs() >= 10, 120000)
 await until('"collect 10 logs": Josh hears "done"', () => whispers.some(w => w.startsWith('done: collect 10 logs')), 20000)
 
+// Behaviors the builder (System 2B) writes, asked for by the orchestrator (2A): a tree whose canopy is out of
+// reach from the ground (eyes at -58.4, lowest leaf centre at -53.5). Collect can't get the leaves, and the
+// scratch library starts empty, so 2A has to request a behavior that builds up. A zombie is summoned while 2B
+// works: 2A keeps the game going (Jev fights it) and no trial window opens until it's dead.
+// Persistent leaves, so none decay instead of being broken.
+const traceRecords = () => readFileSync(agent.traceFile, 'utf8').trim().split('\n').map(l => JSON.parse(l))
+{
+  const TREE = { x: 30, z: -12 }
+  server.command(`fill ${TREE.x - 6} -60 ${TREE.z - 6} ${TREE.x + 6} -45 ${TREE.z + 6} air`) // the world persists between runs
+  server.command('fill 4 -60 6 20 -50 20 air') // logs "collect 10 logs" left, and older runs' oaks: collect would walk off to them
+  server.command(`fill ${TREE.x} -60 ${TREE.z} ${TREE.x} -55 ${TREE.z} oak_log`)
+  server.command(`fill ${TREE.x - 1} -54 ${TREE.z - 1} ${TREE.x + 1} -52 ${TREE.z + 1} oak_leaves[persistent=true]`)
+  server.command(`tp Jeeve ${TREE.x - 3} -60 ${TREE.z}`)
+  server.command(`tp Josh ${TREE.x - 6} -60 ${TREE.z + 4}`)
+  await sleep(2000)
+  // Logs and leaves around the tree. Logs alone can't be checked: Jeeve may pillar with the logs he collected.
+  const treeLeft = (kind: 'log' | 'leaves') => {
+    const left: string[] = []
+    for (let y = -60; y <= -50; y++) for (let x = TREE.x - 2; x <= TREE.x + 2; x++) for (let z = TREE.z - 2; z <= TREE.z + 2; z++) {
+      if (josh.blockAt(new Vec3(x, y, z))?.name.endsWith(`_${kind}`)) left.push(`${x},${y},${z}`)
+    }
+    return left
+  }
+  check('tree built: 6 logs and 27 leaves', treeLeft('log').length === 6 && treeLeft('leaves').length === 27, `${treeLeft('log').length} logs, ${treeLeft('leaves').length} leaves`)
+  // The leaves are persistent, as player-placed leaves are, and Jeeve can't see block states, so Josh says so;
+  // otherwise 2A rightly expects them to decay once the logs are gone, and waits.
+  const asked = Date.now()
+  const since = (kind: string, t = asked) => traceRecords().filter(r => r.kind === kind && r.t > t)
+  const windowEvents = (name: string, t = asked) => traceRecords().filter(r => r.kind === 'event' && r.name === name && r.t > t)
+  josh.whisper('Jeeve', "break that whole tree, leaves included. The leaves won't decay on their own")
+  await until('split: 2A requests a behavior and Josh hears "working on it"', () => whispers.some(w => w.startsWith('working on it')) && since('request').length > 0, 120000)
+  const requested = Date.now()
+  console.log(`INFO split: "working on it" ${((requested - asked) / 1000).toFixed(1)} s after the instruction; request ${JSON.stringify(since('request')[0]?.input)}`)
+  // The request is one 2A call (it may look first), not a build: building happens behind it.
+  check('split: 2A answers in one call (the one that made the request took < 60 s)', since('system2').some(r => r.output?.decision?.requests?.length && r.attrs['jeeve.system2.latency_ms'] < 60000),
+    since('system2').map(r => `${r.attrs['jeeve.system2.trigger']} ${r.attrs['jeeve.system2.latency_ms']} ms`).join('; '))
+  // A threat while 2B works.
+  server.command('time set midnight') // so the zombie doesn't burn
+  server.command(`summon zombie ${TREE.x - 6} -60 ${TREE.z - 2}`)
+  const summoned = Date.now()
+  const zombieAlive = () => Object.values(josh.entities).some(e => e.name === 'zombie')
+  await until('split: zombie spawned mid-build', zombieAlive, 10000)
+  const building = () => !since('builder').length // no build has finished yet
+  await until('split: Jev kills the zombie while 2B is still building', () => !zombieAlive(), 60000)
+  const killed = Date.now()
+  check('split: the zombie died before the build finished', building(), since('builder').map(r => r.attrs?.['jeeve.builder.status']).join(', ') || 'still building')
+  check('split: no trial window opened while the zombie was alive', !windowEvents('trial_window', summoned).some(e => e.t < killed),
+    `windows ${windowEvents('trial_window').map(e => `${((e.t - summoned) / 1000).toFixed(1)} s`).join(', ') || 'none yet'}, pre-empted ${windowEvents('trial_preempted').length}`)
+  server.command('time set day')
+  check('Jeeve survived the zombie', agent.bot.health > 0, `health ${agent.bot.health}`)
+  // Room for a few write → trial → rewrite rounds: a 2B turn takes 5–60 s and a failed trial up to its time limit.
+  await until('split: 2B gets a trial window after the threat', () => windowEvents('trial_window', killed).length > 0, 300000)
+  const registered = () => [...agent.modules.modules.values()].filter(m => m.kind === 'behavior')
+  await until('split: 2B registers a behavior that passed 2A\'s check', () => registered().length > 0, 480000)
+  {
+    // 2A wasn't held up by the build: the calls it made while 2B worked were seconds-scale, as without one.
+    const built = since('builder')[0]?.t ?? Date.now()
+    const during = since('system2', requested).filter(r => r.t < built)
+    check('split: 2A keeps answering while 2B builds (every call during the build < 30 s, at least one)', during.length > 0 && during.every(r => r.attrs['jeeve.system2.latency_ms'] < 30000),
+      during.map(r => `${r.attrs['jeeve.system2.trigger']} ${r.attrs['jeeve.system2.latency_ms']} ms`).join('; ') || 'no calls during the build')
+  }
+  // The result goes to 2A, unless the trial itself finished the goal (then the request closes with it).
+  const finishedByTrial = () => whispers.some(w => w.startsWith('done: break that whole tree')) && since('builder').some(b => b.output?.status === 'registered')
+  await until('split: 2A gets the result (capability_result), or the trial itself finished the goal', () => finishedByTrial() || since('system2').some(r => String(r.attrs['jeeve.system2.trigger']).includes('capability_result')), 120000)
+  await until('"break the tree": every leaf is broken', () => treeLeft('leaves').length === 0, 240000)
+  console.log(`left around the tree: leaves [${treeLeft('leaves').join(' ')}], logs [${treeLeft('log').join(' ')}]`)
+  const SEED = new Set(['navigate', 'follow', 'track', 'attack_when_ready', 'collect', 'e2e_step_forward', 'e2e_whisper'])
+  const authoredRuns = traceRecords().filter(r => r.kind === 'behavior_start' && r.t > asked && !SEED.has(r.name))
+  console.log(`authored runs here: ${authoredRuns.map(r => `${r.attrs['jeeve.behavior.params']} (${String(r.attrs['jeeve.behavior.decided_by']).startsWith('builder:') ? 'trial' : 'Jev'})`).join(', ')}`)
+  check('split: authored code did the work (a trial or a run Jev picked)', authoredRuns.length > 0)
+  await until('"break the tree": the goal completes and Josh hears "done"', () => whispers.some(w => w.startsWith('done: break that whole tree')), 120000)
+  const builds = since('builder')
+  console.log(`builder: ${builds.map(b => `${b.output?.status} ${b.attrs['jeeve.builder.latency_ms']} ms, ${b.attrs['jeeve.builder.trials']} trials: ${(b.output?.attempts ?? []).map((a: any) => `${a.behavior} ${a.end}${a.preempted ? ` (pre-empted ${a.preempted})` : ''}`).join(', ')}`).join('; ')}`)
+  {
+    const ids = registered().map(m => m.id)
+    console.log(`registered behaviors: ${ids.map(id => `${id}: ${JSON.stringify(agent.modules.get(id.split('@')[0])?.trial)}`).join('; ')}`)
+    const { loaded } = new ModuleRegistry(() => {}, LIBRARY).load()
+    check('behaviors persist: a fresh registry reloads the authored behaviors from the library', ids.length > 0 && ids.every(id => loaded.includes(id)), loaded.join(', '))
+  }
+  // Release the tree goal (Jeeve may be up a pillar; the next scenario teleports him).
+  await fetch(`http://127.0.0.1:${API}/instructions`, { method: 'POST', body: JSON.stringify({ from: 'operator', text: 'stand still and wait' }) })
+}
+
 // Perception: a real oak. System 2 has to look (scan) to set the true log count, and to see the leaves are
 // out of reach before trying. Leaves don't decay during the test (random ticks off), and the area is cleared
 // first, so nothing from earlier runs or the log columns is counted.
-const traceRecords = () => readFileSync(agent.traceFile, 'utf8').trim().split('\n').map(l => JSON.parse(l))
 const looksSince = (n: number) => traceRecords().filter(r => r.kind === 'perceive').slice(n)
 const treeBlocks = (re: RegExp) => josh.findBlocks({ matching: b => re.test(b.name), maxDistance: 16, count: 500 }).length
 server.command('gamerule random_tick_speed 0')
@@ -115,7 +197,9 @@ let looked = looksSince(0).length
 josh.whisper('Jeeve', 'break this tree')
 const tree = () => agent.goals.nodes.find(g => g.text === 'break this tree')
 await until('"break this tree": System 2 sets a check', () => !!tree()?.done_when, 45000)
-check('"break this tree": the check counts the real logs', tree()?.done_when?.spec.module === 'inventory_delta' && tree()?.done_when?.spec.count === treeLogs,
+// Either counts the real logs, or tests in the world that none are left: both come from looking, not a guess.
+// (Since the canopy scenario, a registered behavior may build with logs, which makes an inventory count unreliable.)
+check('"break this tree": the check counts the real logs, or tests that none are left', (tree()?.done_when?.spec.module === 'inventory_delta' && tree()?.done_when?.spec.count === treeLogs) || tree()?.done_when?.spec.module === 'authored',
   `${tree()?.done_when?.desc}, tree has ${treeLogs}`)
 const treeLooks = looksSince(looked)
 check('"break this tree": System 2 looked first', treeLooks.some(r => r.attrs['jeeve.perceive.tool'] === 'scan'), treeLooks.map(r => `${r.attrs['jeeve.perceive.tool']} ${r.attrs['jeeve.perceive.query']}`).join('; '))
@@ -197,52 +281,8 @@ check('"follow me and defend me" was abandoned, not failed', status.goals.past.s
   await fetch(`http://127.0.0.1:${API}/instructions`, { method: 'POST', body: JSON.stringify({ from: 'operator', text: 'stand still and wait' }) })
 }
 
-// Behaviors System 2 writes: a tree whose canopy is out of reach from the ground (eyes at -58.4, lowest
-// leaf centre at -53.5). Collect can't get the leaves; System 2 has to write a behavior that builds up.
-// Last, because Jeeve may end up on a pillar. Persistent leaves, so none decay instead of being broken.
-const TREE = { x: 30, z: -12 }
-server.command(`fill ${TREE.x - 6} -60 ${TREE.z - 6} ${TREE.x + 6} -45 ${TREE.z + 6} air`) // the world persists between runs
-server.command('fill 17 -60 10 19 -57 12 air') // logs "collect 10 logs" left: collect would walk off to them
-server.command(`fill ${TREE.x} -60 ${TREE.z} ${TREE.x} -55 ${TREE.z} oak_log`)
-server.command(`fill ${TREE.x - 1} -54 ${TREE.z - 1} ${TREE.x + 1} -52 ${TREE.z + 1} oak_leaves[persistent=true]`)
-server.command(`tp Jeeve ${TREE.x - 3} -60 ${TREE.z}`)
-server.command(`tp Josh ${TREE.x - 6} -60 ${TREE.z + 4}`)
-await sleep(2000)
-// Logs and leaves around the tree. Logs alone can't be checked: Jeeve may pillar with the logs he collected.
-const treeLeft = (kind: 'log' | 'leaves') => {
-  const left: string[] = []
-  for (let y = -60; y <= -50; y++) for (let x = TREE.x - 2; x <= TREE.x + 2; x++) for (let z = TREE.z - 2; z <= TREE.z + 2; z++) {
-    if (josh.blockAt(new Vec3(x, y, z))?.name.endsWith(`_${kind}`)) left.push(`${x},${y},${z}`)
-  }
-  return left
-}
-check('tree built: 6 logs and 27 leaves', treeLeft('log').length === 6 && treeLeft('leaves').length === 27, `${treeLeft('log').length} logs, ${treeLeft('leaves').length} leaves`)
-// The leaves are persistent, as player-placed leaves are, and Jeeve can't see block states, so Josh says so;
-// otherwise System 2 rightly expects them to decay once the logs are gone, and waits.
-const treeAsked = Date.now()
-josh.whisper('Jeeve', "break that whole tree, leaves included. The leaves won't decay on their own")
-// A behavior System 2 wrote earlier in this run (the oak scenario) may be reused here; what this scenario checks is
-// that authored code does the work: the trial of a new behavior, or a registered one Jev picks.
-const SEED = new Set(['navigate', 'follow', 'track', 'attack_when_ready', 'collect', 'e2e_step_forward', 'e2e_whisper'])
-const authoredRuns = () => traceRecords().filter(r => r.kind === 'behavior_start' && r.t > treeAsked && !SEED.has(r.name))
-const registered = () => [...agent.modules.modules.values()].filter(m => m.kind === 'behavior')
-// Room for a few write → trial → rewrite rounds: a System 2 call takes 5–40 s and a failed trial up to its time limit.
-await until('"break the tree": an authored behavior runs (written now, or reused)', () => authoredRuns().length > 0, 480000)
-await until('"break the tree": every leaf is broken', () => treeLeft('leaves').length === 0, 360000)
-console.log(`left around the tree: leaves [${treeLeft('leaves').join(' ')}], logs [${treeLeft('log').join(' ')}]`)
-console.log(`authored runs here: ${authoredRuns().map(r => `${r.attrs['jeeve.behavior.params']} (${r.attrs['jeeve.behavior.decided_by']?.startsWith('system2:') ? 'trial' : 'Jev'})`).join(', ')}`)
-// The leaves can be gone while the trial's code is still running (it may climb down after), and pass_when is judged
-// 3 ticks after it returns, so wait for registration rather than check it at once.
-await until('a behavior System 2 wrote passed its trial and is registered', () => registered().length > 0, 150000)
-{
-  const ids = registered().map(m => m.id)
-  console.log(`registered behaviors: ${ids.map(id => `${id}: ${JSON.stringify(agent.modules.get(id.split('@')[0])?.trial)}`).join('; ')}`)
-  const { loaded } = new ModuleRegistry(() => {}, LIBRARY).load()
-  check('behaviors persist: a fresh registry reloads the authored behaviors from the library', ids.length > 0 && ids.every(id => loaded.includes(id)), loaded.join(', '))
-}
-
-// The full player action API: crafting and containers. No seed behavior crafts or opens a chest, so System 2 has
-// to write behaviors that call craft, open and deposit.
+// The full player action API: crafting and containers. No seed behavior crafts or opens a chest, so 2A has to
+// request behaviors, and 2B writes them with craft, open and deposit.
 const held = (re: RegExp) => agent.bot.inventory.items().filter(i => re.test(i.name)).reduce((n, i) => n + i.count, 0)
 const callsSince = (t: number) => traceRecords().filter(r => r.kind === 'behavior_end' && r.t > t).flatMap(r => r.detail?.actions ?? []).map((a: { call: string, ok: boolean }) => `${a.call}${a.ok ? '' : ' ✗'}`)
 const WORKSHOP = { x: -20, z: 20 }
@@ -250,7 +290,7 @@ server.command(`fill ${WORKSHOP.x - 6} -60 ${WORKSHOP.z - 6} ${WORKSHOP.x + 6} -
 server.command(`tp Jeeve ${WORKSHOP.x} -60 ${WORKSHOP.z}`)
 server.command(`tp Josh ${WORKSHOP.x - 3} -60 ${WORKSHOP.z - 3}`)
 server.command('clear Jeeve')
-server.command('give Jeeve oak_log 4') // a pickaxe from logs: 3 logs make the 9 planks for a table, sticks and the head
+server.command('give Jeeve oak_log 8') // a pickaxe takes 3 logs (9 planks: table, sticks, head); trials are live and use up what they craft, so leave room for a failed one (run 7)
 await sleep(1500)
 {
   const asked = Date.now()
@@ -270,6 +310,8 @@ await sleep(1000)
   const logsHeld = held(/_log$/)
   josh.whisper('Jeeve', 'put your logs in the chest')
   await until('"put your logs in the chest": Jeeve holds no logs', () => held(/_log$/) === 0, 480000)
+  // The run that deposited may still be going; its actions are traced when it ends, which the goal's "done" follows.
+  await until('"put your logs in the chest": Josh hears "done"', () => whispers.some(w => w.startsWith('done: put your logs in the chest')), 30000)
   const calls = callsSince(asked)
   console.log(`authored calls: ${calls.join('; ')}`)
   check('"put your logs in the chest": authored code opened the chest and deposited', calls.some(c => c.startsWith('open(')) && calls.some(c => c.startsWith('deposit(') && !c.endsWith('✗')))
@@ -311,11 +353,19 @@ if (agent.recorder.exporting) {
       names = Object.fromEntries(res.rows.map((r: any) => [r.span_name, Number(r.n)]))
     }
     console.log('judgment spans by name:', JSON.stringify(names))
-    const want = ['window', 'carry_over', 'decide', 'system2', 'perceive', 'program', 'goal', 'module', 'behavior.collect', 'behavior.follow', 'behavior.attack_when_ready']
+    const want = ['window', 'carry_over', 'decide', 'system2', 'perceive', 'program', 'goal', 'module', 'request', 'builder', 'trial', 'behavior.collect', 'behavior.follow', 'behavior.attack_when_ready']
     check('Judgment has every span kind for this session', want.every(n => (names[n] ?? 0) > 0), want.filter(n => !names[n]).join(', ') || 'all present')
-    const looks = await client.sql(`SELECT count() AS n, countIf(p.span_name = 'system2') AS under FROM telemetry.spans s LEFT JOIN telemetry.spans p ON p.span_id = s.parent_span_id AND p.trace_id = s.trace_id WHERE s.session_id = '${session}' AND s.span_name = 'perceive' AND s.input != '' AND s.output != ''`)
+    const looks = await client.sql(`SELECT count() AS n, countIf(p.span_name IN ('system2', 'builder')) AS under FROM telemetry.spans s LEFT JOIN telemetry.spans p ON p.span_id = s.parent_span_id AND p.trace_id = s.trace_id WHERE s.session_id = '${session}' AND s.span_name = 'perceive' AND s.input != '' AND s.output != ''`)
     const lk = looks.rows[0] as any
-    check('perceive spans in Judgment carry query and result, under system2', Number(lk.n) > 0 && Number(lk.under) === Number(lk.n), `${lk.under}/${lk.n} under system2`)
+    check('perceive spans in Judgment carry query and result, under system2 or builder', Number(lk.n) > 0 && Number(lk.under) === Number(lk.n), `${lk.under}/${lk.n} under system2 or builder`)
+    // 2B's work: a builder trace per request, linked to the 2A request span, holding the AI SDK's spans and the trials.
+    const builds = (await client.sql(`SELECT trace_id, attributes['jeeve.request.id'] AS req, attributes['jeeve.request.span_id'] AS req_span FROM telemetry.spans WHERE session_id = '${session}' AND span_name = 'builder'`)).rows as any[]
+    const reqSpans = new Set(((await client.sql(`SELECT span_id FROM telemetry.spans WHERE session_id = '${session}' AND span_name = 'request'`)).rows as any[]).map(r => r.span_id))
+    const inTraces = (await client.sql(`SELECT trace_id, count() AS spans, countIf(span_name = 'trial') AS trials FROM telemetry.spans WHERE trace_id IN (${builds.map(b => `'${b.trace_id}'`).join(',') || "''"}) GROUP BY trace_id`)).rows as any[]
+    const per = (b: any) => inTraces.find(t => t.trace_id === b.trace_id) ?? { spans: 0, trials: 0 }
+    check('Judgment: 2B\'s builder traces link to the 2A request and hold the model calls and trials',
+      builds.some(b => reqSpans.has(b.req_span) && Number(per(b).trials) > 0 && Number(per(b).spans) > Number(per(b).trials) + 1),
+      builds.map(b => `${b.req}: linked ${reqSpans.has(b.req_span)}, ${per(b).spans} spans, ${per(b).trials} trials`).join('; ') || 'no builder spans')
     const lineage = await client.sql(`SELECT count() AS n FROM telemetry.spans WHERE session_id = '${session}' AND span_name = 'window' AND attributes['jeeve.prev_trace_id'] != ''`)
     check('windows are linked by prev_trace_id', Number((lineage.rows[0] as any).n) > 0, `${(lineage.rows[0] as any).n} linked windows`)
   } catch (err) {

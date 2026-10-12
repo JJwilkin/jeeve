@@ -31,8 +31,14 @@ window                   root
 │  └─ perceive           one per scan / reachable call System 2 makes ([[perception]])
 ├─ program               one per new System 1 program version (includes guidance)
 ├─ decide                one per Jev call (most of the spans)
+├─ request               one per capability request 2A makes ([[orchestrator-and-builder]])
 ├─ behavior.<name>       one per behavior run within this window
 └─ goal                  one per goal-tree transition
+
+builder                  root of its own trace, one per capability request (2B's work), linked to its request span
+├─ ai.*                  the Vercel AI SDK's spans (steps, model calls, tool calls), via @ai-sdk/otel
+├─ perceive              2B's scan / reachable
+└─ trial                 one per trial: joins its behavior.<name> run in the window trace by run_id
 ```
 
 ## What each span records
@@ -40,13 +46,16 @@ All custom attributes use the `jeeve.*` prefix.
 
 | Span | Input / output | Attributes | Events |
 |---|---|---|---|
-| `window` | none | `jeeve.window_index`, `jeeve.prev_trace_id`, `jeeve.window.reason` (`time`, `goal_boundary`, `episode_end`), `jeeve.goal.path` (`g-4:collect 10 logs > g-5:…`, at window open) | game events that aren't behavior events: `death`, `damage`, `owner_damage` (the player an open-ended goal protects, [[system-2]]), `chat`. Each carries the program version in effect. |
+| `window` | none | `jeeve.window_index`, `jeeve.prev_trace_id`, `jeeve.window.reason` (`time`, `goal_boundary`, `episode_end`), `jeeve.goal.path` (`g-4:collect 10 logs > g-5:…`, at window open) | game events that aren't behavior events: `death`, `damage`, `owner_damage` (the player an open-ended goal protects, [[system-2]]), `chat`, `trial_window` and `trial_preempted` ([[orchestrator-and-builder]]). Each carries the program version in effect. |
 | `carry_over` | in: goal path, program version, previous window's summary, open behavior runs | `jeeve.prev_trace_id` | none |
 | `system2` | in: instruction text and sender, or the escalation · out: goal, check, program changes | `jeeve.system2.trigger` (`instruction`, `escalation:<reason>`), plus model and tokens via `recordLLMMetadata` | none |
 | `perceive` | in: the query · out: the full result | `jeeve.perceive.tool` (`scan`, `reachable`), `.query`, `.mode` (`xray`, `los`; scan only), `.latency_ms`, `.result_bytes` | none |
 | `program` | in: manifest diff from the parent · out: full manifest | `jeeve.program.version`, `.parent`, `.reason`, `.cites` (trace and span ids), `.activation` (`ok`, `failed_check`, `rolled_back`) | none |
 | `decide` | in: the encoded state as Jev saw it, plus the questions with options **in the order shown** · out: choices, probabilities, confidence | `jeeve.program.version`, `jeeve.decide.trigger` (merged triggers), `.changed`, `.latency_ms`, `.state_age_ms` (how stale the state was when the answer arrived), `.deadline_missed`, `.escalate`, `.raw_state` (compact raw snapshot for replay) | none |
-| `behavior.<name>` | none | `jeeve.behavior.name`, `.version`, `.params`, `.run_id`, `.channels`, `.decided_by` (the `decide` span id, or `system2:<span>` for a trial), `.end_reason` (authored runs also `error`, `timeout`), `.detail` (authored runs: error and last 30 actions), `.continued` | `progress`, `vetoed` (guard and reason), and the other behavior events |
+| `behavior.<name>` | none | `jeeve.behavior.name`, `.version`, `.params`, `.run_id`, `.channels`, `.decided_by` (the `decide` span id, or `builder:<request id>` for a trial), `.end_reason` (authored runs also `error`, `timeout`), `.detail` (authored runs: error and last 30 actions), `.continued` | `progress`, `vetoed` (guard and reason), and the other behavior events |
+| `request` | in: need, constraints, target type, trial target, pass check | `jeeve.request.id`, `jeeve.goal.id`, `jeeve.program.cites` (the `system2` span) | none |
+| `builder` | in: the brief 2B got · out: the result (registered or failed, with every attempt) | `jeeve.request.id`, `.request.span_id`, `.request.trace_id`, `jeeve.goal.id`, `jeeve.builder.model`, `.status` (`registered`, `failed`, `cancelled`), `.trials`, `.latency_ms`; an OTel link to the request span | none |
+| `trial` | in: the draft · out: the trial report | `jeeve.request.id`, `jeeve.module.id`, `jeeve.behavior.run_id`, `jeeve.trial.end`, `.passed`, `.preempted` | none |
 | `goal` | in: the node · out: the check result and one-line summary | `jeeve.goal.id`, `.path`, `.transition` (`pushed`, `completed`, `failed`, `abandoned`; ~~`popped`~~ dropped by [[system-2]]: a pop is the child closing) | none |
 
 **Every `decide` call keeps its full state.** The many `keep_current` calls are the evidence for telling a bad choice from a broken behavior ([[behaviors-and-guards]]). `jeeve.decide.changed` lets queries skip them.

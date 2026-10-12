@@ -9,6 +9,8 @@ How System 2 owns the goal tree, how an instruction from outside becomes a goal 
 
 Judges and the outer loop's reward signal are still roadmap stage 4 ([[roadmap]]).
 
+*Refined by [[orchestrator-and-builder]] (2026-10-11):* System 2 is now two agents. Everything in this note describes **2A, the orchestrator**. Writing, trialling and fixing behaviors moved to **2B, the builder**, which 2A asks through capability requests.
+
 ## The goal tree
 ```yaml
 id: g-4                  # per episode, counts up
@@ -204,7 +206,7 @@ All three are sensible with no prompt tuning.
 - Now the system prompt carries the virtual SQL schema (`discoverSchema()`, fetched once per run, so it stays cached) plus Jeeve's span names and `jeeve.*` keys. The last turn offers only `submit_decision`.
 - Asked about a past session, it answered correctly in one query.
 
-**Writing behaviors:** a third tool, `write_behavior`, not strict. The action API it writes against is described by `API_DOC`, generated from the API's own tables ([[behaviors-and-guards]] → "The player action API"). It's queued and applied with the decision, and the trial result comes back as a `behavior_trial` escalation ([[behaviors-and-guards]] → "How it's built"). Adding behaviors to `new_modules` instead hit the grammar limit again.
+**Writing behaviors:** ~~a third tool, `write_behavior`~~ *superseded by [[orchestrator-and-builder]]:* 2A calls `request_capability` with a pass check it wrote, and 2B writes and trials the behavior against `API_DOC`. Previously: a third tool, `write_behavior`, not strict. The action API it writes against is described by `API_DOC`, generated from the API's own tables ([[behaviors-and-guards]] → "The player action API"). It's queued and applied with the decision, and the trial result comes back as a `behavior_trial` escalation ([[behaviors-and-guards]] → "How it's built"). Adding behaviors to `new_modules` instead hit the grammar limit again.
 
 **Strict-schema limit:** a strict `submit_decision` plus any second tool failed with "compiled grammar is too large". Defining the check object once (`$defs` / `$ref`) instead of three times fixed it, and `run_sql` (one string argument) isn't strict.
 
