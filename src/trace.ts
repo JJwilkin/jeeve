@@ -154,7 +154,7 @@ export class Recorder {
     this.runs.delete(runId)
     const k = `${run.name}:${reason}`
     this.stats.behaviors[k] = (this.stats.behaviors[k] ?? 0) + 1
-    this.jsonl({ kind: 'behavior_end', run_id: runId, reason })
+    this.jsonl({ kind: 'behavior_end', run_id: runId, reason, detail })
   }
 
   async shutdown (reason = 'episode_end') {

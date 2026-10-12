@@ -6,7 +6,7 @@ import mineflayer from 'mineflayer'
 import pf from 'mineflayer-pathfinder'
 import collectblock from 'mineflayer-collectblock'
 import { Judgeval } from 'judgeval'
-import { authoredSpec, BEHAVIORS, CHANNELS, Channels, type Spec, type WorldReads } from './behaviors.ts'
+import { authoredSpec, BEHAVIORS, CHANNELS, Channels, type ApiHost, type Spec } from './behaviors.ts'
 import { coalescing, makeDecider, type Ask } from './decide.ts'
 import { inventoryCounts, newHandles, rawSnapshot, type Directive } from './encoder.ts'
 import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal } from './goals.ts'
@@ -75,7 +75,7 @@ export async function startAgent (opts: AgentOptions) {
   }, library)
   const libraryLoad = modules.load()
   const lookup = (name: string) => modules.get(name)
-  const world: WorldReads = { blockAt, scan, reachable } // the shared block view (src/world.ts), as authored code sees it
+  const world: ApiHost = { blockAt, scan, reachable, allowed: opts.allowed } // the shared block view (src/world.ts) and who code may whisper to
   // Behaviors from the library join the seed set; Jev sees them wherever System 2's program allows them.
   for (const m of modules.modules.values()) if (m.kind === 'behavior') BEHAVIORS[m.name] = { ...authoredSpec(m, world), disabled: m.disabled }
   const authoredFailures = new Map<string, number>() // behavior name → failed runs in a row
@@ -156,6 +156,14 @@ export async function startAgent (opts: AgentOptions) {
     return Math.max(0, want - ((inventoryCounts(bot)[block] ?? 0) - (directive.inventory[block] ?? 0)))
   }
 
+  // What an inventory_delta check naming one item still needs: the target for item behaviors (e.g. a craft).
+  const wanted = () => {
+    const check = goals.leaf()?.done_when
+    if (check?.spec.module !== 'inventory_delta' || !bot.registry.itemsByName[check.spec.match ?? '']) return []
+    const p = check.progress!(bot)
+    return p.want > p.have ? [{ name: check.spec.match!, count: p.want - p.have }] : []
+  }
+
   // ---- programs: validate, dry-run the encoder, activate; the watchdog rolls back ----
   function activate (next: Program, because: string, cites: string[] = []): boolean {
     let failed: string | null = null
@@ -190,7 +198,7 @@ export async function startAgent (opts: AgentOptions) {
 
   function wireDecider () {
     const decide = makeDecider({
-      bot, program, handles, channels, remaining,
+      bot, program, handles, channels, remaining, wanted,
       directive: () => directive && { ...directive, goal: goalLine(), place: goals.place() },
       events: () => recentFor(EVENT_WINDOW_MS),
       record: span => {
@@ -414,7 +422,8 @@ export async function startAgent (opts: AgentOptions) {
     let problem: string | null = null
     try { compileBehavior(src) } catch (err) { problem = `behavior ${n.name} refused: ${String(err)}` }
     const t = n.trial
-    const target = !t ? null : src.targets === 'block' ? (t.block ? { name: t.block, count: t.count ?? 1 } : null) : findEntity(t.entity ?? null)
+    const thing = src.targets === 'block' ? t?.block : t?.item
+    const target = !t ? null : src.targets === 'entity' ? findEntity(t.entity ?? null) : thing ? { name: thing, count: t.count ?? 1 } : null
     if (!problem && trial) problem = `behavior ${n.name}: the trial of ${trial.src.name} is still running`
     if (!problem && !target) problem = `behavior ${n.name}: trial target not found (${JSON.stringify(t)})`
     const passWhen = t?.pass_when || null

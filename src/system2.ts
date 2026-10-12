@@ -2,7 +2,7 @@
 // It reads the goal path, the program and recent events, may query its own traces with SQL,
 // and ends by calling `submit_decision`. Code applies the decision.
 import Anthropic from '@anthropic-ai/sdk'
-import { API_ACTIONS, API_READS, BEHAVIORS } from './behaviors.ts'
+import { API_DOC, BEHAVIORS } from './behaviors.ts'
 import type { CheckSpec } from './goals.ts'
 import { BEHAVIOR_ENDINGS, MODULE_LIMITS, type ModuleSource } from './modules.ts'
 
@@ -20,7 +20,7 @@ export type Decision = {
   new_behaviors?: BehaviorDraft[] // from write_behavior calls, attached by code
 }
 // A behavior as written with write_behavior (not strict, so every field is checked when it's compiled).
-export type BehaviorDraft = Omit<ModuleSource, 'kind'> & { trial?: { block?: string | null, count?: number | null, entity?: string | null, pass_when?: string | null } | null }
+export type BehaviorDraft = Omit<ModuleSource, 'kind'> & { trial?: { block?: string | null, item?: string | null, count?: number | null, entity?: string | null, pass_when?: string | null } | null }
 
 const nullable = (type: string, extra: Record<string, unknown> = {}) => ({ type: [type, 'null'], ...extra })
 const CHECK = {
@@ -149,12 +149,13 @@ const WRITE_BEHAVIOR: Anthropic.Tool = {
       description: { type: 'string', description: 'What it does, as the fast model will read it; the target is appended.' },
       code: { type: 'string', description: `async (api, target) => one of ${BEHAVIOR_ENDINGS.join(', ')}` },
       channels: { type: 'array', items: { type: 'string', enum: ['legs', 'aim', 'hands'] }, description: 'One channel, or all three.' },
-      targets: { type: 'string', enum: ['block', 'entity'] },
+      targets: { type: 'string', enum: ['block', 'entity', 'item'] },
       timeout_s: { type: 'integer', description: `Time limit per run, 1–${MODULE_LIMITS.behaviorTimeoutS}` },
       trial: {
         type: 'object', additionalProperties: false,
         properties: {
           block: { type: 'string', description: 'block name, for targets "block"' },
+          item: { type: 'string', description: 'item name, for targets "item"' },
           count: { type: 'integer' },
           entity: { type: 'string', description: 'player name or mob type, for targets "entity"' },
           pass_when: { type: 'string', description: 'Name of a check module (registered earlier, or in new_modules of this decision) that must be true when the run returns "done". Without it, "done" alone passes.' }
@@ -179,11 +180,10 @@ When no built-in check can express a goal, write one. Put a module in new_module
 s = { t, self: { pos: [x, y, z], yaw, health, food, held, below }, entities: [{ id, name, type, username, pos, vel }], inventory: { item_name: count }, blocks: { block_name: [[x, y, z], ...nearest 8] /* only types that are rare (64 or fewer) within 8 blocks of the bot's feet in every direction */ }, world: { time_of_day /* 0-24000 ticks; night is about 13000-23000 */, is_day, raining } }
 A type missing from s.blocks may just be out of that view (the bot walked off, or the canopy is more than 8 up), so a "none left" check must also require the bot to be within a few blocks of the place. Helpers: dist(a, b) for positions, count(s, "*_log") for inventory globs. Modules are pure: no I/O, no state between calls, no eval. They must finish in under ${MODULE_LIMITS.budgetMs} ms, and they run several times a second. Before registering, a module is trialled on recent real snapshots and refused if it throws or returns a non-boolean. A refusal comes back to you as an escalation. Modules you registered earlier are listed in your context, so reuse them by name.
 
-When no behavior can do what a goal needs, write one with the write_behavior tool. Its code is an async function expression \`async (api, target) => ...\` that returns ${BEHAVIOR_ENDINGS.map(e => `"${e}"`).join(', ')} (or throws). It claims channels (one of legs, aim, hands, or all three), takes a "block" target ({ name, count }) or an "entity" target ({ id, name, type, username, pos }), and has a time limit. It never touches the bot directly; the api is all it has, and positions are absolute [x, y, z] (block coordinates, y up; the bot stands in the block above the one under its feet):
-- reads, synchronous: ${API_READS.map(n => `api.${n}`).join(', ')}. api.self() → { pos, yaw, pitch, on_ground, health, food, held }; api.inventory() → { item: count }; api.entities(radius) → [{ id, name, type, username, pos }]; api.blockAt(x, y, z) → name or null.
-- asynchronous (await them): ${API_ACTIONS.map(n => `api.${n}`).join(', ')}. api.scan({ match: glob, radius, los }) → { total, clusters: [{ count, names, nearest, rel, y_rel, min, max, positions }] }; api.reachable(x, y, z) → { reachable: boolean, status } (whether the pathfinder can get within reach of that block without building; status "timeout" means it gave up after 1 s, not that it's unreachable); api.control(name, on) for forward/back/left/right/jump/sneak/sprint (legs); api.look(x, y, z) at a point (aim); api.dig(x, y, z), api.place(x, y, z) (places the held block there, against any solid neighbour) and api.equip(glob) (hands); api.wait(ticks), 20 ticks a second; api.goto(x, y, z, range) walks there with the pathfinder (legs).
-Each action that moves the bot needs its channel. Your code gets about 20 ms of computation between awaits; keep loops short and await between them. Scans and blockAt see blocks the bot placed itself, too. Safety guards check every action: a vetoed call rejects with "vetoed: <reason>". Catch it to try another way, or let it end the run as "vetoed". The bot can reach blocks about 4.5 blocks from its eyes (eyes are 1.6 above its feet).
-A new behavior is tried once, live, on the trial target you give, and Jev can't interrupt it. A behavior's own "done" is only its claim: give the trial a pass_when check that tests the result in the world, or a run that did half the job passes. Make pass_when test what the behavior was asked to do to its trial target (e.g. no leaves left near the spot), not the whole goal: side effects such as the blocks it built with don't make it fail. Its result comes back to you as a behavior_trial escalation, with the error and its last actions if it failed. Only once its trial has passed can you add it to program.allowed_behaviors, so the fast model can pick it. Behaviors you wrote earlier are listed in your context; reuse them. Behaviors are plain code with no knowledge built in, so write general ones (e.g. "pillar up next to a block until it is in reach, then break it"), not ones tied to one spot.
+When no behavior can do what a goal needs, write one with the write_behavior tool. Its code is an async function expression \`async (api, target) => ...\` that returns ${BEHAVIOR_ENDINGS.map(e => `"${e}"`).join(', ')} (or throws). It claims channels (one of legs, aim, hands, or all three), and takes a "block" target ({ name, count }), an "item" target ({ name, count }: something to make or fetch; the fast model is offered it for the item an inventory_delta goal still needs) or an "entity" target ({ id, name, type, username, pos }). It has a time limit. It never touches the bot directly: the api has every action a player has, and is all it has. Positions are absolute [x, y, z] (block coordinates, y up; the bot stands in the block above the one under its feet), and names are Minecraft ids (oak_planks, crafting_table).
+${API_DOC}
+Each action needs the channel it drives. A window (chest, crafting table, furnace…) belongs to the hands: it stays open across awaits until close() or the run ends. Your code gets about 20 ms of computation between awaits; keep loops short and await between them. Scans and blockAt see blocks the bot placed itself, too. Safety guards check movement, digging and placing: a vetoed call rejects with "vetoed: <reason>". Catch it to try another way, or let it end the run as "vetoed". Other refusals reject with their reason too. The bot can reach blocks about 4.5 blocks from its eyes (eyes are 1.6 above its feet).
+A new behavior is tried once, live, on the trial target you give (trial.block, trial.item or trial.entity), and Jev can't interrupt it. A behavior's own "done" is only its claim: give the trial a pass_when check that tests the result in the world, or a run that did half the job passes. Make pass_when test what the behavior was asked to do to its trial target (e.g. no leaves left near the spot), not the whole goal: side effects such as the blocks it built with don't make it fail. Its result comes back to you as a behavior_trial escalation, with the error and its last actions if it failed. Only once its trial has passed can you add it to program.allowed_behaviors, so the fast model can pick it. Behaviors you wrote earlier are listed in your context; reuse them. Behaviors are plain code with no knowledge built in, so write general ones (e.g. "pillar up next to a block until it is in reach, then break it"), not ones tied to one spot.
 
 On a new instruction: set the goal's done_when (or null if open-ended), escalate_if conditions, and a budget (closed goals) or review interval (open-ended goals). Adjust the program only if the default guidance is not enough. On an escalation: read what happened and decide whether to change the program, fail the goal (with a message saying why), push a sub-goal, or carry on (goal_action "none", everything else null).
 

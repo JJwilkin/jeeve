@@ -19,7 +19,7 @@ type Emit = (event: string, terminal?: boolean) => void
 type Running = { stop: () => void, onVeto?: (reason: string) => void, detail?: () => unknown }
 export type Spec = {
   channels: Channel[]
-  targets: 'entity' | 'block'
+  targets: 'entity' | 'block' | 'item' // block and item targets are { name, count }
   describe: (target: string) => string
   describePlace?: (where: string) => string // also takes the goal's place as a target ({ place: [x, y, z] })
   start: (bot: Bot, target: any, emit: Emit) => Running
@@ -213,18 +213,26 @@ export class Channels {
   }
 }
 
-// ---- behaviors System 2 writes (brain/architecture/behaviors-and-guards.md → "Runtime-authored behaviors") ----
-// Authored code never holds `bot`. It gets an API: read-only world queries (src/world.ts, shared with
-// perception), the bot's own state, and actions. Every action goes through the bot methods installGuards
-// wrapped, so a guard vetoes authored code exactly as it vetoes a seed behavior, and each action needs the
-// channel it drives, so a behavior can't move legs it doesn't hold.
-export type WorldReads = {
+// ---- behaviors System 2 writes (brain/architecture/behaviors-and-guards.md → "The player action API") ----
+// Authored code never holds `bot`. It gets every player action Mineflayer has, one entry each in READS and
+// ACTIONS below: plain data in (positions, entity ids, item globs, slots), plain data out. Block queries come
+// from the shared world layer (src/world.ts). Every action goes through the bot methods installGuards wrapped,
+// and needs the channel it drives. `covers` names the Mineflayer Bot methods an entry stands for: the selfcheck
+// fails when Mineflayer has a Bot method that no entry covers and NOT_MAPPED doesn't explain.
+export type ApiHost = {
   blockAt: (bot: Bot, pos: [number, number, number]) => string | null
   scan: (bot: Bot, opts: { match: string, radius?: number, los?: boolean, max?: number }) => unknown
   reachable: (bot: Bot, pos: [number, number, number]) => Promise<unknown>
+  allowed: string[] // players authored code may whisper to: the instruction allowlist
 }
 type Xyz = [number, number, number]
+// One run's state: the window it opened (hands own windows; closed when the run ends) and its event listeners.
+type Ctx = { bot: Bot, host: ApiHost, win: any, offs: Set<() => void> }
+type Entry = { ch?: Channel, covers: string[], doc: string, run: (c: Ctx, ...a: any[]) => unknown }
+
 const CONTROLS = new Set(['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint'])
+const DESTS = ['hand', 'off-hand', 'head', 'torso', 'legs', 'feet']
+const FACES = [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]]
 const r2 = (v: number) => +v.toFixed(2)
 const xyz = (args: unknown[]): Xyz => {
   const [x, y, z] = args.map(Number)
@@ -232,59 +240,153 @@ const xyz = (args: unknown[]): Xyz => {
   return [Math.floor(x), Math.floor(y), Math.floor(z)]
 }
 const entityData = (e: Entity) => ({ id: e.id, name: e.name, type: e.type, username: e.username, pos: [r2(e.position.x), r2(e.position.y), r2(e.position.z)] })
+const itemData = (i: any) => i ? { name: i.name, count: i.count, slot: i.slot } : null
+const windowData = (w: any) => w && {
+  id: w.id, type: w.type, title: plain(w.title), inventory_start: w.inventoryStart,
+  slots: w.slots.filter(Boolean).map(itemData),
+  ...(w.trades ? { trades: w.trades.map((t: any) => ({ in: [itemData(t.inputItem1), itemData(t.inputItem2)].filter(Boolean), out: itemData(t.outputItem), disabled: t.tradeDisabled })) } : {})
+}
+// Any Mineflayer value as plain data, for event arguments: entities, blocks, windows and items by shape.
+function plain (v: any, depth = 0): unknown {
+  if (v === null || typeof v !== 'object') return typeof v === 'function' || typeof v === 'bigint' ? null : v ?? null
+  if (Object.keys(v).length === 3 && ['x', 'y', 'z'].every(k => typeof v[k] === 'number')) return [r2(v.x), r2(v.y), r2(v.z)]
+  if (v.position && typeof v.id === 'number' && 'yaw' in v) return entityData(v)
+  if (v.position && typeof v.name === 'string' && 'stateId' in v) return { name: v.name, pos: [v.position.x, v.position.y, v.position.z] }
+  if (Array.isArray(v.slots) && 'inventoryStart' in v) return windowData(v)
+  if (typeof v.name === 'string' && typeof v.count === 'number') return itemData(v)
+  if (depth > 1) return null
+  if (Array.isArray(v)) return v.slice(0, 32).map(x => plain(x, depth + 1))
+  if (v.toString !== Object.prototype.toString) return String(v) // chat messages
+  return Object.fromEntries(Object.entries(v).slice(0, 16).map(([k, x]) => [k, plain(x, depth + 1)]))
+}
+const blockOf = (bot: Bot, a: unknown[]) => {
+  const p = xyz(a)
+  const b = bot.blockAt(new Vec3(...p))
+  if (!b) throw new Error(`no block loaded at ${p.join(' ')}`)
+  return b
+}
+const entityOf = (bot: Bot, id: unknown) => {
+  const e = bot.entities[Number(id)]
+  if (!e || e === bot.entity) throw new Error(`no entity with id ${id}`)
+  return e
+}
+const matching = (items: any[], pattern: unknown) => items.filter(i => glob(String(pattern)).test(i.name))
+// The window this run opened, if it's still the open one (walking away closes it server-side).
+const openWin = (c: Ctx) => {
+  if (!c.win || c.bot.currentWindow !== c.win) { c.win = null; throw new Error('no window open: call api.open first') }
+  return c.win
+}
+const closeWin = async (c: Ctx) => {
+  if (c.win && c.bot.currentWindow === c.win) await c.bot.closeWindow(c.win)
+  c.win = null
+}
+// Places with the held item at an empty position, against any solid neighbour.
+async function against (bot: Bot, a: unknown[], put: (ref: any, face: Vec3) => Promise<unknown>) {
+  const t = new Vec3(...xyz(a))
+  if (bot.blockAt(t)?.boundingBox !== 'empty') throw new Error(`${t} is not empty`)
+  for (const d of FACES) {
+    const ref = bot.blockAt(t.offset(d[0], d[1], d[2]))
+    if (ref?.boundingBox === 'block') return put(ref, new Vec3(-d[0], -d[1], -d[2]))
+  }
+  throw new Error(`no solid block next to ${t} to place against`)
+}
+// Moves up to count (all if null) of the items matching a glob, one item type at a time.
+async function moveItems (from: any[], pattern: unknown, count: unknown, move: (type: number, n: number) => Promise<void>) {
+  let left = count == null ? Infinity : Math.max(0, Math.floor(Number(count)))
+  let moved = 0
+  for (const type of new Set(matching(from, pattern).map(i => i.type))) {
+    const n = Math.min(left, from.filter(i => i.type === type).reduce((s, i) => s + i.count, 0))
+    if (n <= 0) break
+    await move(type, n)
+    moved += n
+    left -= n
+  }
+  if (!moved) throw new Error(`no items matching ${pattern}`)
+  return moved
+}
 
-export const API_READS = ['self', 'inventory', 'entities', 'blockAt']
-export const API_ACTIONS = ['scan', 'reachable', 'control', 'look', 'dig', 'place', 'equip', 'wait', 'goto']
-
-function actionApi (bot: Bot, channels: Channel[], world: WorldReads) {
-  const need = (c: Channel) => { if (!channels.includes(c)) throw new Error(`needs the ${c} channel`) }
-  const reads: Record<string, (...a: unknown[]) => unknown> = {
-    self: () => {
+const READS: Record<string, Entry> = {
+  self: {
+    covers: [], doc: 'self() → { pos, yaw, pitch, on_ground, health, food, held }',
+    run: ({ bot }) => {
       const e = bot.entity
       return { pos: [r2(e.position.x), r2(e.position.y), r2(e.position.z)], yaw: r2(e.yaw), pitch: r2(e.pitch), on_ground: e.onGround, health: bot.health, food: bot.food, held: bot.heldItem?.name ?? null }
-    },
-    inventory: () => inventoryCounts(bot),
-    entities: (radius = 32) => Object.values(bot.entities).filter(e => e !== bot.entity && e.position.distanceTo(bot.entity.position) <= Number(radius)).map(entityData),
-    blockAt: (...a) => world.blockAt(bot, xyz(a))
+    }
+  },
+  inventory: { covers: [], doc: 'inventory() → { item: count }', run: ({ bot }) => inventoryCounts(bot) },
+  slots: { covers: [], doc: 'slots() → [{ slot, name, count }] for every filled inventory slot (armor 5-8, main 9-35, hotbar 36-44, off-hand 45)', run: ({ bot }) => bot.inventory.slots.filter(Boolean).map(itemData) },
+  held: {
+    covers: [], doc: 'held() → { name, count, slot, durability_used, max_durability } or null',
+    run: ({ bot }) => bot.heldItem && { ...itemData(bot.heldItem), durability_used: bot.heldItem.durabilityUsed ?? null, max_durability: bot.heldItem.maxDurability ?? null }
+  },
+  entities: {
+    covers: [], doc: 'entities(radius = 32) → [{ id, name, type, username, pos }]',
+    run: ({ bot }, radius = 32) => Object.values(bot.entities).filter(e => e !== bot.entity && e.position.distanceTo(bot.entity.position) <= Number(radius)).map(entityData)
+  },
+  blockAt: { covers: ['blockAt'], doc: 'blockAt(x, y, z) → name or null', run: ({ bot, host }, ...a) => host.blockAt(bot, xyz(a)) },
+  blockInfo: {
+    covers: [], doc: 'blockInfo(x, y, z) → { name, properties } (block states, e.g. persistent, axis, facing, age) or null',
+    run: ({ bot }, ...a) => { const b = bot.blockAt(new Vec3(...xyz(a))); return b && { name: b.name, properties: b.getProperties() } }
+  },
+  window: { covers: [], doc: 'window() → the open window { id, type, title, slots, inventory_start, trades? } or null; slots below inventory_start are the container\'s, the rest your inventory', run: ({ bot }) => windowData(bot.currentWindow) },
+  recipes: {
+    covers: ['recipesAll'], doc: 'recipes(item) → [{ needs_table, makes, uses: { item: count } }], every recipe the game has for an item, those whose ingredients you hold first',
+    run: ({ bot }, item) => {
+      const id = bot.registry.itemsByName[String(item)]?.id
+      if (id === undefined) throw new Error(`no item named ${item}`)
+      // Not capped: there's one recipe per wood type, and a cap of 8 hid oak (e2e: a craft gave up at once).
+      const all = bot.recipesAll(id, null, true).map((r: any) => ({
+        needs_table: r.requiresTable, makes: r.result.count,
+        uses: Object.fromEntries(r.delta.filter((d: any) => d.count < 0).map((d: any) => [bot.registry.items[d.id].name, -d.count])) as Record<string, number>
+      }))
+      const held = inventoryCounts(bot)
+      const ready = (r: { uses: Record<string, number> }) => Object.entries(r.uses).every(([k, n]) => (held[k] ?? 0) >= n)
+      return [...all.filter(ready), ...all.filter(r => !ready(r))]
+    }
   }
-  const actions: Record<string, (...a: unknown[]) => Promise<unknown>> = {
-    // Async although it's a read: host time inside a sync call would count against the realm's 20 ms slice.
-    scan: async (opts) => world.scan(bot, opts as Parameters<WorldReads['scan']>[1]),
-    reachable: async (...a) => world.reachable(bot, xyz(a)),
-    control: async (name, on) => {
-      need('legs')
+}
+
+const ACTIONS: Record<string, Entry> = {
+  // Async although they're reads: host time inside a sync call would count against the realm's 20 ms slice.
+  scan: { covers: ['findBlocks', 'canSeeBlock'], doc: 'scan({ match: glob, radius, los }) → { total, clusters: [{ count, names, nearest, rel, y_rel, min, max, positions }] }', run: async ({ bot, host }, opts) => host.scan(bot, opts) },
+  reachable: {
+    covers: [], doc: 'reachable(x, y, z) → { reachable: boolean, status }: can the pathfinder get within reach of that block without building; status "timeout" means it gave up after 1 s, not that it\'s unreachable',
+    run: async ({ bot, host }, ...a) => host.reachable(bot, xyz(a))
+  },
+  wait: { covers: ['waitForTicks'], doc: 'wait(ticks = 1), 20 ticks a second (max 200)', run: async ({ bot }, ticks = 1) => { await bot.waitForTicks(Math.min(200, Math.max(1, Math.floor(Number(ticks))))) } },
+  next: {
+    covers: ['awaitMessage'], doc: 'next(event, ticks = 100) → the arguments of the next Mineflayer bot event of that name (e.g. "windowOpen", "entityHurt", "entityDead", "playerCollect", "itemDrop", "blockUpdate", "health", "chat", "whisper") as plain data, or null after ticks (max 2400). Events before the call are not buffered',
+    run: (c, event, ticks = 100) => new Promise(resolve => {
+      const name = String(event)
+      const fn = (...args: unknown[]) => { off(); resolve(args.map(a => plain(a))) }
+      const timer = setTimeout(() => { off(); resolve(null) }, Math.min(2400, Math.max(1, Number(ticks))) * 50)
+      const off = () => { clearTimeout(timer); c.bot.removeListener(name as any, fn); c.offs.delete(off) }
+      c.offs.add(off)
+      c.bot.on(name as any, fn)
+    })
+  },
+  // Chat policy for the local milestone (brain/architecture/behaviors-and-guards.md): whispers to allowlisted
+  // players only, and no commands. Public chat isn't mapped.
+  whisper: {
+    covers: ['whisper'], doc: 'whisper(player, text): to players allowed to give instructions only; no "/" commands; max 200 characters',
+    run: async ({ bot, host }, player, text) => {
+      if (!host.allowed.includes(String(player))) throw new Error(`whisper: ${player} is not a player who gives instructions`)
+      const t = String(text)
+      if (/^\s*\//.test(t)) throw new Error('whisper: no commands')
+      bot.whisper(String(player), t.slice(0, 200))
+    }
+  },
+
+  control: {
+    ch: 'legs', covers: ['setControlState'], doc: 'control(name, on) for forward/back/left/right/jump/sneak/sprint',
+    run: async ({ bot }, name, on) => {
       if (!CONTROLS.has(String(name))) throw new Error(`control must be one of ${[...CONTROLS].join(', ')}`)
       bot.setControlState(name as any, !!on)
-    },
-    look: async (...a) => { need('aim'); const [x, y, z] = a.map(Number); await bot.lookAt(new Vec3(x, y, z), true) },
-    dig: async (...a) => {
-      need('hands')
-      const block = bot.blockAt(new Vec3(...xyz(a)))
-      if (!block || block.boundingBox === 'empty') throw new Error(`nothing to dig at ${xyz(a).join(' ')}`)
-      await bot.dig(block, true)
-      return block.name
-    },
-    // Places the held block at a position, against any solid neighbour.
-    place: async (...a) => {
-      need('hands')
-      const t = new Vec3(...xyz(a))
-      if (bot.blockAt(t)?.boundingBox !== 'empty') throw new Error(`${t} is not empty`)
-      for (const d of [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]]) {
-        const ref = bot.blockAt(t.offset(d[0], d[1], d[2]))
-        if (ref?.boundingBox === 'block') { await bot.placeBlock(ref, new Vec3(-d[0], -d[1], -d[2])); return bot.blockAt(t)?.name ?? null }
-      }
-      throw new Error(`no solid block next to ${t} to place against`)
-    },
-    equip: async (pattern) => {
-      need('hands')
-      const item = bot.inventory.items().find(i => glob(String(pattern)).test(i.name))
-      if (!item) throw new Error(`no item matching ${pattern}`)
-      await bot.equip(item, 'hand')
-      return item.name
-    },
-    wait: async (ticks = 1) => { await bot.waitForTicks(Math.min(200, Math.max(1, Math.floor(Number(ticks))))) },
-    goto: async (...a) => {
-      need('legs')
+    }
+  },
+  goto: {
+    ch: 'legs', covers: [], doc: 'goto(x, y, z, range = 1) walks there with the pathfinder',
+    run: async ({ bot }, ...a) => {
       const [x, y, z] = xyz(a)
       setGoal(bot, new goals.GoalNear(x, y, z, Number(a[3] ?? 1))) // flush a pending stop first
       await new Promise<void>((resolve, reject) => {
@@ -294,13 +396,124 @@ function actionApi (bot: Bot, channels: Channel[], world: WorldReads) {
         })
       })
     }
-  }
-  return { reads, actions }
+  },
+  mount: { ch: 'legs', covers: ['mount'], doc: 'mount(id): get in or on an entity (boat, minecart, horse) → whether you are riding', run: async ({ bot }, id) => { bot.mount(entityOf(bot, id)); await bot.waitForTicks(4); return !!(bot as any).vehicle } },
+  dismount: { ch: 'legs', covers: ['dismount'], doc: 'dismount()', run: async ({ bot }) => { bot.dismount() } },
+  steer: { ch: 'legs', covers: ['moveVehicle'], doc: 'steer(left, forward): drive the vehicle you ride, each -1, 0 or 1', run: async ({ bot }, left, forward) => { bot.moveVehicle(Number(left), Number(forward)) } },
+  sleep: { ch: 'legs', covers: ['sleep'], doc: 'sleep(x, y, z) in the bed there (night or thunder, within reach)', run: async ({ bot }, ...a) => { await bot.sleep(blockOf(bot, a)) } },
+  wake: { ch: 'legs', covers: ['wake'], doc: 'wake(): get out of bed', run: async ({ bot }) => { await bot.wake() } },
+  fly: { ch: 'legs', covers: ['elytraFly'], doc: 'fly(): start gliding with an equipped elytra (while falling)', run: async ({ bot }) => { await bot.elytraFly() } },
+
+  look: { ch: 'aim', covers: ['lookAt'], doc: 'look(x, y, z) at a point', run: async ({ bot }, ...a) => { const [x, y, z] = a.map(Number); await bot.lookAt(new Vec3(x, y, z), true) } },
+  turn: { ch: 'aim', covers: ['look'], doc: 'turn(yaw, pitch) in radians (yaw 0 = north, pitch 0 = level)', run: async ({ bot }, yaw, pitch) => { await bot.look(Number(yaw), Number(pitch), true) } },
+
+  dig: {
+    ch: 'hands', covers: ['dig'], doc: 'dig(x, y, z) → the block\'s name, once broken',
+    run: async ({ bot }, ...a) => {
+      const block = blockOf(bot, a)
+      if (block.boundingBox === 'empty') throw new Error(`nothing to dig at ${xyz(a).join(' ')}`)
+      await bot.dig(block, true)
+      return block.name
+    }
+  },
+  stop_digging: { ch: 'hands', covers: ['stopDigging'], doc: 'stop_digging()', run: async ({ bot }) => { bot.stopDigging() } },
+  place: { ch: 'hands', covers: ['placeBlock'], doc: 'place(x, y, z): places the held block there, against any solid neighbour → the block placed', run: async ({ bot }, ...a) => { await against(bot, a, (ref, face) => bot.placeBlock(ref, face)); return bot.blockAt(new Vec3(...xyz(a)))?.name ?? null } },
+  place_entity: { ch: 'hands', covers: ['placeEntity'], doc: 'place_entity(x, y, z): places the held boat, minecart, armor stand or spawn egg there → the entity', run: async ({ bot }, ...a) => entityData(await against(bot, a, (ref, face) => bot.placeEntity(ref, face)) as Entity) },
+  equip: {
+    ch: 'hands', covers: ['equip'], doc: `equip(glob, dest = "hand"), dest one of ${DESTS.join(', ')} → the item equipped`,
+    run: async ({ bot }, pattern, dest = 'hand') => {
+      if (!DESTS.includes(String(dest))) throw new Error(`dest must be one of ${DESTS.join(', ')}`)
+      const item = matching(bot.inventory.items(), pattern)[0]
+      if (!item) throw new Error(`no item matching ${pattern}`)
+      await bot.equip(item, dest as any)
+      return item.name
+    }
+  },
+  unequip: { ch: 'hands', covers: ['unequip'], doc: 'unequip(dest = "hand")', run: async ({ bot }, dest = 'hand') => { await bot.unequip(String(dest) as any) } },
+  hotbar: { ch: 'hands', covers: ['setQuickBarSlot'], doc: 'hotbar(slot): select hotbar slot 0-8', run: async ({ bot }, slot) => { bot.setQuickBarSlot(Math.min(8, Math.max(0, Math.floor(Number(slot))))) } },
+  toss: { ch: 'hands', covers: ['toss', 'tossStack'], doc: 'toss(glob, count = all) → how many were dropped', run: async ({ bot }, pattern, count) => moveItems(bot.inventory.items(), pattern, count, (type, n) => bot.toss(type, null, n)) },
+  attack: { ch: 'hands', covers: ['attack'], doc: 'attack(id): look at an entity within reach (about 3 blocks) and hit it once; mind the attack cooldown (about 0.6 s with a sword)', run: async ({ bot }, id) => { const e = entityOf(bot, id); await bot.lookAt(eyes(e), true); bot.attack(e) } },
+  use: { ch: 'hands', covers: ['activateItem'], doc: 'use(offhand = false): start using the held item (eat, drink, draw a bow, raise a shield, throw, place water…) until release()', run: async ({ bot }, offhand) => { bot.activateItem(!!offhand) } },
+  release: { ch: 'hands', covers: ['deactivateItem'], doc: 'release(): stop using the held item (shoot the bow, lower the shield)', run: async ({ bot }) => { bot.deactivateItem() } },
+  consume: { ch: 'hands', covers: ['consume'], doc: 'consume(): eat or drink the held item, resolving when done', run: async ({ bot }) => { await bot.consume() } },
+  fish: { ch: 'hands', covers: ['fish'], doc: 'fish(): cast the held rod and reel in on a bite', run: async ({ bot }) => { await bot.fish() } },
+  activate_block: { ch: 'hands', covers: ['activateBlock'], doc: 'activate_block(x, y, z): right-click a block (door, lever, button, bed, note block…)', run: async ({ bot }, ...a) => { await bot.activateBlock(blockOf(bot, a)) } },
+  activate_entity: {
+    ch: 'hands', covers: ['activateEntity', 'activateEntityAt'], doc: 'activate_entity(id, x?, y?, z?): right-click an entity (breed, shear, name, ride…), optionally at a point on it',
+    run: async ({ bot }, id, ...at) => { const e = entityOf(bot, id); await (at.length ? bot.activateEntityAt(e, new Vec3(Number(at[0]), Number(at[1]), Number(at[2]))) : bot.activateEntity(e)) }
+  },
+  use_on: { ch: 'hands', covers: ['useOn'], doc: 'use_on(id): use the held item on an entity', run: async ({ bot }, id) => { bot.useOn(entityOf(bot, id)) } },
+  swing: { ch: 'hands', covers: ['swingArm'], doc: 'swing(): swing the arm', run: async ({ bot }) => { bot.swingArm(undefined) } },
+  craft: {
+    ch: 'hands', covers: ['craft', 'recipesFor'], doc: 'craft(item, count = 1, table?: [x, y, z]) → how many of the item you now hold. Crafts from the inventory (2×2 grid), or at the crafting table at table (within reach) for recipes that need one',
+    run: async ({ bot }, item, count = 1, table) => {
+      const id = bot.registry.itemsByName[String(item)]?.id
+      if (id === undefined) throw new Error(`no item named ${item}`)
+      const t = table ? blockOf(bot, table as unknown[]) : null
+      if (t && t.name !== 'crafting_table') throw new Error(`${(table as unknown[]).join(' ')} is ${t.name}, not a crafting_table`)
+      const n = Math.max(1, Math.floor(Number(count)))
+      const recipe = bot.recipesFor(id, null, n, t as any)[0]
+      if (!recipe) throw new Error(!t && bot.recipesAll(id, null, false).length === 0 && bot.recipesAll(id, null, true).length ? `${item} needs a crafting table` : `not enough ingredients for ${n} ${item}`)
+      await bot.craft(recipe, Math.ceil(n / recipe.result.count), t ?? undefined)
+      return countItem(bot, String(item))
+    }
+  },
+  open: {
+    ch: 'hands', covers: ['openBlock', 'openContainer', 'openChest', 'openDispenser', 'openFurnace', 'openEnchantmentTable', 'openAnvil'],
+    doc: 'open(x, y, z): open the block\'s window (chest, barrel, furnace, enchanting table, anvil…) within reach → window(). It stays open across ticks until close() or the run ends',
+    run: async (c, ...a) => {
+      const b = blockOf(c.bot, a)
+      await closeWin(c)
+      c.win = b.name === 'enchanting_table' ? await c.bot.openEnchantmentTable(b) : /anvil$/.test(b.name) ? await c.bot.openAnvil(b) : await c.bot.openBlock(b)
+      return windowData(c.win)
+    }
+  },
+  open_entity: {
+    ch: 'hands', covers: ['openEntity', 'openVillager'], doc: 'open_entity(id): open a villager\'s trades, or a horse\'s or chest boat\'s inventory → window()',
+    run: async (c, id) => {
+      const e = entityOf(c.bot, id)
+      await closeWin(c)
+      c.win = /villager|trader/.test(e.name ?? '') ? await c.bot.openVillager(e) : await (c.bot.openEntity as any)(e)
+      return windowData(c.win)
+    }
+  },
+  click: { ch: 'hands', covers: ['clickWindow', 'moveSlotItem', 'putAway', 'putSelectedItemRange', 'transfer'], doc: 'click(slot, button = 0, mode = 0): a raw click in the open window, or the inventory if none (button 0 left, 1 right; mode 0 click, 1 shift-click, 2 hotbar swap, 4 drop) → window()', run: async ({ bot }, slot, button = 0, mode = 0) => { await bot.clickWindow(Number(slot), Number(button), Number(mode)); return windowData(bot.currentWindow ?? bot.inventory) } },
+  deposit: { ch: 'hands', covers: [], doc: 'deposit(glob, count = all): move items from your inventory into the open container → how many moved', run: async (c, pattern, count) => { const w = openWin(c); return moveItems(w.items(), pattern, count, (type, n) => w.deposit(type, null, n)) } },
+  withdraw: { ch: 'hands', covers: [], doc: 'withdraw(glob, count = all): move items from the open container into your inventory → how many moved', run: async (c, pattern, count) => { const w = openWin(c); return moveItems(w.containerItems(), pattern, count, (type, n) => w.withdraw(type, null, n)) } },
+  close: { ch: 'hands', covers: ['closeWindow'], doc: 'close(): close the window this run opened', run: async c => closeWin(c) },
+  trade: { ch: 'hands', covers: ['trade'], doc: 'trade(index, times = 1) with the open villager window (trades in window())', run: async (c, index, times = 1) => { const w = openWin(c); if (!w.trades) throw new Error('the open window is not a villager\'s'); await c.bot.trade(w, Number(index), Number(times)) } },
+  enchant: { ch: 'hands', covers: [], doc: 'enchant(choice 0-2) at the open enchanting table, after clicking the item and lapis into slots 0 and 1 → the enchanted item', run: async (c, choice) => { const w = openWin(c); if (!w.enchant) throw new Error('the open window is not an enchanting table'); return itemData(await w.enchant(Number(choice))) } },
+  rename: { ch: 'hands', covers: [], doc: 'rename(slot, name) the item in that slot of the open anvil', run: async (c, slot, name) => { const w = openWin(c); if (!w.rename) throw new Error('the open window is not an anvil'); await w.rename(w.slots[Number(slot)], String(name)) } },
+  write_book: { ch: 'hands', covers: ['writeBook'], doc: 'write_book(slot, pages): write pages (strings) into the writable book in that inventory slot', run: async ({ bot }, slot, pages) => { await bot.writeBook(Number(slot), (pages as unknown[]).map(String)) } },
+  sign: { ch: 'hands', covers: ['updateSign'], doc: 'sign(x, y, z, text, back = false): write a sign\'s text (lines split by \\n)', run: async ({ bot }, x, y, z, text, back) => { bot.updateSign(blockOf(bot, [x, y, z]), String(text), !!back) } }
 }
+
+export const API_READS = Object.keys(READS)
+export const API_ACTIONS = Object.keys(ACTIONS)
+// Mineflayer Bot methods no entry covers, and why. Everything else a player can do is in READS or ACTIONS.
+export const NOT_MAPPED: Record<string, string> = Object.fromEntries([
+  ...['connect', 'end', 'quit', 'loadPlugin', 'loadPlugins', 'hasPlugin', 'setSettings', 'respawn', 'acceptResourcePack', 'denyResourcePack', 'waitForChunksToLoad', 'updateHeldItem'].map(m => [m, 'the client and its lifecycle belong to the runtime']),
+  ...['chatAddPattern', 'addChatPattern', 'addChatPatternSet', 'removeChatPattern'].map(m => [m, 'chat parsing: next("chat") gives the raw messages']),
+  ['chat', 'public chat: not allowed for the local milestone (whisper to allowlisted players only)'],
+  ['tabComplete', 'command completion: no commands'],
+  ['setCommandBlock', 'needs operator rights'],
+  ...['blockInSight', 'blockAtCursor', 'blockAtEntityCursor', 'entityAtCursor', 'nearestEntity', 'findBlock', 'canDigBlock', 'digTime', 'isABed', 'getExplosionDamages', 'getControlState', 'getEquipmentDestSlot'].map(m => [m, 'a query code can answer from the reads (blockAt, blockInfo, entities, scan, self)']),
+  ['clearControlStates', 'control(name, false); a run\'s controls are cleared when it ends'],
+  ['creative', 'creative-mode actions (flying, setting inventory slots); Jeeve plays survival']
+])
+export const API_COVERS = new Set([...Object.values(READS), ...Object.values(ACTIONS)].flatMap(e => e.covers))
+// The API as System 2 (and any builder) reads it, generated from the tables so it can't drift from them.
+export const API_DOC = [
+  'Reads, synchronous:', ...Object.values(READS).map(e => `- api.${e.doc}`),
+  ...([undefined, 'legs', 'aim', 'hands'] as const).flatMap(ch => [
+    `Actions ${ch ? `on ${ch}` : 'needing no channel'}, asynchronous (await them):`,
+    ...Object.values(ACTIONS).filter(e => e.ch === ch).map(e => `- api.${e.doc}`)
+  ])
+].join('\n')
 
 // A Spec that runs authored code in a fresh sandbox per run. Ends with what the code returns (done, stuck,
 // none_found), `vetoed` if a veto went uncaught, `error` if it threw, `timeout` past its time limit.
-export function authoredSpec (m: Pick<Module, 'name' | 'description' | 'code' | 'channels' | 'targets' | 'timeout_s' | 'version'>, world: WorldReads): Spec {
+export function authoredSpec (m: Pick<Module, 'name' | 'description' | 'code' | 'channels' | 'targets' | 'timeout_s' | 'version'>, host: ApiHost): Spec {
   const channels = m.channels as Channel[]
   return {
     channels,
@@ -308,20 +521,21 @@ export function authoredSpec (m: Pick<Module, 'name' | 'description' | 'code' | 
     version: m.version,
     describe: t => `${m.description} (target: ${t})`,
     start (bot, target, emit) {
-      const { reads, actions } = actionApi(bot, channels, world)
+      const c: Ctx = { bot, host, win: null, offs: new Set() }
       const log: Array<{ call: string, ok: boolean, out: unknown, ms: number }> = [] // the last 30 actions, for System 2
       const inflight = new Set<(err: Error) => void>()
       let error: string | undefined
       let timer: ReturnType<typeof setTimeout> | undefined
       const cleanup = () => {
         clearTimeout(timer)
-        if (channels.includes('legs')) { for (const c of CONTROLS) bot.setControlState(c as any, false); bot.pathfinder.setGoal(null) }
-        if (channels.includes('hands')) bot.stopDigging()
+        for (const off of c.offs) off()
+        if (channels.includes('legs')) { for (const ctl of CONTROLS) bot.setControlState(ctl as any, false); bot.pathfinder.setGoal(null) }
+        if (channels.includes('hands')) { bot.stopDigging(); void closeWin(c).catch(() => {}) }
       }
       const runner = startBehavior(m.code, target?.position ? entityData(target) : target, {
-        reads: Object.keys(reads),
-        actions: Object.keys(actions),
-        read: (name, args) => reads[name](...args),
+        reads: API_READS,
+        actions: API_ACTIONS,
+        read: (name, args) => READS[name].run(c, ...args),
         act: (name, args) => {
           const t0 = Date.now()
           const call = `${name}(${args.map(a => JSON.stringify(a)).join(', ')})`
@@ -329,7 +543,11 @@ export function authoredSpec (m: Pick<Module, 'name' | 'description' | 'code' | 
           return new Promise((resolve, rej) => {
             reject = rej
             inflight.add(rej)
-            actions[name](...args).then(resolve, rej)
+            const e = ACTIONS[name]
+            Promise.resolve().then(() => {
+              if (e.ch && !channels.includes(e.ch)) throw new Error(`needs the ${e.ch} channel`)
+              return e.run(c, ...args)
+            }).then(resolve, rej)
           }).then(
             out => { log.push({ call, ok: true, out, ms: Date.now() - t0 }); return out },
             err => { log.push({ call, ok: false, out: String(err.message ?? err), ms: Date.now() - t0 }); throw err }

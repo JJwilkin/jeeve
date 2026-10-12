@@ -2,7 +2,7 @@
 import type { Bot } from 'mineflayer'
 import type { Channels, Channel } from './behaviors.ts'
 import { rawSnapshot, type Directive, type Handles } from './encoder.ts'
-import { ENCODERS, LIMITS, optionsFor, shuffled, version, type Choice, type Option, type Program } from './program.ts'
+import { ENCODERS, LIMITS, optionsFor, shuffled, version, type Choice, type Option, type Program, type Thing } from './program.ts'
 
 const MODEL = 'jev-1.13.0' // pinned: thresholds are tuned against a version, aliases move
 
@@ -50,6 +50,7 @@ export type DecideCtx = {
   directive: () => Directive | null
   events: () => string[]
   remaining: (block: string) => number // what's left of the goal's count for a block type
+  wanted: () => Thing[] // the item the goal still needs, if its check names one (item targets)
   record: (span: { attrs: Record<string, string | number | boolean | undefined>, input: unknown, output: unknown, llm?: Record<string, unknown> }) => string
   escalate: (reason: string, detail: unknown) => void
   ask?: Ask
@@ -72,7 +73,7 @@ export function makeDecider (ctx: DecideCtx) {
     const optionOrder: Record<string, string[]> = {}
     for (const [id, q] of Object.entries(ctx.program.questions)) {
       if (q.type === 'noul') { questions[id] = { type: 'noul', instructions: q.instructions }; continue }
-      options[id] = optionsFor(q.claims, ctx.program.allowed_behaviors, enc, running(ctx, q), ctx.remaining)
+      options[id] = optionsFor(q.claims, ctx.program.allowed_behaviors, enc, running(ctx, q), ctx.remaining, ctx.wanted())
       // Shuffled per call and traced: Jev leans toward early options on close calls.
       optionOrder[id] = shuffled(Object.keys(options[id])).slice(0, LIMITS.options)
       questions[id] = { type: 'choice', instructions: q.instructions, criteria: Object.fromEntries(optionOrder[id].map(k => [k, options[id][k].desc])) }

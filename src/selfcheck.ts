@@ -9,7 +9,8 @@ import pf from 'mineflayer-pathfinder'
 import registryFor from 'prismarine-registry'
 import worldLoader from 'prismarine-world'
 import chunkLoader from 'prismarine-chunk'
-import { authoredSpec, Channels } from './behaviors.ts'
+import { readFileSync } from 'node:fs'
+import { API_ACTIONS, API_COVERS, API_DOC, API_READS, authoredSpec, BEHAVIORS, Channels, NOT_MAPPED } from './behaviors.ts'
 import { coalescing, makeDecider } from './decide.ts'
 import { direction, distanceBucket, makeEgocentric, newHandles, rawSnapshot } from './encoder.ts'
 import { blockAt, notableBlocks, reachable, scan } from './world.ts'
@@ -118,6 +119,7 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
     escalate: reason => escalations.push(reason),
     directive: () => ({ text: 'collect 10 logs', from: 'Josh', at: 0, inventory: {}, place }), events: () => [],
     remaining: () => 10,
+    wanted: () => [],
     ask: async (state, questions) => { seen = { state, questions }; return { model: 'fake', answers } }
   })
   await decide(['test'])
@@ -379,23 +381,25 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.throws(() => compileBehavior({ ...shape, code: '42' }), /function expression/)
 
   // On the channel runtime, with a fake bot whose guard vetoes every forward: the veto rejects the call.
-  const fakeWorld = { blockAt: () => null, scan: () => ({}), reachable: async () => ({ reachable: false }) }
+  const fakeWorld = { blockAt: () => null, scan: () => ({}), reachable: async () => ({ reachable: false }), allowed: ['Josh'] }
   const ended: string[] = []
   const events: string[] = []
   let channels: Channels
-  const bot: any = {
+  const whispered: string[] = []
+  const bot: any = Object.assign(new EventEmitter(), {
     entity: { position: new Vec3(0, 0, 0), yaw: 0, pitch: 0, onGround: true }, entities: {}, health: 20, food: 20, heldItem: null,
+    whisper: (to: string, text: string) => whispered.push(`${to}: ${text}`),
     inventory: { items: () => [] },
     setControlState: (_c: string, on: boolean) => { if (on) channels.veto('legs', 'forward: drop of more than 3') },
     pathfinder: { setGoal: () => {} }, stopDigging: () => {}, waitForTicks: async () => {}
-  }
+  })
   channels = new Channels(bot, { start: () => {}, event: (_s, e) => events.push(e), end: (_s, r) => ended.push(r) })
-  const play = async (code: string, ch = ['legs']) => {
+  const play = async (code: string, ch = ['legs'], ms = 30) => {
     ended.length = 0
     events.length = 0
     const spec = authoredSpec({ ...shape, code, channels: ch, version: 1 }, fakeWorld)
     channels.set('t:trial', 't', { name: 'stone', count: 1 }, 'operator', { spec, pinned: true })
-    await new Promise(r => setTimeout(r, 30))
+    await new Promise(r => setTimeout(r, ms))
     return { end: ended[0], events: [...events], detail: channels.slots[ch[0] as 'legs']?.run.detail?.() as any }
   }
   const vetoed = await play('async (api) => { await api.control("forward", true); return "done" }')
@@ -404,6 +408,14 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.equal((await play('async (api) => { try { await api.control("forward", true) } catch (e) { return "stuck" } }')).end, 'stuck') // caught: the code adapts
   assert.match((await play('async (api) => { await api.dig(0, 0, 0) }')).detail.error, /needs the hands channel/)
   assert.match((await play('async (api) => "finished"')).detail.error, /returned "finished"/)
+  // Chat policy: whispers reach players who give instructions only, and never run a command.
+  const said = await play('async (api) => { await api.whisper("Josh", "logs are in the chest"); for (const [p, t] of [["Stranger", "hi"], ["Josh", "/op Stranger"]]) { try { await api.whisper(p, t); return "stuck" } catch {} } return "done" }')
+  assert.deepEqual([said.end, whispered], ['done', ['Josh: logs are in the chest']], JSON.stringify(said.detail))
+  // Events: next() resolves with the next bot event's arguments as plain data, and null on timeout.
+  setTimeout(() => bot.emit('entityHurt', { id: 7, name: 'zombie', type: 'hostile', position: new Vec3(1, 2, 3), yaw: 0 }, null), 5)
+  assert.equal((await play('async (api) => { const e = await api.next("entityHurt", 20); return e[0].name === "zombie" && e[0].pos[2] === 3 && e[1] === null ? "done" : "stuck" }', ['hands'])).end, 'done')
+  assert.equal((await play('async (api) => (await api.next("never", 1)) === null ? "done" : "stuck"', ['legs'], 80)).end, 'done')
+  assert.equal(bot.listenerCount('entityHurt') + bot.listenerCount('never'), 0) // listeners don't outlive the call
 
   // The library keeps behaviors with their channels and target type, and reloads them.
   const file = join(mkdtempSync(join(tmpdir(), 'jeeve-')), 'library.json')
@@ -411,6 +423,27 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   const again = new ModuleRegistry(() => {}, file)
   assert.deepEqual(again.load().loaded, ['pillar@1'])
   assert.deepEqual([again.get('pillar')?.channels, again.get('pillar')?.targets, again.nextVersion('pillar')], [['legs', 'aim', 'hands'], 'block', 2])
+}
+
+// The action API covers Mineflayer: every Bot method is covered by a read or an action, or NOT_MAPPED says why.
+// A Mineflayer upgrade that adds a method fails here until someone decides what it is.
+{
+  const dts = readFileSync(new URL('../node_modules/mineflayer/index.d.ts', import.meta.url), 'utf8')
+  const body = dts.slice(dts.indexOf('export interface Bot extends'), dts.indexOf('\n}', dts.indexOf('export interface Bot extends')))
+  const methods = [...body.matchAll(/^ {2}(\w+)\??: \(/gm)].map(m => m[1]).concat('creative')
+  assert.ok(methods.length > 80, `parsed ${methods.length} Bot methods`)
+  assert.deepEqual(methods.filter(m => !API_COVERS.has(m) && !NOT_MAPPED[m]), [], 'Bot methods neither covered nor in NOT_MAPPED')
+  assert.deepEqual([...API_COVERS, ...Object.keys(NOT_MAPPED)].filter(m => !methods.includes(m)), [], 'covers or NOT_MAPPED name a method Mineflayer lacks')
+  for (const n of [...API_READS, ...API_ACTIONS]) assert.ok(API_DOC.includes(`api.${n}(`), `API_DOC documents ${n}`)
+}
+
+// Item targets: Jev is offered an item behavior for the item the goal still needs, like collect for blocks.
+{
+  BEHAVIORS.make_it = { channels: ['hands'], targets: 'item', describe: t => `Craft ${t}`, start: () => ({ stop () {} }) }
+  const opts = optionsFor(['hands'], ['make_it'], { entities: [], blocks: [], place: null }, null, () => 0, [{ name: 'wooden_pickaxe', count: 1 }])
+  assert.deepEqual(opts['make_it:wooden_pickaxe(1)'], { desc: 'Craft 1 wooden_pickaxe', behavior: 'make_it', block: { name: 'wooden_pickaxe', count: 1 } })
+  assert.deepEqual(Object.keys(optionsFor(['hands'], ['make_it'], { entities: [], blocks: [], place: null }, null, () => 0)), ['keep_current'])
+  delete BEHAVIORS.make_it
 }
 
 console.log('selfcheck ok')
