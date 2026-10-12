@@ -39,6 +39,7 @@ export type Goal = {
   log: string[]
   summary?: string
   plan?: { steps: PlanStep[], next: number } // steps System 2 planned; code starts each as a child when the last closes
+  origin?: Pos // where the bot was when the instruction came: searches widen from here
 }
 // One step of a plan (brain/architecture/system-2.md → "Plans"): a child goal with its own place and check.
 export type PlanStep = { text: string, place: Pos | null, done_when: CheckSpec | null, budget_s: number | null }

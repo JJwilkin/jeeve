@@ -453,7 +453,8 @@ export async function startAgent (opts: AgentOptions) {
       program: { version: version(program), guidance: program.guidance, allowed_behaviors: program.allowed_behaviors, heartbeat_ms: program.triggers.heartbeat_ms },
       fast_model_view: lastView,
       seen_map: seenMap(bot), // everything the bot has seen around it, so the scene doesn't hinge on this turn's scans
-      explored: { cell: 16, bot_at: [Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.z)], frontier: frontier(bot), centers: explored(bot) }, // where it has looked, and where not yet
+      // Where it has looked, and where not yet: the frontier widens from where the instruction came.
+      explored: { cell: 16, bot_at: [Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.z)], origin: root?.origin ? [root.origin[0], root.origin[2]] : null, frontier: frontier(bot, root?.origin ? { x: root.origin[0], z: root.origin[2] } : undefined), centers: explored(bot) },
       modules: modules.list(),
       requests: requests.map(r => ({ id: r.id, goal: r.goal.id, need: r.need, status: windowAsk?.req === r ? 'waiting_for_trial_window' : trial?.ask?.req === r ? 'trialling' : r.status })),
       recent_events: recentFor(30_000),
@@ -765,6 +766,8 @@ export async function startAgent (opts: AgentOptions) {
   // ---- instructions: whispers from allowed players, or the local API ----
   function instruct (text: string, from: { player: string, via: 'whisper' | 'api' }) {
     const { root, abandoned } = goals.instruction(text, from, bot)
+    const at = bot.entity.position.floored()
+    root.origin = [at.x, at.y, at.z]
     if (confirming) channels.stop(LOOK_AROUND.channels, 'cancelled')
     dropStaleRequests()
     channels.stopStalePlace(null) // other behaviors keep running while System 2 reads the instruction

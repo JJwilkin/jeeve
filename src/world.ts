@@ -191,13 +191,14 @@ export function placedStanding (bot: Bot): Pos[] {
 const coveredBy = new WeakMap<Bot, Set<string>>()
 export const explored = (bot: Bot) => [...coveredBy.get(bot) ?? []].map(k => k.split(',').map(Number))
 
-// The frontier, for search: in each of 8 compass directions from the bot, the nearest cell not yet looked over that
-// borders one that was (frontier-based exploration). Picking unexplored directions from a list of cell centres was
-// too hard for 2A: it searched west four times while the trees it never saw were north and south (forage bench).
+// The frontier, for search: in each of 8 compass directions from the search's origin (where the task started), the
+// unexplored cell nearest the origin that borders one looked over (frontier-based exploration, in widening rings).
+// Picking unexplored directions from a list of cell centres was too hard for 2A (forage: west four times, trees
+// north and south), and a frontier ranked from the bot drifted ever outward: 300 blocks east, trees within 60 of start.
 const DIRS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] // +x is east, +z is south
-export function frontier (bot: Bot, within = 128): Array<{ dir: string, at: [number, number], dist: number }> {
+export function frontier (bot: Bot, origin?: { x: number, z: number }, within = 128): Array<{ dir: string, at: [number, number], dist: number }> {
   const seen = coveredBy.get(bot) ?? new Set<string>()
-  const me = bot.entity.position
+  const me = origin ?? bot.entity.position
   const best = new Map<string, { dir: string, at: [number, number], dist: number }>()
   for (const k of seen) {
     const [x, z] = k.split(',').map(Number)

@@ -54,7 +54,7 @@
         "end": "done",
         "ms": 2270
       },
-      "idle_rounds": 1
+      "idle_rounds": 2
     },
     {
       "kind": "behavior",
@@ -82,26 +82,7 @@
         "end": "done",
         "ms": 1063
       },
-      "idle_rounds": 1
-    },
-    {
-      "kind": "check",
-      "name": "pickaxe_deposited",
-      "description": "No wooden_pickaxe in inventory and bot within 4 blocks of a seen chest",
-      "code": "(s) => { const c = (s.blocks[\"chest\"]||[]); return !(s.inventory[\"wooden_pickaxe\"]>0) && c.length>0 && dist(s.self.pos, c[0]) <= 4; }",
-      "version": 2,
-      "origin": {
-        "session": "jeeve-2026-10-12T09-02-29-929Z",
-        "goal": "g-3: put the wooden pickaxe in the chest",
-        "created_at": "2026-10-12T09:04:12.537Z"
-      },
-      "trial": {
-        "states": 31,
-        "trues": 0,
-        "errors": 0,
-        "maxMs": 0.202
-      },
-      "idle_rounds": 1
+      "idle_rounds": 2
     },
     {
       "kind": "watch",
@@ -140,7 +121,7 @@
         "maxMs": 0.158
       },
       "used_at": "2026-10-12T10:13:03.079Z",
-      "idle_rounds": 0
+      "idle_rounds": 1
     },
     {
       "kind": "behavior",
@@ -168,7 +149,7 @@
         "end": "done",
         "ms": 6032
       },
-      "idle_rounds": 1
+      "idle_rounds": 2
     },
     {
       "kind": "check",
@@ -188,6 +169,54 @@
         "maxMs": 0.198
       },
       "used_at": "2026-10-12T10:12:06.887Z",
+      "idle_rounds": 1
+    },
+    {
+      "kind": "behavior",
+      "name": "craft_wooden_item_and_deposit",
+      "description": "Crafts exactly one of the target item (any wooden tool/item made from planks and sticks, e.g. wooden_sword, wooden_pickaxe, wooden_axe, wooden_shovel, wooden_hoe; name taken from the target): chops nearby logs if wood is short, makes planks, at most one batch of sticks, finds or places a crafting table next to the bot (crafting one if needed), crafts one target item, then walks to the nearest existing chest, deposits only that item and closes it. Never places a chest.",
+      "code": "async (api, target) => {\n  const item = target.name;\n  const inv = () => api.inventory();\n  const sum = (re) => Object.entries(inv()).filter(([k]) => re.test(k)).reduce((a, [, v]) => a + v, 0);\n  const planks = () => sum(/_planks$/);\n  const logs = () => sum(/_(log|stem|wood|hyphae)$/);\n  const known = { wooden_sword: [2, 1], wooden_pickaxe: [3, 2], wooden_axe: [3, 2], wooden_shovel: [1, 2], wooden_hoe: [2, 2] };\n  let P, S;\n  if (known[item]) [P, S] = known[item];\n  else {\n    const rs = api.recipes(item) || [];\n    if (!rs.length) return \"stuck\";\n    const u = rs[0].uses || {};\n    P = 0; S = 0;\n    for (const [k, v] of Object.entries(u)) { if (/planks/.test(k)) P += v; else if (k === \"stick\") S += v; else return \"stuck\"; }\n  }\n  const cr0 = await api.scan({ match: \"chest\", radius: 24 });\n  if (!cr0.total) return \"none_found\";\n  const findTable = async () => {\n    const r = await api.scan({ match: \"crafting_table\", radius: 8 });\n    if (!r.total) return null;\n    const me = api.self().pos; let best = null, bd = 1e9;\n    for (const c of r.clusters) for (const p of (c.positions || [c.nearest])) {\n      const d = Math.hypot(p[0]-me[0], p[1]-me[1], p[2]-me[2]); if (d < bd) { bd = d; best = p; } }\n    return best;\n  };\n  const startCount = inv()[item] || 0;\n  let table = await findTable();\n  const needPlanks = () => { let n = P; if ((inv().stick || 0) < S) n += 2; if (!table && !inv().crafting_table) n += 4; return n; };\n  let tries = 0;\n  while (planks() + logs() * 4 < needPlanks() && tries < 8) {\n    tries++;\n    const r = await api.scan({ match: \"*_log\", radius: 16 });\n    if (!r.total) break;\n    const me = api.self().pos; const cands = [];\n    for (const c of r.clusters) for (const p of (c.positions || [c.nearest])) cands.push(p);\n    cands.sort((a, b) => (Math.hypot(a[0]-me[0], a[2]-me[2]) + Math.abs(a[1]-me[1]) * 0.7) - (Math.hypot(b[0]-me[0], b[2]-me[2]) + Math.abs(b[1]-me[1]) * 0.7));\n    let dug = false;\n    for (const p of cands.slice(0, 6)) {\n      try {\n        await api.goto(p[0], p[1], p[2], 2);\n        try { await api.equip(\"*_axe\"); } catch (e) {}\n        const before = logs();\n        await api.dig(p[0], p[1], p[2]);\n        dug = true;\n        await api.wait(8);\n        for (let i = 0; i < 4 && logs() <= before; i++) {\n          const s = api.self().pos;\n          const it = api.entities(8).filter(e => e.name === \"item\").sort((a, b) => Math.hypot(a.pos[0]-s[0], a.pos[2]-s[2]) - Math.hypot(b.pos[0]-s[0], b.pos[2]-s[2]))[0];\n          if (!it) break;\n          try { await api.goto(Math.floor(it.pos[0]), Math.floor(it.pos[1]), Math.floor(it.pos[2]), 0); } catch (e) {}\n          await api.wait(6);\n        }\n        break;\n      } catch (e) {}\n    }\n    if (!dug) break;\n  }\n  let guard = 0;\n  while (planks() < needPlanks() && logs() > 0 && guard++ < 10) {\n    const logName = Object.keys(inv()).find(k => /_(log|stem|wood|hyphae)$/.test(k) && inv()[k] > 0);\n    const pl = logName.replace(/^stripped_/, \"\").replace(/_(log|wood)$/, \"_planks\").replace(/_(stem|hyphae)$/, \"_planks\");\n    const before = planks();\n    try { await api.craft(pl, 1); } catch (e) {}\n    if (planks() === before) return \"stuck\";\n  }\n  if (planks() < needPlanks()) return \"stuck\";\n  if (S > 0 && (inv().stick || 0) < S) { try { await api.craft(\"stick\", 1); } catch (e) {} }\n  if ((inv().stick || 0) < S) return \"stuck\";\n  table = await findTable();\n  if (!table) {\n    if (!inv().crafting_table) { try { await api.craft(\"crafting_table\", 1); } catch (e) {} if (!inv().crafting_table) return \"stuck\"; }\n    await api.equip(\"crafting_table\");\n    const f = api.self().pos.map(Math.floor);\n    const occ = api.entities(4).map(e => e.pos.map(Math.floor));\n    const offs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1],[2,0],[-2,0],[0,2],[0,-2]];\n    for (const [dx, dz] of offs) {\n      const x = f[0]+dx, y = f[1], z = f[2]+dz;\n      if (occ.some(o => o[0] === x && o[2] === z && (o[1] === y || o[1] === y - 1))) continue;\n      const here = api.blockAt(x, y, z), below = api.blockAt(x, y-1, z);\n      if (here !== \"air\" && here !== \"short_grass\" && here !== \"grass\") continue;\n      if (!below || /air|water|lava/.test(below)) continue;\n      try { await api.place(x, y, z); } catch (e) { continue; }\n      if (api.blockAt(x, y, z) === \"crafting_table\") { table = [x, y, z]; break; }\n    }\n    if (!table) table = await findTable();\n    if (!table) return \"stuck\";\n  }\n  try { await api.goto(table[0], table[1], table[2], 2); } catch (e) {}\n  try { await api.craft(item, 1, table); } catch (e) {}\n  if ((inv()[item] || 0) <= startCount) return \"stuck\";\n  const r = await api.scan({ match: \"chest\", radius: 24 });\n  if (!r.total) return \"none_found\";\n  const me = api.self().pos; const cands = [];\n  for (const c of r.clusters) for (const p of (c.positions || [c.nearest])) cands.push(p);\n  cands.sort((a, b) => Math.hypot(a[0]-me[0], a[1]-me[1], a[2]-me[2]) - Math.hypot(b[0]-me[0], b[1]-me[1], b[2]-me[2]));\n  for (const p of cands.slice(0, 4)) {\n    try { await api.goto(p[0], p[1], p[2], 2); } catch (e) { continue; }\n    try { await api.open(p[0], p[1], p[2]); } catch (e) { continue; }\n    try { await api.deposit(item); } catch (e) {}\n    await api.wait(2);\n    try { await api.close(); } catch (e) {}\n    await api.wait(2);\n    if (!(inv()[item] > 0)) return \"done\";\n  }\n  return inv()[item] > 0 ? \"stuck\" : \"done\";\n}",
+      "version": 1,
+      "channels": [
+        "legs",
+        "aim",
+        "hands"
+      ],
+      "targets": "item",
+      "timeout_s": 120,
+      "origin": {
+        "session": "jeeve-2026-10-12T10-17-11-853Z",
+        "goal": "g-1: make a wooden sword and put it in the chest",
+        "created_at": "2026-10-12T10:18:28.589Z"
+      },
+      "trial": {
+        "target": {
+          "item": "wooden_sword",
+          "count": 1
+        },
+        "end": "done",
+        "ms": 8680
+      },
+      "idle_rounds": 1
+    },
+    {
+      "kind": "check",
+      "name": "sword_deposited",
+      "description": "Wooden sword crafted and put away: none in inventory, leftover sticks from one batch (count 3 mod 4), and bot within 4 blocks of a seen chest",
+      "code": "(s) => { const inv = s.inventory || {}; if ((inv.wooden_sword || 0) > 0) return false; const sticks = inv.stick || 0; if (sticks % 4 !== 3) return false; const chests = (s.blocks && s.blocks.chest) || []; return chests.some(p => dist(s.self.pos, p) <= 4); }",
+      "version": 1,
+      "origin": {
+        "session": "jeeve-2026-10-12T10-17-11-853Z",
+        "goal": "g-1: make a wooden sword and put it in the chest",
+        "created_at": "2026-10-12T10:17:49.565Z"
+      },
+      "trial": {
+        "states": 31,
+        "trues": 0,
+        "errors": 0,
+        "maxMs": 0.416
+      },
+      "used_at": "2026-10-12T10:18:49.628Z",
       "idle_rounds": 0
     }
   ]
