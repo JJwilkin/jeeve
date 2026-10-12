@@ -54,7 +54,7 @@
         "end": "done",
         "ms": 2270
       },
-      "idle_rounds": 7
+      "idle_rounds": 9
     },
     {
       "kind": "behavior",
@@ -82,7 +82,7 @@
         "end": "done",
         "ms": 1063
       },
-      "idle_rounds": 7
+      "idle_rounds": 9
     },
     {
       "kind": "watch",
@@ -129,7 +129,7 @@
         "end": "done",
         "ms": 6032
       },
-      "idle_rounds": 1
+      "idle_rounds": 0
     },
     {
       "kind": "behavior",
@@ -157,27 +157,7 @@
         "end": "done",
         "ms": 5146
       },
-      "idle_rounds": 0
-    },
-    {
-      "kind": "check",
-      "name": "sword_put_away",
-      "description": "No wooden_sword in inventory, has sticks, bot within 4 blocks of a seen chest",
-      "code": "(s) => !(s.inventory.wooden_sword>0) && (s.inventory.stick||0)>0 && (s.blocks.chest||[]).some(p=>dist(p,s.self.pos)<=4)",
-      "version": 1,
-      "origin": {
-        "session": "jeeve-2026-10-12T10-36-11-808Z",
-        "goal": "g-3: craft a wooden sword and deposit it in the chest",
-        "created_at": "2026-10-12T10:37:43.311Z"
-      },
-      "trial": {
-        "states": 31,
-        "trues": 31,
-        "errors": 0,
-        "maxMs": 0.132
-      },
-      "used_at": "2026-10-12T10:38:05.716Z",
-      "idle_rounds": 0
+      "idle_rounds": 2
     },
     {
       "kind": "check",
@@ -197,7 +177,7 @@
         "maxMs": 0.115
       },
       "used_at": "2026-10-12T10:41:31.881Z",
-      "idle_rounds": 1
+      "idle_rounds": 0
     }
   ]
 }

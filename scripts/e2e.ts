@@ -202,12 +202,13 @@ const tree = () => agent.goals.nodes.find(g => g.text === 'break this tree')
 await until('"break this tree": System 2 sets a check', () => !!tree()?.done_when, 45000)
 // Either counts the real logs, or tests in the world that none are left: both come from looking, not a guess.
 // (Since the canopy scenario, a registered behavior may build with logs, which makes an inventory count unreliable.)
-check('"break this tree": the check counts the real logs, or tests that none are left', (tree()?.done_when?.spec.module === 'inventory_delta' && tree()?.done_when?.spec.count === treeLogs) || tree()?.done_when?.spec.module === 'authored',
+check('"break this tree": the check counts the real logs, or tests that none are left', (tree()?.done_when?.spec.module === 'inventory_delta' && tree()?.done_when?.spec.count === treeLogs) || ['authored', 'cleared'].includes(tree()?.done_when?.spec.module ?? ''),
   `${tree()?.done_when?.desc}, tree has ${treeLogs}`)
 const treeLooks = looksSince(looked)
 check('"break this tree": System 2 looked first', treeLooks.some(r => r.attrs['jeeve.perceive.tool'] === 'scan'), treeLooks.map(r => `${r.attrs['jeeve.perceive.tool']} ${r.attrs['jeeve.perceive.query']}`).join('; '))
 await until('"break this tree": every log is collected', () => treeBlocks(/_log$/) === 0, 120000)
-await until('"break this tree": Josh hears "done"', () => whispers.some(w => w.startsWith('done: break this tree')), 20000)
+// A check that reads the world has the bot look around before the goal closes (~10-20 s, brain/architecture/perception.md).
+await until('"break this tree": Josh hears "done"', () => whispers.some(w => w.startsWith('done: break this tree')), 60000)
 
 // Outcome-based: an oak's leaves are mostly within reach once the trunk is gone, but collect measures
 // progress by items and leaves drop none. Pass if System 2 looks, then reports a limit up front or breaks leaves.
