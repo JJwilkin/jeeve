@@ -5,10 +5,10 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { BEHAVIORS } from './behaviors.ts'
 import type { CapabilityRequest } from './builder.ts'
-import type { CheckSpec } from './goals.ts'
+import type { CheckSpec, PlanStep } from './goals.ts'
 import { MODULE_LIMITS, type ModuleSource } from './modules.ts'
 
-export const MODEL = process.env.JEEVE_SYSTEM2_MODEL ?? 'claude-sonnet-5-5'
+export const MODEL = process.env.JEEVE_SYSTEM2_MODEL ?? 'claude-opus-5-5'
 const MAX_TURNS = 4
 
 export type Decision = {
@@ -20,6 +20,7 @@ export type Decision = {
   new_modules: ModuleSource[]
   message: string | null
   requests?: RequestDraft[] // from request_capability calls, attached by code
+  plan?: PlanStep[] // from a set_plan call, attached by code
 }
 // A capability request as 2A writes it (not strict: code checks it); code adds the id and the goal.
 export type RequestDraft = Omit<CapabilityRequest, 'id'>
@@ -30,11 +31,11 @@ const CHECK = {
   additionalProperties: false,
   required: ['module', 'name', 'player', 'radius', 'match', 'count', 'negate', 'for_ms'],
   properties: {
-    module: { type: 'string', enum: ['near_entity', 'inventory_delta', 'entity_alive', 'authored'] },
+    module: { type: 'string', enum: ['near_entity', 'inventory_delta', 'entity_alive', 'cleared', 'authored'] },
     name: nullable('string', { description: 'authored: the name of a check module you registered (now or earlier)' }),
     player: nullable('string', { description: 'near_entity, entity_alive: player name' }),
-    radius: nullable('number', { description: 'near_entity: blocks' }),
-    match: nullable('string', { description: 'inventory_delta: item name glob, e.g. "*_log"' }),
+    radius: nullable('number', { description: "near_entity: blocks. cleared: blocks around the goal's place (2 for a tree)" }),
+    match: nullable('string', { description: 'inventory_delta: item name glob, e.g. "*_log". cleared: block globs, comma-separated, e.g. "*_log,*_leaves"' }),
     count: nullable('integer', { description: 'inventory_delta: how many more than held when the goal was created' }),
     negate: { type: 'boolean', description: 'true: the check holds when the predicate is false' },
     for_ms: nullable('integer', { description: 'escalate_if only: fire after the condition has held this long' })
@@ -163,6 +164,29 @@ const REQUEST_CAPABILITY: Anthropic.Tool = {
   }
 }
 
+// A plan: steps code runs one after another as child goals (brain/architecture/system-2.md → "Plans"). Not strict.
+const SET_PLAN: Anthropic.Tool = {
+  name: 'set_plan',
+  description: 'Break the instruction into steps that code runs one after another, each as a sub-goal with its own place and check. Code starts the next step when one completes, without calling you. Calling it again replaces the plan (the current step starts over). Call it before or together with submit_decision.',
+  input_schema: {
+    type: 'object', additionalProperties: false, required: ['steps'],
+    properties: {
+      steps: {
+        type: 'array', minItems: 1, maxItems: 12,
+        items: {
+          type: 'object', additionalProperties: false, required: ['text', 'place', 'done_when', 'budget_s'],
+          properties: {
+            text: { type: 'string', description: 'The step in a few words, e.g. "break the tree at x=36".' },
+            place: { anyOf: [{ type: 'array', items: { type: 'integer' }, minItems: 3, maxItems: 3 }, { type: 'null' }], description: "Where the step happens, absolute [x, y, z] (a tree's trunk base)." },
+            done_when: { anyOf: [CHECK, { type: 'null' }] },
+            budget_s: nullable('integer', { description: 'Time limit before you are called back.' })
+          }
+        }
+      }
+    }
+  }
+}
+
 const SYSTEM = `You are System 2A, the orchestrator of Jeeve, a Minecraft bot that joins servers as a normal player and takes instructions from players.
 
 You are the slow planner. A fast decision model (System 1, "Jev") picks a behavior per channel several times a second under a program you shape: guidance text, the allowed behaviors and how often it re-decides. Deterministic code runs the behaviors and safety guards. You are called when an instruction arrives or something escalates. The bot never waits for you: it keeps acting on the current program while you think.
@@ -170,7 +194,7 @@ You are the slow planner. A fast decision model (System 1, "Jev") picks a behavi
 Behaviors System 1 can choose from:
 ${Object.entries(BEHAVIORS).map(([n, b]) => `- ${n} (${b.channels.join('+')}): ${b.describe('<target>')}`).join('\n')}
 
-Success checks are code you parameterize: near_entity(player, radius), inventory_delta(match glob, count), entity_alive(player). Under an inventory_delta check, the fast model is offered collect only for block types the check still needs, with the count still missing, so for a goal that gathers blocks use inventory_delta with the exact count. Under an authored check, it is offered the block types in view that the check's code names (e.g. "oak_leaves", "*_log"), with how many are within 8 blocks. Code evaluates them every tick, marks a goal completed when its done_when passes, and tells the player. You never need to say "done".
+Success checks are code you parameterize: near_entity(player, radius), inventory_delta(match glob, count), entity_alive(player), cleared(match globs, radius: nothing matching the bot has seen is left within radius of the goal's place, judged from close by). Under an inventory_delta check, the fast model is offered collect only for block types the check still needs, with the count still missing, so for a goal that gathers blocks use inventory_delta with the exact count. Under a cleared or authored check, it is offered the block types the check names (cleared's match; the authored check's code, e.g. "oak_leaves", "*_log"), with how many it has seen: near the goal's place if it has one, else within 8 blocks. Code evaluates them every tick, marks a goal completed when its done_when passes, and tells the player. You never need to say "done".
 
 The fast model only sees targets near the bot. If a goal happens at a place (a tree to break, a spot to guard or build at), set goal.place to a block there, e.g. one scan found. The fast model is told either "you are at the goal's place" (within 3 blocks) or "you are not at the goal's place yet", and in the second case it is offered navigate to the place, so it can walk back after wandering off or out of view. Write guidance about the place in those words, not in blocks or distances (e.g. "if you are not at the goal's place yet, walk back to it"): it is weak with numbers, and stood still short of the place when told "within ~3 blocks" or "close". Setting goal again replaces the place too, so repeat it.
 
@@ -179,6 +203,8 @@ s = { t, self: { pos: [x, y, z], yaw, health, food, held, below }, entities: [{ 
 s.blocks holds what the bot has seen, not x-ray: a block it never saw isn't there, so a "none left" check must also require the bot to be within a few blocks of the place, and a type in s.crowded must count as present. When an authored done_when passes, code has the bot look around the goal's place first and closes the goal only if the check still passes on what it saw, so set goal.place for such goals. Helpers: dist(a, b) for positions, count(s, "*_log") for inventory globs. Modules are pure: no I/O, no state between calls, no eval. They must finish in under ${MODULE_LIMITS.budgetMs} ms, and they run several times a second. Before registering, a module is trialled on recent real snapshots and refused if it throws or returns a non-boolean. A refusal comes back to you as an escalation. Modules you registered earlier are listed in your context, so reuse them by name.
 
 When no allowed behavior can do what a goal needs, ask the builder (System 2B) for one with request_capability. You describe the need and its constraints, and name the trial target. You also write its pass check yourself: a check module (in new_modules of the same decision) that tests in the world what a run on the trial target should have done, e.g. no oak_leaves left within a few blocks of the spot, with the bot near it. The builder writes the code, waits for the runtime to grant a trial window (only while no hostile is near and the bot hasn't been hurt for a few seconds; a threat pre-empts a running trial), trials it, and fixes it from the evidence, which can take minutes. Code tells the player you're working on it. Meanwhile you keep running the game: keep the goal moving with what's allowed, and let the fast model fight anything that threatens the bot. Requests in flight are listed in your context (requests). One request per goal: a new one replaces the old, and a request is dropped when its goal closes. Its result comes back as a capability_result escalation: if it's registered, add it to program.allowed_behaviors and write guidance for it (the builder proposes some as usage; you decide). If it failed, read its attempts and decide whether to ask again differently or fail the goal. Only a behavior whose trial passed can be allowed. Behaviors written earlier are in your context (modules); reuse them by name.
+
+Plans: when an instruction is a sequence or several of the same task (break four trees, clear a field, fetch then build), think it through first, then call set_plan with one step per unit of work, in the order to do them: finish one before starting the next, nearest first. Each step is a sub-goal with its own place, so the fast model is told about that spot and offered only the blocks there. Code starts each step when the one before completes, after the bot has looked around to confirm, without calling you. For a step that clears blocks at a spot, use the built-in check cleared (match "*_log,*_leaves", radius 2, with the step's place at the trunk base): it tests what the bot has seen, so you needn't write a module. The instruction's goal completes when the last step does, unless you give it a done_when of its own. While a plan runs you are called every 30 s (review_due) with seen_map and the plan's progress: carry on, adjust the program, or call set_plan again to re-plan. Use seen_map to plan: it shows every tree the bot has seen.
 
 On a new instruction: set the goal's done_when (or null if open-ended), escalate_if conditions, and a budget (closed goals) or review interval (open-ended goals). Adjust the program only if the default guidance is not enough. On an escalation: read what happened and decide whether to change the program, fail the goal (with a message saying why), push a sub-goal, or carry on (goal_action "none", everything else null).
 
@@ -209,6 +235,7 @@ export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, sche
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: JSON.stringify({ trigger, ...context }) }]
     const sqls: string[] = []
     const requests: RequestDraft[] = []
+    let plan: PlanStep[] | undefined
     let usage: Anthropic.Beta.BetaUsage | null = null
     let model = MODEL
     for (let turn = 1; turn <= MAX_TURNS; turn++) {
@@ -220,7 +247,7 @@ export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, sche
         output_config: { effort: opts.effort(trigger) },
         system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
         // The last turn offers only submit_decision, so a call always ends in a decision.
-        tools: [...(turn < MAX_TURNS ? tools : TOOLS.slice(0, 1)), REQUEST_CAPABILITY],
+        tools: [...(turn < MAX_TURNS ? tools : TOOLS.slice(0, 1)), REQUEST_CAPABILITY, SET_PLAN],
         messages
       } as Anthropic.Beta.MessageCreateParamsNonStreaming)
       usage = res.usage
@@ -228,13 +255,15 @@ export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, sche
       if (res.stop_reason === 'refusal') return { decision: null, model, usage, turns: turn, sql: sqls, refusal: true }
       const calls = res.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use')
       for (const c of calls) if (c.name === 'request_capability') requests.push(c.input as RequestDraft)
+      for (const c of calls) if (c.name === 'set_plan') plan = (c.input as { steps: PlanStep[] }).steps
       const submit = calls.find(c => c.name === 'submit_decision')
-      if (submit) return { decision: { ...submit.input as Decision, requests }, model, usage, turns: turn, sql: sqls, refusal: false }
+      if (submit) return { decision: { ...submit.input as Decision, requests, plan }, model, usage, turns: turn, sql: sqls, refusal: false }
       if (!calls.length) break
       messages.push({ role: 'assistant', content: res.content })
       // Tool calls in one turn run in parallel: a turn costs seconds, a look costs milliseconds.
       const results = await Promise.all(calls.map(async (c): Promise<Anthropic.Beta.BetaToolResultBlockParam> => {
         if (c.name === 'request_capability') return { type: 'tool_result', tool_use_id: c.id, content: 'Queued: sent to the builder when your decision is applied.' }
+        if (c.name === 'set_plan') return { type: 'tool_result', tool_use_id: c.id, content: 'Queued: the plan starts when your decision is applied.' }
         try {
           let out: unknown
           if (c.name === 'run_sql') {

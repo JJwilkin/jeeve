@@ -354,6 +354,17 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.equal(notableBlocks(bot, 8, 64).find(n => n.name === 'oak_leaves')!.count, 11)
   world.set('4,5,0', 'oak_leaves')
   observe(bot)
+  // cleared: nothing matching the bot has seen is left near the goal's place. False while the tree stands, true once
+  // the bot has seen every spot empty.
+  const treeGoal = { inventory: {}, place: [3, 0, 0] as [number, number, number] }
+  const gone = compile({ module: 'cleared', match: '*_log,*_leaves', radius: 2, name: null, player: null, count: null, negate: false, for_ms: null }, treeGoal)
+  assert.equal(gone.test(bot), false)
+  const tree = [...world.entries()].filter(([, n]) => n !== 'grass_block')
+  for (const [k] of tree) world.delete(k)
+  observe(bot)
+  assert.equal(gone.test(bot), true)
+  for (const [k, n] of tree) world.set(k, n)
+  observe(bot)
   Object.assign(bot, { entities: {}, health: 20, food: 20, heldItem: null }) // the same bot: the memory is per bot
   const raw = rawSnapshot({ ...bot, inventory: undefined } as any)
   assert.deepEqual(raw.blocks, {}) // a copy of the bot has seen nothing

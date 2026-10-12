@@ -179,7 +179,10 @@ export function beats (rows: Row[]): Beat[] {
   let trial = 0
   for (const r of rows) {
     const tr = r.attrs?.['jeeve.goal.transition']
-    if (r.kind === 'goal' && tr === 'pushed' && r.input?.from) b(r, 'instruction', { from: r.input.from.player, text: goalText(r) }, `${r.input.from.player} asks Jeeve: "${clip(goalText(r), 70)}"`)
+    if (r.kind === 'goal' && tr === 'pushed' && r.attrs?.['jeeve.goal.plan_step']) {
+      const [n, of] = String(r.attrs['jeeve.goal.plan_step']).split('/')
+      b(r, 'step', { step: n, of, text: r.input?.text }, `Step ${n} of ${of}: ${clip(r.input?.text, 60)}.`)
+    } else if (r.kind === 'goal' && tr === 'pushed' && r.input?.from) b(r, 'instruction', { from: r.input.from.player, text: goalText(r) }, `${r.input.from.player} asks Jeeve: "${clip(goalText(r), 70)}"`)
     else if (r.kind === 'goal' && (tr === 'completed' || tr === 'failed') && !String(r.attrs?.['jeeve.goal.path'] ?? '').includes('>')) b(r, `goal_${tr}`, { summary: r.output?.summary }, tr === 'completed' ? 'Done.' : 'Jeeve gives up on this one.')
     else if (r.kind === 'request') b(r, 'request', { need: r.input?.need, pass_when: r.input?.pass_when }, "Jeeve can't do this yet. System 2 asks the builder for a new skill.")
     else if (r.kind === 'builder_tool' && r.tool === 'write_behavior' && r.phase === 'start') { trial++; b(r, 'draft', { name: r.input?.name, trial }, trial === 1 ? `The builder writes code for it: ${r.input?.name}.` : `The builder fixes the code (attempt ${trial}).`) }

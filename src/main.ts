@@ -13,13 +13,13 @@ import { authoredSpec, BEHAVIORS, CHANNELS, Channels, LOOK_AROUND, type ApiHost,
 import { build, BUILDER_MODEL, type BehaviorDraft, type BuildResult, type CapabilityRequest, type TrialReport, type TrialTarget } from './builder.ts'
 import { coalescing, makeDecider, optionTarget, type Ask } from './decide.ts'
 import { attacking, checkSnapshot, describeEntity, handleFor, inventoryCounts, newHandles, rawSnapshot, type Attackers, type Directive } from './encoder.ts'
-import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal } from './goals.ts'
+import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal, type PlanStep } from './goals.ts'
 import { guardedMovements, installGuards } from './guards.ts'
 import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type ModuleSource, type Snapshot } from './modules.ts'
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
 import { makeSystem2, type Decision, type RequestDraft } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
-import { blockAt, observe, reachable, scan, seenMap, type Pos } from './world.ts'
+import { blockAt, observe, reachable, scan, seenMap, seenTypes, type Pos } from './world.ts'
 
 export type AgentOptions = {
   host?: string
@@ -45,6 +45,10 @@ const TRIAL_WINDOW = { hostileWithin: 8, quietMs: 5_000, maxPreempts: 3 }
 const FAILED_COOLDOWN_MS = 10_000
 // A look that ended this recently confirms a check that still passes; an older one, or none, means look first.
 const CONFIRM_FRESH_MS = 3_000
+// Under a goal with a place, Jev is offered only blocks this close to it (horizontally): a tree's leaves reach 1–2 out.
+const PLACE_RADIUS = 3
+// While a plan runs, each step is reviewed by 2A this often (review_due), with the seen map and the plan's progress.
+const STEP_REVIEW_MS = 30_000
 // Trace rows stay small: long outputs (a scan, an event's data) are cut.
 const short = (v: unknown, max = 500) => { const s = JSON.stringify(v); return s && s.length > max ? s.slice(0, max) + '…' : v }
 
@@ -106,16 +110,53 @@ export async function startAgent (opts: AgentOptions) {
   const authoredFailures = new Map<string, number>() // behavior name → failed runs in a row
   let trial: TrialRun | null = null // the one live trial, if any (see startTrial)
 
+  const completed = (g: Goal) => {
+    recorder.record('goal', { attrs: { 'jeeve.goal.id': g.id, 'jeeve.goal.path': goals.pathText(), 'jeeve.goal.transition': 'completed' }, output: { summary: g.summary } })
+    note(`goal completed: ${g.text} (${g.summary})`)
+    if (g.from?.via === 'whisper') bot.whisper(g.from.player, `done: ${g.text}, ${g.summary}`)
+    afterGoalChange(g)
+    // A plan step done: code starts the next one, no model call in between.
+    const parent = g.parent ? goals.nodes.find(n => n.id === g.parent) : null
+    if (parent?.plan && parent.status === 'active') startStep(parent)
+  }
   const goals = new Goals({
-    completed: g => {
-      recorder.record('goal', { attrs: { 'jeeve.goal.id': g.id, 'jeeve.goal.path': goals.pathText(), 'jeeve.goal.transition': 'completed' }, output: { summary: g.summary } })
-      note(`goal completed: ${g.text} (${g.summary})`)
-      if (g.from?.via === 'whisper') bot.whisper(g.from.player, `done: ${g.text}, ${g.summary}`)
-      afterGoalChange(g)
-    },
+    completed,
     confirm: g => confirm(g),
     escalate: (reason, g) => escalate(reason, { goal: g.id }, g)
   })
+
+  // ---- plans: 2A's steps run one after another as child goals of the instruction's goal (set_plan) ----
+  // A step has its own place (so Jev is told about that spot and offered only the blocks there) and check. The goal
+  // completes after its last step, unless it has a check of its own.
+  function startStep (root: Goal) {
+    const plan = root.plan!
+    const step = plan.steps[plan.next]
+    if (!step) {
+      if (!root.done_when && root.status === 'active') { goals.close(root, 'completed', `all ${plan.steps.length} steps done`); completed(root) }
+      return
+    }
+    plan.next++
+    const child = goals.create(step.text, root.id, null, bot)
+    child.place = step.place?.length === 3 && step.place.every(Number.isFinite) ? step.place.map(Math.floor) as Pos : null
+    try { child.done_when = step.done_when ? compile(step.done_when, child, lookup) : null } catch (err) { child.log.push(`check refused: ${err}`) }
+    child.budget_ms = step.budget_s ? step.budget_s * 1000 : null
+    child.review_ms = STEP_REVIEW_MS
+    recorder.record('goal', { attrs: { 'jeeve.goal.id': child.id, 'jeeve.goal.path': goals.pathText(), 'jeeve.goal.transition': 'pushed', 'jeeve.goal.plan_step': `${plan.next}/${plan.steps.length}` }, input: { text: step.text, place: child.place } })
+    recorder.goalPath = goals.pathText()
+    channels.stopStalePlace(goals.place())
+    note(`plan step ${plan.next} of ${plan.steps.length}: ${step.text}`)
+    if (fires('new_directive')) wake('plan_step')
+  }
+
+  // A new plan replaces the old one: the step running now is abandoned, and the new plan starts at its first step.
+  function setPlan (root: Goal, steps: PlanStep[]) {
+    for (const g of goals.path().slice(1).reverse()) {
+      goals.close(g, 'abandoned', 're-planned')
+      recorder.record('goal', { attrs: { 'jeeve.goal.id': g.id, 'jeeve.goal.transition': 'abandoned' }, output: { summary: 're-planned' } })
+    }
+    root.plan = { steps, next: 0 }
+    startStep(root)
+  }
 
   // ---- confirm before done: a check that reads the world passed; look around the place, then judge again ----
   // The check re-runs on the next tick over what the look added to the seen memory. A trial holds the body, so the
@@ -198,13 +239,22 @@ export async function startAgent (opts: AgentOptions) {
       const p = check.progress!(bot)
       return glob(check.spec.match ?? '*').test(block) ? p.want - p.have : 0
     }
-    // An authored check (e.g. "no leaves left") has no count: offer what's in view (the encoder's block radius), and
-    // only the block types its code names ("oak_leaves", "*_log"). Otherwise Jev was offered the dirt a pillar left.
-    // A wider count sends collect after far blocks and away from the goal's place.
-    if (check?.spec.module === 'authored') {
-      const code = lookup(check.spec.name ?? '')?.code ?? ''
-      if (!code.includes(block) && !code.includes(`_${block.split('_').at(-1)}`)) return 0
-      return bot.findBlocks({ matching: bot.registry.blocksByName[block]?.id, maxDistance: program.encoder.params.block_radius, count: 64 }).length
+    // A cleared or authored check (e.g. "no leaves left") has no count: offer only the block types it names (cleared's
+    // globs; "oak_leaves", "*_log" in an authored check's code), counted from what the bot has seen near the goal's
+    // place, or within the encoder's block radius without one. Otherwise Jev was offered the dirt a pillar left, and
+    // the next tree's logs before this one was done (orchard clip, 2026-10-12).
+    if (check?.spec.module === 'authored' || check?.spec.module === 'cleared') {
+      const code = check.spec.module === 'authored' ? lookup(check.spec.name ?? '')?.code ?? '' : ''
+      const named = check.spec.module === 'cleared'
+        ? (check.spec.match ?? '*').split(',').some(m => glob(m.trim()).test(block))
+        : code.includes(block) || code.includes(`_${block.split('_').at(-1)}`)
+      if (!named) return 0
+      const at = goals.place()
+      const me = bot.entity.position
+      const r = program.encoder.params.block_radius
+      return (seenTypes(bot, 24).get(block) ?? []).filter(p => at
+        ? Math.abs(p[0] - at[0]) <= PLACE_RADIUS && Math.abs(p[2] - at[2]) <= PLACE_RADIUS
+        : Math.max(Math.abs(p[0] - me.x), Math.abs(p[1] - me.y), Math.abs(p[2] - me.z)) <= r).length
     }
     if (check) return 0
     const want = Number(directive.text.match(/\d+/)?.[0] ?? 1)
@@ -314,7 +364,8 @@ export async function startAgent (opts: AgentOptions) {
       sql: judgeval ? q => judgeval.sql(q) : undefined,
       schema,
       // JEEVE_SYSTEM2_EFFORT sets every call's effort (e.g. low, to make 2A answer instructions faster).
-      effort: trigger => (process.env.JEEVE_SYSTEM2_EFFORT as 'low' | 'medium' | 'high' | undefined) ?? (trigger.includes('instruction') ? 'medium' : 'low')
+      // Instructions at high: that's when 2A plans. Escalations stay at low, for responsiveness mid-task.
+      effort: trigger => (process.env.JEEVE_SYSTEM2_EFFORT as 'low' | 'medium' | 'high' | undefined) ?? (trigger.includes('instruction') ? 'high' : 'low')
     })
     : null
   type Trigger = { reason: string, detail: unknown, goal: string }
@@ -404,8 +455,10 @@ export async function startAgent (opts: AgentOptions) {
       if (!module) problems.push(`module ${src.name} refused: ${trial.error}`)
     }
     // After modules, so a request's pass_when can name a check registered in this decision.
+    // Requests belong to the instruction's goal, not a plan step: a skill outlives the step that asked for it.
+    const top = goals.path()[0] ?? goal
     for (const r of d.requests ?? []) {
-      const problem = request(r, goal, cite)
+      const problem = request(r, top, cite)
       goal.log.push(problem ?? `capability requested: ${r.need}`)
       if (problem) problems.push(problem)
     }
@@ -460,6 +513,10 @@ export async function startAgent (opts: AgentOptions) {
       recorder.record('goal', { attrs: { 'jeeve.goal.id': goal.id, 'jeeve.goal.path': goals.pathText(), 'jeeve.goal.transition': 'failed' }, output: { summary: d.note } })
       afterGoalChange(goal)
       return
+    }
+    if (d.plan?.length && (top.status === 'active' || top.status === 'suspended')) {
+      setPlan(top, d.plan)
+      goal.log.push(`plan: ${d.plan.map(s => s.text).join(' → ')}`)
     }
     recorder.goalPath = goals.pathText()
     const want = goals.program() ?? DEFAULT_PROGRAM

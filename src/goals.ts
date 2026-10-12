@@ -4,15 +4,15 @@ import type { Bot } from 'mineflayer'
 import { checkSnapshot, inventoryCounts } from './encoder.ts'
 import type { Module } from './modules.ts'
 import type { Program } from './program.ts'
-import type { Pos } from './world.ts'
+import { seenTypes, type Pos } from './world.ts'
 
 // A check is a generic predicate over raw state; System 2 picks the module and fills in the values.
 export type CheckSpec = {
-  module: 'near_entity' | 'inventory_delta' | 'entity_alive' | 'authored'
+  module: 'near_entity' | 'inventory_delta' | 'entity_alive' | 'cleared' | 'authored'
   name: string | null // authored: a check module System 2 registered (src/modules.ts)
   player: string | null // near_entity, entity_alive
-  radius: number | null // near_entity
-  match: string | null // inventory_delta: item name glob, e.g. "*_log"
+  radius: number | null // near_entity; cleared: blocks around the goal's place
+  match: string | null // inventory_delta: item name glob, e.g. "*_log"; cleared: globs, comma-separated
   count: number | null // inventory_delta
   negate: boolean // escalate_if: fire when the predicate is false
   for_ms: number | null // escalate_if: only after it has held this long
@@ -38,7 +38,10 @@ export type Goal = {
   started: number // also reset when a budget or review is renewed
   log: string[]
   summary?: string
+  plan?: { steps: PlanStep[], next: number } // steps System 2 planned; code starts each as a child when the last closes
 }
+// One step of a plan (brain/architecture/system-2.md → "Plans"): a child goal with its own place and check.
+export type PlanStep = { text: string, place: Pos | null, done_when: CheckSpec | null, budget_s: number | null }
 
 // Players seen dying recently: Mineflayer can't read other players' health, but it sees them die.
 const deaths = new Map<string, number>()
@@ -50,7 +53,7 @@ const playerEntity = (bot: Bot, name: string | null) => name ? bot.players[name]
 // Authored checks run on the raw snapshot; the registry lookup is passed in by the runtime.
 export type ModuleLookup = (name: string) => Module | undefined
 
-export function compile (spec: CheckSpec, goal: Pick<Goal, 'inventory'>, modules?: ModuleLookup): Compiled {
+export function compile (spec: CheckSpec, goal: Pick<Goal, 'inventory' | 'place'>, modules?: ModuleLookup): Compiled {
   const base = (() => {
     switch (spec.module) {
       case 'near_entity': {
@@ -67,6 +70,23 @@ export function compile (spec: CheckSpec, goal: Pick<Goal, 'inventory'>, modules
         const start = count(goal.inventory)
         const have = (bot: Bot) => Math.max(0, count(inventoryCounts(bot)) - start)
         return { desc: `${want} more ${spec.match}`, test: (bot: Bot) => have(bot) >= want, progress: (bot: Bot) => ({ have: Math.min(have(bot), want), want }) }
+      }
+      // Nothing matching is left near the goal's place, as far as the bot has seen (src/world.ts seen memory), judged
+      // from close by. The goal's place is read when the check runs, so it can be set after the check.
+      case 'cleared': {
+        const res = (spec.match ?? '*').split(',').map(m => glob(m.trim()))
+        const r = spec.radius ?? 2
+        const near = (p: Pos, at: Pos) => Math.abs(p[0] - at[0]) <= r && Math.abs(p[2] - at[2]) <= r && p[1] >= at[1] - 1
+        return {
+          desc: `no ${spec.match} left within ${r} of the goal's place`,
+          test: (bot: Bot) => {
+            const at = goal.place
+            const me = bot.entity.position
+            if (!at || Math.max(Math.abs(me.x - at[0]), Math.abs(me.z - at[2])) > r + 4) return false
+            for (const [name, ps] of seenTypes(bot, 24)) if (res.some(re => re.test(name)) && ps.some(p => near(p, at))) return false
+            return true
+          }
+        }
       }
       case 'authored': {
         const m = spec.name ? modules?.(spec.name) : undefined
@@ -157,7 +177,7 @@ export class Goals {
     if (!leaf) return
     const now = Date.now()
     if (leaf.status === 'active' && !leaf.confirming && leaf.done_when?.test(bot)) {
-      if (leaf.done_when.spec.module === 'authored' && this.on.confirm?.(leaf)) return
+      if ((leaf.done_when.spec.module === 'authored' || leaf.done_when.spec.module === 'cleared') && this.on.confirm?.(leaf)) return
       const p = leaf.done_when.progress?.(bot)
       this.close(leaf, 'completed', p ? `${p.have}/${p.want}` : leaf.done_when.desc)
       this.on.completed(leaf)
@@ -179,7 +199,8 @@ export class Goals {
     return {
       path: this.path().map(g => ({
         id: g.id, text: g.text, status: g.status, place: g.place, done_when: g.done_when?.desc ?? null,
-        progress: g.done_when?.progress?.(bot) ?? null, escalate_if: g.escalate_if.map(c => c.desc), log: g.log.slice(-10)
+        progress: g.done_when?.progress?.(bot) ?? null, escalate_if: g.escalate_if.map(c => c.desc), log: g.log.slice(-10),
+        plan: g.plan?.steps.map((s, i) => `${i < g.plan!.next - 1 ? 'done' : i === g.plan!.next - 1 ? 'now' : 'next'}: ${s.text}`)
       })),
       past: this.past.slice(-5)
     }

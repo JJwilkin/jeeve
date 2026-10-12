@@ -74,6 +74,16 @@ Two channels, handled the same way:
 - **For failures, refusals and clarifying questions,** System 2 writes the message.
 - **Jev never speaks.**
 
+## Plans (2026-10-12)
+Decided with Joshua after the orchard clip ([[brain-monitor]]): 2A steered "break the other three trees" reactively, one escalation at a time, and Jev hopped between trees' logs. A heuristic design would break one tree and repeat. So 2A plans once, and code walks the plan.
+- **Plan at the instruction.** Instruction calls run at `high` effort (escalations stay `low`). 2A calls a `set_plan` tool (its own tool, like `request_capability`, so the strict `submit_decision` grammar doesn't grow): ordered steps, each `{ text, place, done_when, budget_s }`, e.g. one per tree, nearest first.
+- **Code walks it.** Each step becomes a child goal of the instruction's goal, with its own place and check. When a step completes (after the look-around, [[perception]] → "Confirm before done"), code starts the next one with no model call. The instruction's goal completes after the last step, unless 2A gave it a check of its own. Calling `set_plan` again replaces the plan: the running step is abandoned, and the new plan starts at its first step.
+- **Jev stays on the step.** Under a step's `cleared` or authored check, Jev is offered only the block types the check names, counted from the seen memory within 3 blocks (horizontally) of the step's place. It can't start on the next tree's logs.
+- **A built-in `cleared` check:** `cleared(match: "*_log,*_leaves", radius)`, true when nothing matching that the bot has seen is left within `radius` of the goal's place, judged from within `radius + 4`. 2A doesn't have to write a module per tree.
+- **Reviews.** Each step has a 30 s review interval (`review_due`). 2A is called with the seen map and the plan's progress (`goals.status` lists each step as done, now or next) and can carry on, adjust the program, or re-plan.
+- **Requests belong to the instruction's goal,** not the step that asked for them, so a skill build outlives its step.
+- **Model:** 2A is back on `claude-opus-5-5` (Sonnet 5.5 wrote vaguer requests and checks, [[orchestrator-and-builder]]).
+
 ## Escalations
 **Where escalations come from:**
 

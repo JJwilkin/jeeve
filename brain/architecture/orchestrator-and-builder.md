@@ -20,7 +20,7 @@ System 2 is two agents. **2A, the orchestrator,** runs the game: the goal tree, 
 | Speed | Seconds per call | Minutes per request |
 | Context | Goal path, program, recent events, the module list | The action API, the request, its pass check, the library's behavior code |
 | Writes | Goals, guidance, allowed behaviors, check and watch modules. It stays the **only writer of commitments** ([[system-2]]) | Library entries only (behaviors). It *proposes* guidance; 2A decides |
-| Model | `claude-sonnet-5-5` since 2026-10-12 (was `claude-opus-5-5`), `medium` for instructions, `low` for escalations: Joshua's call, 2A says what should happen rather than writing hard code, and its instruction calls (28–36 s on Opus) were the slow part of the canopy clip | `JEEVE_BUILDER_MODEL`, default `claude-opus-5-5` at `medium` (`JEEVE_BUILDER_EFFORT`; `high` until 2026-10-12, lowered for faster drafts after Sonnet at `low` was too weak) |
+| Model | `claude-opus-5-5`, `high` for instructions (it plans then, [[system-2]] → Plans), `low` for escalations. *Tried 2026-10-12:* `claude-sonnet-5-5` (3× faster instruction calls, but vaguer requests and checks) | `JEEVE_BUILDER_MODEL`, default `claude-opus-5-5` at `medium` (`JEEVE_BUILDER_EFFORT`; `high` until 2026-10-12, lowered for faster drafts after Sonnet at `low` was too weak) |
 
 ## Capability requests
 2A calls a `request_capability` tool, next to `submit_decision`. It's not a `submit_decision` field, because the strict grammar is already at its size limit. The request is applied with the decision, after `new_modules`, so its pass check can be registered in the same decision.
