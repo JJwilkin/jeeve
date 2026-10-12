@@ -89,6 +89,7 @@ const SCENARIOS: Record<string, Scenario> = {
       command('time set midnight')
       command('gamemode survival Josh')
       command('effect give Josh resistance 600 2 true')
+      command('give Jeeve bread 8') // rations: health only comes back when it eats; nothing tells it to
     },
     during: async ({ command, done }) => {
       const r = rng(SEED + 1)
