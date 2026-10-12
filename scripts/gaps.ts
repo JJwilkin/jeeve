@@ -61,10 +61,12 @@ for (const r of trace.filter(r => r.kind === 'system2' && r.input?.seen_map)) {
 
 say()
 say('## Goals closed vs. the world')
-const places = new Map(trace.filter(r => r.kind === 'goal' && r.attrs?.['jeeve.goal.transition'] === 'pushed').map(r => [r.attrs['jeeve.goal.id'], r.input?.place]))
+const pushed = new Map(trace.filter(r => r.kind === 'goal' && r.attrs?.['jeeve.goal.transition'] === 'pushed').map(r => [r.attrs['jeeve.goal.id'], r.input]))
 for (const r of trace.filter(r => r.kind === 'goal' && r.attrs?.['jeeve.goal.transition'] === 'completed')) {
-  const at = places.get(r.attrs['jeeve.goal.id'])
-  if (!at) { say(`- ${sec(r.t)} ${r.attrs['jeeve.goal.id']} completed (${r.output?.summary ?? ''})`); continue }
+  const at = pushed.get(r.attrs['jeeve.goal.id'])?.place
+  const module = pushed.get(r.attrs['jeeve.goal.id'])?.check?.module
+  // Only a goal whose check says the spot is clear can be falsely done that way.
+  if (!at || (module !== 'cleared' && module !== 'authored')) { say(`- ${sec(r.t)} ${r.attrs['jeeve.goal.id']} completed (${r.output?.summary ?? ''})`); continue }
   const left = world.allAt(r.t).filter(b => /_(log|leaves)$/.test(b.name) && Math.abs(b.pos[0] - at[0]) <= 2 && Math.abs(b.pos[2] - at[2]) <= 2).length
   say(`- ${sec(r.t)} ${r.attrs['jeeve.goal.id']} completed at [${at}]: ${left ? `**${left} logs/leaves still there (false done)**` : 'truly clear'}`)
 }

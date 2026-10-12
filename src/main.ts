@@ -141,7 +141,7 @@ export async function startAgent (opts: AgentOptions) {
     try { child.done_when = step.done_when ? compile(step.done_when, child, lookup) : null } catch (err) { child.log.push(`check refused: ${err}`) }
     child.budget_ms = step.budget_s ? step.budget_s * 1000 : null
     child.review_ms = STEP_REVIEW_MS
-    recorder.record('goal', { attrs: { 'jeeve.goal.id': child.id, 'jeeve.goal.path': goals.pathText(), 'jeeve.goal.transition': 'pushed', 'jeeve.goal.plan_step': `${plan.next}/${plan.steps.length}` }, input: { text: step.text, place: child.place } })
+    recorder.record('goal', { attrs: { 'jeeve.goal.id': child.id, 'jeeve.goal.path': goals.pathText(), 'jeeve.goal.transition': 'pushed', 'jeeve.goal.plan_step': `${plan.next}/${plan.steps.length}` }, input: { text: step.text, place: child.place, check: step.done_when } })
     recorder.goalPath = goals.pathText()
     channels.stopStalePlace(goals.place())
     note(`plan step ${plan.next} of ${plan.steps.length}: ${step.text}`)

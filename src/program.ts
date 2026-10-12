@@ -39,6 +39,9 @@ export type Thing = { name: string, count: number }
 // A behavior that takes places (navigate) also gets the goal's place, so Jev can walk back once it's out of view.
 // No two options may mean the same thing: Jev splits probability between them and confidence collapses.
 // So `stop` is offered only while something runs, and the running option only as `keep_current`.
+// An option's target without its count, so "collect:oak_leaves(9)" and "(8)" are the same option.
+export const optionTarget = (key: string) => key.replace(/\(\d+\)$/, '')
+
 export function optionsFor (
   claims: Channel[], allowed: string[], enc: Pick<Encoded, 'entities' | 'blocks' | 'place'>,
   running: string | null, remaining: (block: string) => number, items: Thing[] = []
@@ -58,7 +61,9 @@ export function optionsFor (
           return n > 0 ? [[`${name}:${b.name}(${n})`, { desc: spec.describe(`${n} ${b.name} (${b.desc})`), behavior: name, block: { name: b.name, count: n } }]] : []
         })
     if (spec.describePlace && enc.place) targets.push([`${name}:place`, { desc: spec.describePlace(enc.place.desc), behavior: name, place: enc.place.pos }])
-    for (const [key, opt] of targets) if (key !== running) opts[key] = opt
+    // The running one is keep_current, whatever its count is now: offered again under its new count, Jev picked it as
+    // a fresh option and restarted it (a pillaring skill restarted 18 times on one tree, orchard bench 2026-10-12).
+    for (const [key, opt] of targets) if (!running || optionTarget(key) !== optionTarget(running)) opts[key] = opt
   }
   return opts
 }

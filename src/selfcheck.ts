@@ -45,6 +45,8 @@ assert.deepEqual(keys(optionsFor(['legs'], allowed, enc, 'follow:E0', want)), ['
 assert.deepEqual(keys(optionsFor(['hands'], allowed, enc, null, want)), ['keep_current', 'attack_when_ready:E0', 'attack_when_ready:E1'])
 assert.deepEqual(keys(optionsFor(['legs', 'aim', 'hands'], allowed, enc, null, want)), ['keep_current', 'collect:oak_log(4)'])
 assert.deepEqual(optionsFor(['legs', 'aim', 'hands'], allowed, enc, null, want)['collect:oak_log(4)'].block, { name: 'oak_log', count: 4 })
+// The running option under a new count is still keep_current, not a fresh option that would restart it.
+assert.deepEqual(keys(optionsFor(['legs', 'aim', 'hands'], allowed, enc, 'collect:oak_log(5)', want)), ['keep_current', 'stop'])
 // The goal's place: navigate is offered a walk back to it, collect isn't, and a running walk back is only keep_current.
 {
   const away = { ...enc, place: { pos: [10, 0, 0] as [number, number, number], desc: 'medium, right' } }

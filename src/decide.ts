@@ -2,7 +2,7 @@
 import type { Bot } from 'mineflayer'
 import type { Channels, Channel } from './behaviors.ts'
 import { rawSnapshot, type Attackers, type Directive, type Handles } from './encoder.ts'
-import { ENCODERS, LIMITS, optionsFor, shuffled, version, type Choice, type Option, type Program, type Thing } from './program.ts'
+import { ENCODERS, LIMITS, optionsFor, optionTarget, shuffled, version, type Choice, type Option, type Program, type Thing } from './program.ts'
 
 const MODEL = 'jev-1.13.0' // pinned: thresholds are tuned against a version, aliases move
 
@@ -58,8 +58,7 @@ export type DecideCtx = {
   ask?: Ask
 }
 
-// An option's target without its count, so "collect:oak_leaves(9)" and "(8)" are the same target.
-export const optionTarget = (key: string) => key.replace(/\(\d+\)$/, '')
+export { optionTarget }
 
 export function makeDecider (ctx: DecideCtx) {
   const encode = ENCODERS[ctx.program.encoder.module](ctx.program.encoder.params)
