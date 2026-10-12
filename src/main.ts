@@ -386,6 +386,19 @@ export async function startAgent (opts: AgentOptions) {
   type Trigger = { reason: string, detail: unknown, goal: string }
   let pending: Trigger[] = []
   const lastSent = new Map<string, number>()
+  // Learning from 2A's answers: an escalation it answered with no change backs off for that goal, doubling each time
+  // (30 s to 4 min); one it acted on resets. About half of 2A's calls were Jev's doubts answered "carry on" (bench).
+  const quiet = new Map<string, { until: number, ms: number }>()
+  const changedNothing = (d: Decision) => !d.goal && !d.program && !d.push_child && d.goal_action === 'none' && !d.new_modules?.length && !d.requests?.length && !d.plan?.length && !d.message
+  function learnFrom (d: Decision, triggers: Trigger[]) {
+    for (const t of triggers) {
+      if (t.reason === 'instruction' || t.reason === 'capability_result') continue
+      const k = `${t.reason}|${t.goal}`
+      if (!changedNothing(d)) { quiet.delete(k); continue }
+      const ms = Math.min(240_000, (quiet.get(k)?.ms ?? NO_REPEAT_MS / 2) * 2)
+      quiet.set(k, { until: Date.now() + ms, ms })
+    }
+  }
 
   // During a trial Jev can't act on the pinned channels, so its doubts are expected; the trial's result is what counts.
   const jevDoubtDuringTrial = (reason: string) => !!trial && (reason === 'low_confidence' || reason === 'jev_escalate')
@@ -397,7 +410,9 @@ export async function startAgent (opts: AgentOptions) {
     // A fast health drop bypasses the window: in run jeeve-2026-10-11T16-36-51-167Z it suppressed every jev_escalate
     // while slimes took health from 11 to 1.
     const bypass = reason === 'instruction' || reason === 'capability_result' || fallingFast()
-    if (jevDoubtDuringTrial(reason) || (!bypass && Date.now() - (lastSent.get(key) ?? 0) < NO_REPEAT_MS)) {
+    // 2A answered this kind of escalation for this goal with "no change" lately: it's quiet for a while (see below).
+    const hushed = (quiet.get(`${reason}|${goal.id}`)?.until ?? 0) > Date.now()
+    if (jevDoubtDuringTrial(reason) || (!bypass && (hushed || Date.now() - (lastSent.get(key) ?? 0) < NO_REPEAT_MS))) {
       recorder.jsonl({ kind: 'escalation_suppressed', reason, goal: goal.id })
       return
     }
@@ -447,7 +462,7 @@ export async function startAgent (opts: AgentOptions) {
     if (stopped) return
     recorder.stats.system2.push(`${trigger} → ${d ? d.note : result.refusal ? 'refused' : 'no decision'}`)
     console.log(`[system2] ${trigger} (${Date.now() - t0} ms): ${d?.note ?? 'no decision'}`)
-    if (d) applyDecision(d, goal, spanId)
+    if (d) { learnFrom(d, triggers); applyDecision(d, goal, spanId) }
   }, 0)
 
   function applyDecision (d: Decision, goal: Goal, cite: string) {

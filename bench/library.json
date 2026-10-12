@@ -1,0 +1,139 @@
+{
+  "modules": [
+    {
+      "kind": "behavior",
+      "name": "clear_tall_tree",
+      "description": "Clears a whole tree (logs and leaves) including parts too high to reach: finds the nearest tree containing the target block, gathers pillar material (logs/dirt in inventory, digs a little dirt if needed), pillars up in the trunk column breaking every log/leaf in reach on the way, then digs its own pillar back down to the ground (no fall damage).",
+      "code": "async (api, target) => {\n  const tname = target.name || 'oak_leaves';\n  const species = tname.replace(/_(log|leaves|wood)$/, '');\n  const placedSet = new Set();\n  const key = p => p.join(',');\n  const isTreeN = n => n === species + '_log' || n === species + '_leaves';\n  const isTreeAt = p => !placedSet.has(key(p)) && isTreeN(api.blockAt(...p));\n  const me = () => api.self().pos;\n  const fl = Math.floor;\n  let p0 = me(); let best = null, bd = 1e9;\n  for (let dx = -16; dx <= 16; dx++) { for (let dz = -16; dz <= 16; dz++) for (let dy = -4; dy <= 16; dy++) {\n    const x = fl(p0[0]) + dx, y = fl(p0[1]) + dy, z = fl(p0[2]) + dz;\n    if (isTreeN(api.blockAt(x, y, z))) { const d = dx*dx + dy*dy + dz*dz; if (d < bd) { bd = d; best = [x, y, z]; } }\n  } if (dx % 4 === 0) await api.wait(1); }\n  if (!best) return 'none_found';\n  const seen = new Set([key(best)]); const cluster = [best]; const q = [best];\n  while (q.length && cluster.length < 400) {\n    const c = q.shift();\n    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {\n      const n = [c[0]+dx, c[1]+dy, c[2]+dz]; const k = key(n);\n      if (seen.has(k)) continue; seen.add(k);\n      if (Math.abs(n[0]-best[0]) > 6 || Math.abs(n[2]-best[2]) > 6) continue;\n      if (isTreeN(api.blockAt(...n))) { cluster.push(n); q.push(n); }\n    }\n    if (cluster.length % 50 === 0) await api.wait(1);\n  }\n  const logs = cluster.filter(p => api.blockAt(...p) === species + '_log');\n  let cx, cz;\n  if (logs.length) { cx = logs[0][0]; cz = logs[0][2]; }\n  else { cx = Math.round(cluster.reduce((a, p) => a + p[0], 0) / cluster.length); cz = Math.round(cluster.reduce((a, p) => a + p[2], 0) / cluster.length); }\n  const ymin = Math.min(...cluster.map(p => p[1]));\n  let g = ymin - 20;\n  for (let y = ymin; y > ymin - 20; y--) { const n = api.blockAt(cx, y, cz); if (n && n !== 'air' && !isTreeN(n) && !/short_grass|^grass$|fern|flower|tall_grass|snow$/.test(n)) { g = y; break; } }\n  const remaining = () => { const out = []; for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) for (let y = g + 1; y <= g + 24; y++) { const p = [cx+dx, y, cz+dz]; if (isTreeAt(p)) out.push(p); } return out; };\n  const inReach = p => { const s = me(); return Math.hypot(p[0]+0.5-s[0], p[1]+0.5-s[1]-1.6, p[2]+0.5-s[2]) <= 4.4; };\n  const tool = async () => { const ax = Object.keys(api.inventory()).find(n => n.endsWith('_axe')); if (ax) { try { await api.equip(ax); } catch (e) {} } };\n  const breakReachable = async () => {\n    await tool();\n    const rem = remaining().filter(inReach);\n    const s = me();\n    rem.sort((a, b) => Math.hypot(a[0]-s[0], a[1]-s[1]-1.6, a[2]-s[2]) - Math.hypot(b[0]-s[0], b[1]-s[1]-1.6, b[2]-s[2]));\n    for (const p of rem) { if (!isTreeAt(p)) continue; try { await api.dig(...p); } catch (e) {} }\n  };\n  const MAT = /(_log|_planks|^dirt|^cobblestone|^cobbled_deepslate|_wood)$/;\n  const matName = () => Object.keys(api.inventory()).find(n => MAT.test(n));\n  const matCount = () => { const inv = api.inventory(); return Object.keys(inv).filter(n => MAT.test(n)).reduce((a, n) => a + inv[n], 0); };\n  try { await api.goto(cx, g + 1, cz, 0); } catch (e) { try { await api.goto(cx, g + 1, cz, 1); } catch (e2) {} }\n  await breakReachable();\n  const r0 = remaining();\n  if (!r0.length) return 'done';\n  const t = Math.max(...r0.map(p => p[1]));\n  const need = Math.max(1, t - g - 4) + 1;\n  let tries = 0;\n  while (matCount() < need && tries < 10) {\n    tries++;\n    let cand = null, cd = 1e9; const s = me();\n    for (let dx = -5; dx <= 5; dx++) for (let dz = -5; dz <= 5; dz++) {\n      if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1) continue;\n      for (let y = g + 2; y >= g - 2; y--) { const n = api.blockAt(cx+dx, y, cz+dz); if (!n || n === 'air' || /short_grass|^grass$|fern|flower|tall_grass/.test(n)) continue; if (n === 'dirt' || n === 'grass_block') { const d = Math.hypot(cx+dx-s[0], cz+dz-s[2]); if (d < cd) { cd = d; cand = [cx+dx, y, cz+dz]; } } break; }\n    }\n    if (!cand) break;\n    try { await api.goto(cand[0], cand[1] + 1, cand[2], 3); await api.dig(...cand); await api.wait(4); await api.goto(cand[0], cand[1], cand[2], 0).catch(() => {}); await api.wait(10); } catch (e) {}\n  }\n  try { await api.goto(cx, g + 1, cz, 0); } catch (e) {}\n  const s0 = me();\n  if (fl(s0[0]) !== cx || fl(s0[2]) !== cz) return 'stuck';\n  let placed = 0, stall = 0;\n  while (true) {\n    await breakReachable();\n    const r = remaining();\n    if (!r.length) break;\n    const fy = fl(me()[1] + 0.01);\n    const mat = matName();\n    if (!mat || placed > 24 || stall > 4) break;\n    const hn = api.blockAt(cx, fy + 2, cz);\n    if (hn && hn !== 'air') { if (isTreeAt([cx, fy + 2, cz])) { await tool(); try { await api.dig(cx, fy + 2, cz); } catch (e) {} } }\n    if (api.blockAt(cx, fy + 2, cz) !== 'air') break;\n    await api.equip(mat);\n    await api.control('jump', true);\n    let ok = false;\n    for (let i = 0; i < 14; i++) { await api.wait(1); if (me()[1] > fy + 1.05) { try { await api.place(cx, fy, cz); ok = true; } catch (e) {} break; } }\n    await api.control('jump', false);\n    for (let i = 0; i < 20 && !api.self().on_ground; i++) await api.wait(1);\n    if (ok && api.blockAt(cx, fy, cz) !== 'air') { placedSet.add(key([cx, fy, cz])); placed++; } else stall++;\n  }\n  for (let i = 0; i < 40; i++) {\n    const fy = fl(me()[1] + 0.01);\n    if (fy <= g + 1) break;\n    const below = api.blockAt(cx, fy - 1, cz);\n    if (below && below !== 'air') { await tool(); try { await api.dig(cx, fy - 1, cz); placedSet.delete(key([cx, fy - 1, cz])); } catch (e) { return 'stuck'; } }\n    for (let k = 0; k < 20; k++) { await api.wait(1); if (api.self().on_ground && fl(me()[1] + 0.01) < fy) break; }\n  }\n  await api.wait(10);\n  return remaining().length ? 'stuck' : 'done';\n}",
+      "version": 1,
+      "channels": [
+        "legs",
+        "aim",
+        "hands"
+      ],
+      "targets": "block",
+      "timeout_s": 120,
+      "origin": {
+        "session": "jeeve-2026-10-12T08-56-41-845Z",
+        "goal": "g-1: break the tree closest to you, leaves included. The leaves won't decay on their own",
+        "created_at": "2026-10-12T08:59:26.890Z"
+      },
+      "trial": {
+        "target": {
+          "block": "oak_leaves",
+          "count": 13
+        },
+        "end": "done",
+        "ms": 17454
+      }
+    },
+    {
+      "kind": "check",
+      "name": "tree_at_35_cleared",
+      "description": "No oak_log/oak_leaves seen within 3 blocks horizontally of the trunk column x=35,z=-11 (y -61..-47), with the bot within 8 blocks of the trunk base",
+      "code": "(s) => { if (dist(s.self.pos, [35, -60, -11]) > 8) return false; if ((s.crowded || []).some(n => n === 'oak_log' || n === 'oak_leaves')) return false; for (const n of ['oak_log', 'oak_leaves']) { for (const p of (s.blocks[n] || [])) { if (Math.abs(p[0] - 35) <= 3 && Math.abs(p[2] + 11) <= 3 && p[1] >= -61 && p[1] <= -47) return false; } } return true; }",
+      "version": 1,
+      "origin": {
+        "session": "jeeve-2026-10-12T08-56-41-845Z",
+        "goal": "g-1: break the tree closest to you, leaves included. The leaves won't decay on their own",
+        "created_at": "2026-10-12T08:57:24.154Z"
+      },
+      "trial": {
+        "states": 31,
+        "trues": 0,
+        "errors": 0,
+        "maxMs": 0.155
+      }
+    },
+    {
+      "kind": "behavior",
+      "name": "craft_wooden_pickaxe",
+      "description": "Crafts a wooden pickaxe: chops nearby tree logs if the inventory lacks wood, turns logs into planks, makes sticks, finds or places a crafting table next to the bot (crafting one if needed), and crafts the pickaxe at it.",
+      "code": "async (api, target) => {\n  const inv = () => api.inventory();\n  const sum = (re) => Object.entries(inv()).filter(([k]) => re.test(k)).reduce((a, [, v]) => a + v, 0);\n  const planks = () => sum(/_planks$/);\n  const logs = () => sum(/_(log|stem|wood|hyphae)$/);\n  const fl = (p) => p.map(Math.floor);\n  if ((inv().wooden_pickaxe || 0) >= 1) return \"done\";\n\n  const findTable = async () => {\n    const r = await api.scan({ match: \"crafting_table\", radius: 8 });\n    if (!r.total) return null;\n    const me = api.self().pos;\n    let best = null, bd = 1e9;\n    for (const c of r.clusters) for (const p of (c.positions || [c.nearest])) {\n      const d = Math.hypot(p[0] - me[0], p[1] - me[1], p[2] - me[2]);\n      if (d < bd) { bd = d; best = p; }\n    }\n    return best;\n  };\n\n  let table = await findTable();\n  const needPlanks = () => {\n    let n = 3;\n    if ((inv().stick || 0) < 2) n += 2;\n    if (!table && !(inv().crafting_table)) n += 4;\n    return n;\n  };\n\n  // chop logs if needed\n  let tries = 0;\n  while (planks() + logs() * 4 < needPlanks() && tries < 8) {\n    tries++;\n    const r = await api.scan({ match: \"*_log\", radius: 16 });\n    if (!r.total) break;\n    const me = api.self().pos;\n    let cands = [];\n    for (const c of r.clusters) for (const p of (c.positions || [c.nearest])) cands.push(p);\n    cands.sort((a, b) => (Math.hypot(a[0]-me[0], a[2]-me[2]) + Math.abs(a[1]-me[1])*0.5) - (Math.hypot(b[0]-me[0], b[2]-me[2]) + Math.abs(b[1]-me[1])*0.5));\n    let dug = false;\n    for (const p of cands.slice(0, 6)) {\n      try {\n        await api.goto(p[0], p[1], p[2], 2);\n        try { await api.equip(\"*_axe\"); } catch (e) {}\n        await api.dig(p[0], p[1], p[2]);\n        dug = true;\n        // pick up drop\n        try { await api.goto(p[0], api.self().pos[1], p[2], 0); } catch (e) {\n          try { await api.goto(p[0], p[1], p[2], 1); } catch (e2) {}\n        }\n        await api.wait(15);\n        break;\n      } catch (e) { /* try next */ }\n    }\n    if (!dug) break;\n  }\n\n  // planks\n  let guard = 0;\n  while (planks() < needPlanks() && logs() > 0 && guard++ < 10) {\n    const logName = Object.keys(inv()).find(k => /_(log|stem|wood|hyphae)$/.test(k) && inv()[k] > 0);\n    let pl = logName.replace(/^stripped_/, \"\").replace(/_(log|wood)$/, \"_planks\").replace(/_(stem|hyphae)$/, \"_planks\");\n    const before = planks();\n    try { await api.craft(pl, 1); } catch (e) {}\n    if (planks() === before) return \"stuck\";\n  }\n  if (planks() < 3 + ((inv().stick || 0) < 2 ? 2 : 0)) return \"stuck\";\n\n  // sticks\n  guard = 0;\n  while ((inv().stick || 0) < 2 && guard++ < 3) {\n    try { await api.craft(\"stick\", 1); } catch (e) {}\n  }\n  if ((inv().stick || 0) < 2) return \"stuck\";\n\n  // table\n  table = await findTable();\n  if (!table) {\n    if (!inv().crafting_table) {\n      try { await api.craft(\"crafting_table\", 1); } catch (e) {}\n      if (!inv().crafting_table) return \"stuck\";\n    }\n    await api.equip(\"crafting_table\");\n    const f = fl(api.self().pos);\n    const offs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1],[2,0],[-2,0],[0,2],[0,-2]];\n    for (const [dx, dz] of offs) {\n      const x = f[0] + dx, y = f[1], z = f[2] + dz;\n      const here = api.blockAt(x, y, z), below = api.blockAt(x, y - 1, z);\n      if (here !== \"air\" && here !== \"short_grass\" && here !== \"grass\") continue;\n      if (!below || /air|water|lava/.test(below)) continue;\n      try { await api.place(x, y, z); } catch (e) { continue; }\n      if (api.blockAt(x, y, z) === \"crafting_table\") { table = [x, y, z]; break; }\n    }\n    if (!table) table = await findTable();\n    if (!table) return \"stuck\";\n  }\n  try { await api.goto(table[0], table[1], table[2], 2); } catch (e) {}\n  try { await api.craft(\"wooden_pickaxe\", 1, table); } catch (e) {}\n  return (inv().wooden_pickaxe || 0) >= 1 ? \"done\" : \"stuck\";\n}",
+      "version": 1,
+      "channels": [
+        "legs",
+        "aim",
+        "hands"
+      ],
+      "targets": "item",
+      "timeout_s": 120,
+      "origin": {
+        "session": "jeeve-2026-10-12T08-56-41-939Z",
+        "goal": "g-1: make a wooden pickaxe and put it in the chest",
+        "created_at": "2026-10-12T08:58:04.987Z"
+      },
+      "trial": {
+        "target": {
+          "item": "wooden_pickaxe",
+          "count": 1
+        },
+        "end": "done",
+        "ms": 2270
+      }
+    },
+    {
+      "kind": "behavior",
+      "name": "deposit_wooden_pickaxe_in_chest",
+      "description": "Walks to the nearest container of the target block type (e.g. chest), opens it, deposits every wooden_pickaxe from the inventory (nothing else), and closes it. Does not place a new container.",
+      "code": "async (api, target) => {\n  const item = \"wooden_pickaxe\";\n  const r = await api.scan({ match: target.name || \"chest\", radius: 16 });\n  if (!r.total) return \"none_found\";\n  const me = api.self().pos;\n  let cands = [];\n  for (const c of r.clusters) for (const p of (c.positions || [c.nearest])) cands.push(p);\n  cands.sort((a, b) => Math.hypot(a[0]-me[0], a[1]-me[1], a[2]-me[2]) - Math.hypot(b[0]-me[0], b[1]-me[1], b[2]-me[2]));\n  for (const p of cands.slice(0, 4)) {\n    try { await api.goto(p[0], p[1], p[2], 2); } catch (e) { continue; }\n    const d = api.self().pos;\n    if (Math.hypot(p[0]+0.5-d[0], p[1]+0.5-(d[1]+1.6), p[2]+0.5-d[2]) > 4.5) continue;\n    if (!(api.inventory()[item] > 0)) return \"done\";\n    try {\n      await api.open(p[0], p[1], p[2]);\n    } catch (e) { continue; }\n    try { await api.deposit(item); } catch (e) {}\n    await api.wait(2);\n    try { await api.close(); } catch (e) {}\n    await api.wait(2);\n    if (!(api.inventory()[item] > 0)) return \"done\";\n  }\n  return (api.inventory()[item] > 0) ? \"stuck\" : \"done\";\n}",
+      "version": 1,
+      "channels": [
+        "legs",
+        "aim",
+        "hands"
+      ],
+      "targets": "block",
+      "timeout_s": 40,
+      "origin": {
+        "session": "jeeve-2026-10-12T08-56-41-939Z",
+        "goal": "g-1: make a wooden pickaxe and put it in the chest",
+        "created_at": "2026-10-12T08:58:24.757Z"
+      },
+      "trial": {
+        "target": {
+          "block": "chest",
+          "count": 1
+        },
+        "end": "done",
+        "ms": 1063
+      }
+    },
+    {
+      "kind": "check",
+      "name": "has_wooden_pickaxe",
+      "description": "Bot holds at least one wooden pickaxe",
+      "code": "(s) => count(s, \"wooden_pickaxe\") >= 1",
+      "version": 1,
+      "origin": {
+        "session": "jeeve-2026-10-12T08-56-41-939Z",
+        "goal": "g-1: make a wooden pickaxe and put it in the chest",
+        "created_at": "2026-10-12T08:57:36.082Z"
+      },
+      "trial": {
+        "states": 31,
+        "trues": 0,
+        "errors": 0,
+        "maxMs": 0.447
+      }
+    },
+    {
+      "kind": "check",
+      "name": "pickaxe_deposited",
+      "description": "No wooden_pickaxe in inventory and bot within 4 blocks of a seen chest",
+      "code": "(s) => { const c = (s.blocks[\"chest\"]||[]); return !(s.inventory[\"wooden_pickaxe\"]>0) && c.length>0 && dist(s.self.pos, c[0]) <= 4; }",
+      "version": 2,
+      "origin": {
+        "session": "jeeve-2026-10-12T09-02-29-929Z",
+        "goal": "g-3: put the wooden pickaxe in the chest",
+        "created_at": "2026-10-12T09:04:12.537Z"
+      },
+      "trial": {
+        "states": 31,
+        "trues": 0,
+        "errors": 0,
+        "maxMs": 0.202
+      }
+    }
+  ]
+}
