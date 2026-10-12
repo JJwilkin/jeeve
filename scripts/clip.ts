@@ -15,7 +15,7 @@ import { Vec3 } from 'vec3'
 import { startAgent } from '../src/main.ts'
 import { MODEL } from '../src/system2.ts'
 import { beats, parse, type Beat, type Row } from '../viz/src/timeline.ts'
-import { canopy, CANOPY, guard, GUARD, orchard, ORCHARD, workshop, WORKSHOP } from './scenes.ts'
+import { AREA, build, cameraFor, canopy, CANOPY, guardScene, orchardScene, rng, workshopScene, type Scene } from './scenes.ts'
 import { PORT, startServer } from './server.ts'
 
 type Xyz = [number, number, number]
@@ -28,13 +28,23 @@ type Scenario = {
   setup: (command: (c: string) => void) => void, camera: { at: Xyz, facing: Xyz }, view: { min: Xyz, max: Xyz },
   instructions: string[], timeoutMs: number, during?: (ctx: Ctx) => Promise<void>, verify: (ctx: Ctx) => Promise<{ pass: boolean, detail: string }>
 }
+const SEED = Number(process.env.JEEVE_SEED ?? Date.now() % 1_000_000)
+const GUARD_WAVE_MS = 25_000
+// A scenario from a generated scene: setup builds it, the camera and the recorded box frame it.
+function fromScene (scene: Scene, o: Pick<Scenario, 'timeoutMs' | 'verify' | 'during'> & { setup?: (command: (c: string) => void) => void }): Scenario {
+  return {
+    setup: command => { build(command, scene); o.setup?.(command) },
+    camera: cameraFor(scene), view: { min: AREA.min, max: AREA.max },
+    instructions: scene.instructions, timeoutMs: o.timeoutMs, during: o.during, verify: o.verify
+  }
+}
 // Blocks matching re in a box, counted by Josh (who sees everything: he's the referee, not the agent).
-const countIn = (josh: Bot, re: RegExp, min: Xyz, max: Xyz) => {
+const countIn = (josh: Bot, re: RegExp, min: readonly number[], max: readonly number[]) => {
   let n = 0
   for (let x = min[0]; x <= max[0]; x++) for (let y = min[1]; y <= max[1]; y++) for (let z = min[2]; z <= max[2]; z++) if (re.test(josh.blockAt(new Vec3(x, y, z))?.name ?? '')) n++
   return n
 }
-const treeLeft = (josh: Bot, min: Xyz, max: Xyz) => { const n = countIn(josh, /_(log|leaves)$/, min, max); return { pass: n === 0, detail: `${n} logs and leaves left` } }
+const treeLeft = (josh: Bot, min: readonly number[], max: readonly number[]) => { const n = countIn(josh, /_(log|leaves)$/, min, max); return { pass: n === 0, detail: `${n} logs and leaves left` } }
 const SCENARIOS: Record<string, Scenario> = {
   // "It wrote itself a skill": Jeeve can't reach the leaves, 2A asks for a skill, 2B writes and trials a pillaring
   // behavior, and Jeeve climbs and clears them. A wide shot from the south-west takes in Josh, Jeeve and the canopy.
@@ -46,52 +56,44 @@ const SCENARIOS: Record<string, Scenario> = {
     timeoutMs: 10 * 60_000,
     verify: async ({ josh }) => treeLeft(josh, [CANOPY.x - 2, -61, CANOPY.z - 2], [CANOPY.x + 2, -49, CANOPY.z + 2])
   },
-  // "It learns a skill, then uses it": the skill is built on the first tree, then Jev picks it for the other three.
-  // The camera stands back south of the row to take in all four.
-  orchard: {
-    setup: command => { orchard(command); command('give Jeeve oak_log 32') },
-    camera: { at: [39, -52, 6], facing: [39, -56, -12] },
-    view: { min: [22, -61, -20], max: [56, -36, -4] },
-    instructions: ORCHARD.instructions,
-    timeoutMs: 10 * 60_000,
-    verify: async ({ josh }) => treeLeft(josh, [27, -61, -15], [51, -49, -9])
-  },
-  // A chain: logs, a crafting table, a pickaxe, the chest. Two small trees in reach.
-  workshop: {
-    setup: command => workshop(command),
-    camera: { at: [22, -54, -1], facing: [31, -58, -12] },
-    view: { min: [18, -61, -24], max: [44, -40, 0] },
-    instructions: [WORKSHOP.instruction],
+  // Randomized per run (scripts/scenes.ts, seeded by JEEVE_SEED or the clock; the seed is in the results row).
+  // orchard: 3–5 canopy trees (oak or birch, trunks 5–7): learn a skill on the nearest, use it on the rest.
+  orchard: fromScene(orchardScene(SEED), { timeoutMs: 10 * 60_000, verify: async ({ josh }) => treeLeft(josh, AREA.min, AREA.max) }),
+  // workshop: 2–3 small trees and a chest at random spots: logs, a crafting table, a pickaxe, the chest.
+  workshop: fromScene(workshopScene(SEED), {
     timeoutMs: 10 * 60_000,
     verify: async ({ josh }) => {
-      await josh.lookAt(new Vec3(...WORKSHOP.chest).offset(0.5, 0.5, 0.5))
-      const chest = await josh.openContainer(josh.blockAt(new Vec3(...WORKSHOP.chest))!)
+      const at = new Vec3(...workshopScene(SEED).chest!)
+      await josh.lookAt(at.offset(0.5, 0.5, 0.5))
+      const chest = await josh.openContainer(josh.blockAt(at)!)
       const n = chest.containerItems().filter(i => i.name === 'wooden_pickaxe').length
       chest.close()
       return { pass: n > 0, detail: `${n} wooden pickaxe in the chest` }
     }
-  },
-  // Guard duty: an open-ended goal for a fixed time, zombie waves near Josh while he moves.
-  guard: {
-    setup: command => guard(command),
-    camera: { at: [31, -51, 4], facing: [31, -58, -12] },
-    view: { min: [14, -61, -28], max: [48, -44, 4] },
-    instructions: [GUARD.instruction],
-    timeoutMs: GUARD.waves * GUARD.waveEveryMs + 20_000,
-    during: async ({ josh, command, done }) => {
+  }),
+  // guard: at night, 3–5 waves of two zombies near Josh while he moves between four spots.
+  guard: fromScene(guardScene(SEED), {
+    timeoutMs: guardScene(SEED).waves * GUARD_WAVE_MS + 20_000,
+    setup: command => {
+      command('time set midnight')
+      command('gamemode survival Josh')
+      command('effect give Josh resistance 600 2 true')
+    },
+    during: async ({ command, done }) => {
+      const r = rng(SEED + 1)
+      const waves = guardScene(SEED).waves
       for (let i = 0; !done(); i++) {
-        if (i % 2 === 0 && i / 2 < GUARD.waves) for (const dx of [-6, 6]) command(`execute at Josh run summon zombie ~${dx} ~ ~4`)
-        await sleep(GUARD.waveEveryMs / 2)
-        command(`tp Josh ${GUARD.spots[(i + 1) % GUARD.spots.length].join(' ')}`)
+        if (i % 2 === 0 && i / 2 < waves) for (const dx of [-6, 6]) command(`execute at Josh run summon zombie ~${dx} ~ ~${Math.round(r() * 8) - 4}`)
+        await sleep(GUARD_WAVE_MS / 2)
+        command(`tp Josh ${24 + Math.round(r() * 16)} -60 ${-20 + Math.round(r() * 14)}`)
       }
-      void josh
     },
     verify: async ({ josh, agent }) => {
       const zombies = Object.values(josh.entities).filter(e => e.name === 'zombie').length
       const ok = zombies === 0 && josh.health > 0 && agent.bot.health > 0 && !joshDied && !jeeveDied
       return { pass: ok, detail: `${zombies} zombies left, Josh ${josh.health.toFixed(0)} HP (lost ${joshLost.toFixed(0)}), Jeeve ${agent.bot.health.toFixed(0)} HP${joshDied ? ', Josh died' : ''}${jeeveDied ? ', Jeeve died' : ''}` }
     }
-  }
+  })
 }
 let joshDied = false
 let jeeveDied = false
@@ -328,7 +330,7 @@ const result = {
   confirms: rows.filter(r => r.kind === 'event' && r.name === 'confirm').length,
   deaths: rows.filter(r => r.kind === 'event' && r.name === 'death').length,
   commit,
-  session: basename(traceFile, '.jsonl'), dir
+  seed: SEED, session: basename(traceFile, '.jsonl'), dir
 }
 mkdirSync('bench', { recursive: true })
 appendFileSync('bench/results.jsonl', JSON.stringify(result) + '\n')
