@@ -135,7 +135,7 @@ export function makeEgocentric (params: { entity_cap: number, radius: number, bl
 
 // Compact raw snapshot logged with every decision, so a new encoder can be replayed on old states.
 // It is also the input to modules System 2 writes (src/modules.ts), so keep it plain JSON.
-// Blocks: each notable type's nearest 8 positions (src/world.ts). A common type (more than 64 in the 17³ cube)
+// Blocks: every position of each notable type, nearest first (src/world.ts). A common type (more than 64 in the 17³ cube)
 // is absent, so a missing name doesn't mean none; ask world.scan for that.
 export function rawSnapshot (bot: Bot, radius = 32) {
   const me = bot.entity
@@ -147,7 +147,7 @@ export function rawSnapshot (bot: Bot, radius = 32) {
       held: bot.heldItem?.name ?? null, below: bot.blockAt?.(me.position.offset(0, -1, 0))?.name ?? null
     },
     inventory: bot.inventory ? inventoryCounts(bot) : {},
-    blocks: Object.fromEntries(notableBlocks(bot).slice(0, 12).map(n => [n.name, n.positions.slice(0, 8)])),
+    blocks: Object.fromEntries(notableBlocks(bot).slice(0, 12).map(n => [n.name, n.positions])),
     world: { time_of_day: bot.time?.timeOfDay ?? null, is_day: bot.time?.isDay ?? null, raining: bot.isRaining ?? null },
     entities: Object.values(bot.entities)
       .filter(e => e !== me && e.position.distanceTo(me.position) <= radius)

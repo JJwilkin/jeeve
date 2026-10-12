@@ -276,7 +276,8 @@ export async function startAgent (opts: AgentOptions) {
       perceive: (tool, input) => perceive(tool, input),
       sql: judgeval ? q => judgeval.sql(q) : undefined,
       schema,
-      effort: trigger => trigger.includes('instruction') ? 'medium' : 'low'
+      // JEEVE_SYSTEM2_EFFORT sets every call's effort (e.g. low, to make 2A answer instructions faster).
+      effort: trigger => (process.env.JEEVE_SYSTEM2_EFFORT as 'low' | 'medium' | 'high' | undefined) ?? (trigger.includes('instruction') ? 'medium' : 'low')
     })
     : null
   type Trigger = { reason: string, detail: unknown, goal: string }

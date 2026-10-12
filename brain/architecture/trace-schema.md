@@ -61,7 +61,7 @@ All custom attributes use the `jeeve.*` prefix.
 **Every `decide` call keeps its full state.** The many `keep_current` calls are the evidence for telling a bad choice from a broken behavior ([[behaviors-and-guards]]). `jeeve.decide.changed` lets queries skip them.
 
 **The raw snapshot is for replay** ([[system-1]]):
-- **What's in it:** entities, inventory, the bot's own status, the event window, and notable blocks with positions (nearest 8 per type), as JSON in `jeeve.decide.raw_state`.
+- **What's in it:** entities, inventory, the bot's own status, the event window, and notable blocks with positions (every position of each rare type, nearest first; nearest 8 until 2026-10-12), as JSON in `jeeve.decide.raw_state`.
 - ~~**A 16³ block cube, logged only when it changes.**~~ *Superseded by [[perception]]:* notable blocks with positions (~1 KB) instead of the full cube (~5k blocks). Add the cube when a replayed encoder needs terrain.
 - **Option order is part of the input,** because order changes Jev's answers ([[jev-measurements]]).
 
