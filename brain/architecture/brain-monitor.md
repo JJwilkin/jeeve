@@ -63,6 +63,14 @@ Everything visual lives in `viz/`, its own package, so the agent's runtime takes
 
 `--no-record` skips OBS and renders the panels over a "no footage" box. In the render, the footage is cut into the same segments as the speed-up map: each segment is an `OffthreadVideo` with its own `trimBefore` and `playbackRate`, so the game and the panels stay frame-synced through every speed-up.
 
+**Client-look footage without a client** (2026-10-12): `node viz/src/world-video.ts clips/<dir>` draws the recorded world (`world.jsonl`) with [prismarine-viewer](https://github.com/PrismarineJS/prismarine-viewer): real block models, textures, and mob models with walk cycles.
+- It renders headless (node-canvas-webgl) to `world.mp4` at 30 fps in trace time, then points `clip.json`'s `footage` at it, so the clip cuts and speeds it up exactly like OBS footage.
+- It takes about 26 s for a 166 s run.
+- Both packages are pinned to GitHub commits in `viz/package.json`. Master supports 26.1, while npm's 1.33.0 stops at 1.21.4. `npm install` builds the textures, which takes about 6 min. No Mojang assets are committed.
+- Around the recorded box it adds a plains biome (without it, grass and oak leaves render brown), a grass apron and dirt underneath, plus a sky colour and fog.
+- Name tags are off: the viewer draws them as small black text.
+- Without `world.mp4`, clips fall back to the flat-colour three.js scene (`viz/src/WorldScene.tsx`).
+
 ## First clips (2026-10-12)
 - **Without footage** (`--no-record`): `clips/canopy-2026-10-12T05-13-52-548Z/`. 2B's first trial got `stuck`, its second passed. The 210 s run renders to 104 s.
 - **Recorded from Joshua's client** (OBS 32.2, window capture, `JEEVE_CAMERA=JoshBGosh321`): `clips/canopy-2026-10-12T05-33-04-716Z/`. 2B's `fell_whole_tree@1` failed its first trial (`none_found`) and passed its second, and the goal completed after 168 s. The panels and footage stay in sync through the speed-ups; the 173 s run renders to 86 s.

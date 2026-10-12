@@ -92,7 +92,8 @@ for (let t = clip.start, n = 0; t <= clip.end; t = clip.start + ++n * frameMs) {
   for (const e of here) {
     if (!meshes[e.id]) {
       const kind = registry.entitiesByName[e.name]
-      viewer.updateEntity({ id: e.id, name: e.name, username: e.username, width: kind?.width ?? 0.6, height: kind?.height ?? 1.8, pos: new Vec3(e.pos[0], e.pos[1], e.pos[2]) })
+      // No username: the viewer's name tag is small black text that reads as a smudge at clip size.
+      viewer.updateEntity({ id: e.id, name: e.name, width: kind?.width ?? 0.6, height: kind?.height ?? 1.8, pos: new Vec3(e.pos[0], e.pos[1], e.pos[2]) })
     }
     const mesh = meshes[e.id]
     if (!mesh) continue

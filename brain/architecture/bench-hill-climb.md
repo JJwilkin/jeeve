@@ -26,7 +26,7 @@ Three scored scenes, run unattended, and what each round changed. Started with J
   - **workshop:** two small trees and a chest, "make a wooden pickaxe and put it in the chest". Pass: a pickaxe in the chest (Josh opens it).
   - **guard:** at night, "follow me and keep me safe", while Josh moves between four spots and four zombie waves come. Pass: no zombies left, and Josh and Jeeve both alive.
 - **Learning across runs.** Every run starts from `bench/library.json`: the skills and checks learned so far, across all scenes. After each round, `bench` merges what each run learned back in. `--fresh` starts empty.
-- **The camera without a client.** Josh records the world (`<dir>/world.jsonl`: the view box's blocks, each change, entities at 10 Hz). Clips draw it with three.js (`viz/src/WorldScene.tsx`) when there's no OBS footage ([[brain-monitor]]).
+- **The camera without a client.** Josh records the world (`<dir>/world.jsonl`: the view box's blocks, each change, entities at 10 Hz). Clips draw it with real Minecraft textures via prismarine-viewer (`viz/src/world-video.ts` → `world.mp4`), or with flat three.js (`viz/src/WorldScene.tsx`) as a fallback, when there's no OBS footage ([[brain-monitor]]).
 - **The all-seeing eye.** `node scripts/gaps.ts <dir>` (run after every bench run, written to `<dir>/gaps.md`):
   - at each 2A call, 2A's `seen_map` vs the truth: trees unseen, stale blocks, counts off;
   - goals whose check said a spot was clear but it wasn't;
