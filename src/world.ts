@@ -100,7 +100,8 @@ export async function reachable (bot: Bot, p: Pos, timeoutMs = 1000) {
 // observe() runs every 250 ms. Each block within SEEN.radius that has an empty neighbour and that a ray from the
 // eyes reaches is remembered with when it was seen; a remembered block whose spot the bot now sees empty, or as
 // something else, is updated. Blocks out of sight stay as last seen: what Jeeve believes, not what the server says.
-export const SEEN = { radius: 8, far: 24, down: 6, up: 16, common: 512, keepWithin: 48, warnMs: 60 }
+// keepWithin: how far from the bot remembered blocks are kept once the memory is large.
+export const SEEN = { radius: 8, far: 24, down: 6, up: 16, common: 512, keepWithin: 96, warnMs: 60 }
 type Seen = { name: string, pos: Pos, t: number }
 const memories = new WeakMap<Bot, Map<string, Seen>>()
 const memory = (bot: Bot) => { let m = memories.get(bot); if (!m) memories.set(bot, m = new Map()); return m }
@@ -194,7 +195,8 @@ export function seenTypes (bot: Bot, radius: number): Map<string, Pos[]> {
 // Ground is told by shape, not by name or count: a type with most of its blocks on one height level over a wide
 // area (a floor of grass, sand or stone). A count cutoff alone kept the partly seen grass floor of the orchard, and
 // it swallowed every tree that touched it.
-export const MAP_LIMITS = { radius: 32, common: 512, clusters: 12, groundMin: 48, groundShare: 0.8 }
+// radius 64: a map of 32 around the bot dropped a tree it had walked past by the next 2A call (forage bench).
+export const MAP_LIMITS = { radius: 64, common: 2048, clusters: 20, groundMin: 48, groundShare: 0.8 }
 const isGround = (ps: Pos[]) => {
   if (ps.length < MAP_LIMITS.groundMin) return false
   const byY = new Map<number, number>()
