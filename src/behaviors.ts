@@ -145,11 +145,12 @@ export const LOOK_AROUND: Spec = {
   channels: ['legs', 'aim'],
   targets: 'block',
   describe: () => "Look around the goal's place",
-  start (bot, target: { place: Xyz }, emit) {
+  start (bot, target: { place: Xyz, radius?: number }, emit) {
     const [x, y, z] = target.place
+    const r = target.radius ?? 4
     let stopped = false
     const here = bot.entity.position
-    const spots = [[4, 0], [0, 4], [-4, 0], [0, -4]].map(([dx, dz]) => [x + dx, z + dz])
+    const spots = [[r, 0], [0, r], [-r, 0], [0, -r]].map(([dx, dz]) => [x + dx, z + dz])
       .sort((a, b) => Math.hypot(a[0] - here.x, a[1] - here.z) - Math.hypot(b[0] - here.x, b[1] - here.z))
     const arrive = () => new Promise<void>(resolve => {
       const timer = setTimeout(done, 6000)

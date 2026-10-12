@@ -158,6 +158,17 @@ export async function startAgent (opts: AgentOptions) {
     startStep(root)
   }
 
+  // ---- survey: 2A's search tool. Jeeve walks a loop around where it stands, looking, and 2A gets the updated map. ----
+  // From where it stands a view is occluded (a row of trees hides all but the first, orchard bench); moving is how it
+  // finds out what else is there.
+  let surveyed: (() => void) | null = null
+  const survey = () => new Promise<unknown>(resolve => {
+    if (trial || confirming || surveyed) return resolve({ error: 'the body is busy (a trial, a look or another survey)' })
+    const me = bot.entity.position.floored()
+    surveyed = () => { surveyed = null; resolve({ seen_map: seenMap(bot) }) }
+    channels.set('look_around:survey', 'look_around', { place: [me.x, me.y, me.z] as Pos, radius: 6 } as never, 'survey', { spec: LOOK_AROUND, pinned: true })
+  })
+
   // ---- confirm before done: a check that reads the world passed; look around the place, then judge again ----
   // The check re-runs on the next tick over what the look added to the seen memory. A trial holds the body, so the
   // look waits until it ends.
@@ -202,6 +213,7 @@ export async function startAgent (opts: AgentOptions) {
       recorder.endBehavior(slot.runId, reason, slot.run.detail?.())
       if ((reason === 'none_found' || reason === 'stuck') && !slot.pinned) failedAt.set(optionTarget(slot.key), Date.now())
       if (slot.key === 'look_around:confirm') return endConfirm()
+      if (slot.key === 'look_around:survey') return surveyed?.()
       if (slot.pinned) return finishTrial(reason, slot.run.detail?.() as RunDetail | undefined) // only trials are pinned
       // An authored behavior that keeps failing (its own error or time limit) is disabled, as checks are.
       const m = modules.get(slot.behavior)
@@ -345,7 +357,10 @@ export async function startAgent (opts: AgentOptions) {
     const t0 = performance.now()
     let out: unknown
     try {
-      out = tool === 'scan' ? scan(bot, input as Parameters<typeof scan>[1]) : tool === 'reachable' ? await reachable(bot, input.position as Pos) : { error: `unknown tool ${tool}` }
+      out = tool === 'scan' ? scan(bot, input as Parameters<typeof scan>[1])
+        : tool === 'reachable' ? await reachable(bot, input.position as Pos)
+          : tool === 'survey' ? await survey()
+            : { error: `unknown tool ${tool}` }
     } catch (err) { out = { error: String(err) } }
     recorder.record('perceive', {
       parent,

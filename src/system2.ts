@@ -127,6 +127,11 @@ const PERCEPTION: Anthropic.Tool[] = [
     }
   },
   {
+    name: 'survey',
+    description: "Walk a short loop around where you stand (about 6 blocks out), looking, and get back the updated seen_map. A view from one spot is occluded (the first tree in a row hides the rest), so use it before you plan when the instruction is about things seen_map doesn't show, or might be hiding. Takes about 10-20 s; the fast model's legs and aim pause meanwhile.",
+    input_schema: { type: 'object', additionalProperties: false, properties: {} }
+  },
+  {
     name: 'reachable',
     description: 'Can you walk to where a block is within arm\'s reach (about 4.5 blocks from your eyes), using the same pathfinder as collect: no placing blocks, and no breaking anything but logs and leaves? Judged on the world as it is now: a block behind others of the same tree may become reachable once those are broken. status noPath means no path stays within 16 blocks of you and the block; timeout means the search ran out of time (unknown). Absolute position.',
     input_schema: {
@@ -136,7 +141,7 @@ const PERCEPTION: Anthropic.Tool[] = [
   }
 ]
 
-const PERCEIVE = `You can look at the world with scan and reachable. Your context has seen_map: everything the bot has seen within 32 blocks, as clusters (a tree is one cluster of logs and leaves) with exact counts, names, bounds and heights; terrain is left out. It's what the bot remembers seeing, line of sight only, so it can be out of date for places it hasn't looked at lately. Use it to keep the whole scene in mind (which trees are left, what's half done). Look with scan before you set a count or a check that depends on blocks it doesn't show, or before you judge whether something can be reached. Each tool call costs a turn of a few seconds, so make every look you need in the same turn (several tool calls at once), then decide.`
+const PERCEIVE = `You can look at the world with scan and reachable. Your context has seen_map: everything the bot has seen within 32 blocks, as clusters (a tree is one cluster of logs and leaves) with exact counts, names, bounds and heights; terrain is left out. It's what the bot remembers seeing, line of sight only, so it can be out of date for places it hasn't looked at lately. Use it to keep the whole scene in mind (which trees are left, what's half done). If what the instruction is about may be out of view, call survey to walk around and look first. Look with scan before you set a count or a check that depends on blocks it doesn't show, or before you judge whether something can be reached. Each tool call costs a turn of a few seconds, so make every look you need in the same turn (several tool calls at once), then decide.`
 
 // Its own tool, not a submit_decision field: one more strict object makes the grammar too large for the API.
 const REQUEST_CAPABILITY: Anthropic.Tool = {

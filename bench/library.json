@@ -66,19 +66,19 @@
     {
       "kind": "check",
       "name": "pickaxe_deposited",
-      "description": "Bot is next to a seen chest and no longer carries a wooden pickaxe (it was crafted in the previous step, so it went into the chest).",
-      "code": "(s) => { const c = (s.blocks && s.blocks.chest) || []; if (c.length === 0) return false; return dist(s.self.pos, c[0]) <= 4 && count(s, \"wooden_pickaxe\") === 0; }",
-      "version": 1,
+      "description": "Bot within 6 blocks of a seen chest and carries no wooden pickaxe.",
+      "code": "(s) => { const c = (s.blocks.chest||[]); const near = c.some(p => dist(p, s.self.pos) <= 6); return near && !((s.inventory.wooden_pickaxe||0) > 0); }",
+      "version": 2,
       "origin": {
-        "session": "jeeve-2026-10-12T08-22-08-867Z",
-        "goal": "g-1: make a wooden pickaxe and put it in the chest",
-        "created_at": "2026-10-12T08:22:51.058Z"
+        "session": "jeeve-2026-10-12T08-39-53-454Z",
+        "goal": "g-3: put the wooden pickaxe in the chest",
+        "created_at": "2026-10-12T08:41:04.693Z"
       },
       "trial": {
         "states": 31,
-        "trues": 11,
+        "trues": 31,
         "errors": 0,
-        "maxMs": 0.135
+        "maxMs": 0.145
       }
     },
     {
