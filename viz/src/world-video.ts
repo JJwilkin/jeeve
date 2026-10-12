@@ -5,16 +5,32 @@
 import { spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative } from 'node:path'
 import { makeWorld, parseWorld, type WorldRow } from './world.ts'
 
 const require = createRequire(import.meta.url)
 const viewerRequire = createRequire(require.resolve('prismarine-viewer'))
 const THREE = viewerRequire('three') // the viewer pins its own three (0.128), and reads it from the global
 Object.assign(globalThis, { THREE, Worker: require('node:worker_threads').Worker })
-const { createCanvas } = require('node-canvas-webgl/lib')
+const { createCanvas, loadImage } = require('node-canvas-webgl/lib')
 const { Viewer, WorldView } = require('prismarine-viewer').viewer
 const { Vec3 } = viewerRequire('vec3')
+
+// The viewer's zombie and husk models render as a crumpled head. Their skins use the player layout, so they're drawn
+// as players with arms out. The 64×64 files leave the left limbs blank; cropped to the old 64×32 layout, the viewer
+// mirrors the right limbs over them.
+// Skin paths are joined onto the viewer's public/, so the cropped file is named relative to it.
+const PUBLIC = join(dirname(require.resolve('prismarine-viewer')), 'public')
+const SKINS: Record<string, string> = {}
+for (const name of ['zombie', 'husk']) {
+  const image = await loadImage(join(PUBLIC, `textures/1.16.4/entity/zombie/${name}.png`))
+  const legacy = createCanvas(64, 32)
+  legacy.getContext('2d').drawImage(image, 0, 0)
+  const file = join(tmpdir(), `jeeve-${name}-skin.png`)
+  writeFileSync(file, legacy.toBuffer('image/png'))
+  SKINS[name] = relative(PUBLIC, file)
+}
 
 const VERSION = '26.1'
 const FPS = 30
@@ -93,7 +109,9 @@ for (let t = clip.start, n = 0; t <= clip.end; t = clip.start + ++n * frameMs) {
     if (!meshes[e.id]) {
       const kind = registry.entitiesByName[e.name]
       // No username: the viewer's name tag is small black text that reads as a smudge at clip size.
-      viewer.updateEntity({ id: e.id, name: e.name, width: kind?.width ?? 0.6, height: kind?.height ?? 1.8, pos: new Vec3(e.pos[0], e.pos[1], e.pos[2]) })
+      const skin = SKINS[e.name]
+      viewer.updateEntity({ id: e.id, name: skin ? 'player' : e.name, skin, width: kind?.width ?? 0.6, height: kind?.height ?? 1.8, pos: new Vec3(e.pos[0], e.pos[1], e.pos[2]) })
+      if (skin && meshes[e.id]?.walk) meshes[e.id].walk.zombieArms = true
     }
     const mesh = meshes[e.id]
     if (!mesh) continue
