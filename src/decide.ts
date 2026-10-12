@@ -104,6 +104,9 @@ export function makeDecider (ctx: DecideCtx) {
       if (!a) continue
       if (q.claims.some(c => claimed.has(c))) { applied[id] = 'overridden'; continue }
       if (q.claims.some(c => ctx.channels.slots[c]?.pinned && ctx.channels.slots[c]?.status === 'running')) { applied[id] = 'pinned'; continue } // a trial runs
+      // A whole-body behavior that's running is the body question's to change: a channel's own answer (walk the legs
+      // to the place) stopped a tree skill 9 times in one orchard run.
+      if (a.choice !== 'keep_current' && q.claims.some(c => { const s = ctx.channels.slots[c]; return s?.status === 'running' && s.channels.length > q.claims.length })) { applied[id] = 'held'; continue }
       const [status, act] = plan(ctx, q, a.choice, options[id][a.choice])
       applied[id] = status
       if (act) actions.push(act)

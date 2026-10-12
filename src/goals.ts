@@ -84,7 +84,8 @@ export function compile (spec: CheckSpec, goal: Pick<Goal, 'inventory' | 'place'
       case 'cleared': {
         const res = (spec.match ?? '*').split(',').map(m => glob(m.trim()))
         const r = spec.radius ?? 2
-        const near = (p: Pos, at: Pos) => Math.abs(p[0] - at[0]) <= r && Math.abs(p[2] - at[2]) <= r && p[1] >= at[1] - 1
+        // The whole column: a place at the canopy left the trunk below uncounted (orchard bench).
+        const near = (p: Pos, at: Pos) => Math.abs(p[0] - at[0]) <= r && Math.abs(p[2] - at[2]) <= r && Math.abs(p[1] - at[1]) <= 12
         return {
           desc: `no ${spec.match} left within ${r} of the goal's place`,
           test: (bot: Bot) => {
