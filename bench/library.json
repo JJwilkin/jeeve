@@ -134,6 +134,24 @@
         "errors": 0,
         "maxMs": 0.202
       }
+    },
+    {
+      "kind": "check",
+      "name": "birch_tree_43_cleared",
+      "description": "No birch_log/birch_leaves seen within 3 blocks horizontally of the trunk column x=43,z=-13 (y -61..-47), with the bot within 8 blocks of the trunk base",
+      "code": "(s) => { if (dist(s.self.pos, [43,-60,-13]) > 8) return false; if ((s.crowded||[]).some(n => n === 'birch_log' || n === 'birch_leaves')) return false; for (const n of ['birch_log','birch_leaves']) { const list = s.blocks[n] || []; for (const p of list) { if (Math.abs(p[0]-43) <= 3 && Math.abs(p[2]+13) <= 3 && p[1] >= -61 && p[1] <= -47) return false; } } return true; }",
+      "version": 1,
+      "origin": {
+        "session": "jeeve-2026-10-12T09-05-32-833Z",
+        "goal": "g-1: break the tree closest to you, leaves included. The leaves won't decay on their own",
+        "created_at": "2026-10-12T09:05:56.903Z"
+      },
+      "trial": {
+        "states": 24,
+        "trues": 2,
+        "errors": 0,
+        "maxMs": 0.156
+      }
     }
   ]
 }

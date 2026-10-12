@@ -74,9 +74,27 @@ export function guardScene (seed: number): Scene {
   return { trees: [], chest: null, waves: between(r, 3, 5), jeeve: [30, -60, -10], josh: [32, -60, -10], instructions: ['follow me and keep me safe'] }
 }
 
-// Build a scene: clear the area, plant the trees, place the chest, put the players in place.
-export function build (command: Command, scene: Scene, instructor = 'Josh') {
-  command(`fill ${AREA.min[0]} -60 ${AREA.min[2]} ${AREA.max[0]} ${AREA.max[1]} ${AREA.max[2]} air`)
+// Forage: small trees scattered 28–45 blocks from the start, beyond the far look (24): nothing is in sight, so the
+// task is search. Its own, wider area around the origin.
+export const FORAGE_AREA = { min: [-50, -61, -50] as Xyz, max: [50, -48, 50] as Xyz }
+export function forageScene (seed: number): Scene {
+  const r = rng(seed)
+  const trees: Tree[] = []
+  for (let tries = 0; trees.length < between(r, 6, 8) && tries < 500; tries++) {
+    const a = r() * Math.PI * 2, d = 28 + r() * 17
+    const x = Math.round(Math.cos(a) * d), z = Math.round(Math.sin(a) * d)
+    if (trees.some(t => Math.max(Math.abs(t.x - x), Math.abs(t.z - z)) < 6)) continue
+    trees.push({ x, z, wood: pick(r, ['oak', 'birch'] as const), trunk: between(r, 4, 5), canopy: false })
+  }
+  return { trees, chest: null, waves: 0, jeeve: [0, -60, 0], josh: [2, -60, 2], instructions: ['get me 16 logs'] }
+}
+
+// Build a scene: clear the area, plant the trees, place the chest, put the players in place. A fill holds at most
+// 32768 blocks, so a wide area is cleared in strips.
+export function build (command: Command, scene: Scene, instructor = 'Josh', area: { min: Xyz, max: Xyz } = AREA) {
+  const h = area.max[1] + 61, depth = area.max[2] - area.min[2] + 1
+  const step = Math.max(1, Math.floor(32768 / (h * depth)))
+  for (let x = area.min[0]; x <= area.max[0]; x += step) command(`fill ${x} -60 ${area.min[2]} ${Math.min(area.max[0], x + step - 1)} ${area.max[1]} ${area.max[2]} air`)
   for (const t of scene.trees) {
     const top = -60 + t.trunk - 1
     command(`fill ${t.x} -60 ${t.z} ${t.x} ${top} ${t.z} ${t.wood}_log`)

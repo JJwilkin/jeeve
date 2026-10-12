@@ -11,7 +11,7 @@ import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, r
 const flags = process.argv.slice(2).filter(a => a.startsWith('--'))
 const args = process.argv.slice(2).filter(a => !a.startsWith('--'))
 const rounds = Number(args[0] ?? 1)
-const scenarios = args.slice(1).length ? args.slice(1) : ['orchard', 'workshop', 'guard']
+const scenarios = args.slice(1).length ? args.slice(1) : ['orchard', 'workshop', 'guard', 'forage']
 const SHARED = 'bench/library.json'
 mkdirSync('bench', { recursive: true })
 if (flags.includes('--fresh') && existsSync(SHARED)) rmSync(SHARED)

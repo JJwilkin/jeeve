@@ -15,7 +15,7 @@ import { Vec3 } from 'vec3'
 import { startAgent } from '../src/main.ts'
 import { MODEL } from '../src/system2.ts'
 import { beats, parse, type Beat, type Row } from '../viz/src/timeline.ts'
-import { AREA, build, cameraFor, canopy, CANOPY, guardScene, orchardScene, rng, workshopScene, type Scene } from './scenes.ts'
+import { AREA, build, cameraFor, canopy, CANOPY, FORAGE_AREA, forageScene, guardScene, orchardScene, rng, workshopScene, type Scene } from './scenes.ts'
 import { PORT, startServer } from './server.ts'
 
 type Xyz = [number, number, number]
@@ -31,10 +31,11 @@ type Scenario = {
 const SEED = Number(process.env.JEEVE_SEED ?? Date.now() % 1_000_000)
 const GUARD_WAVE_MS = 25_000
 // A scenario from a generated scene: setup builds it, the camera and the recorded box frame it.
-function fromScene (scene: Scene, o: Pick<Scenario, 'timeoutMs' | 'verify' | 'during'> & { setup?: (command: (c: string) => void) => void }): Scenario {
+function fromScene (scene: Scene, o: Pick<Scenario, 'timeoutMs' | 'verify' | 'during'> & { setup?: (command: (c: string) => void) => void, area?: { min: Xyz, max: Xyz }, camera?: { at: Xyz, facing: Xyz } }): Scenario {
+  const area = o.area ?? AREA
   return {
-    setup: command => { build(command, scene); o.setup?.(command) },
-    camera: cameraFor(scene), view: { min: AREA.min, max: AREA.max },
+    setup: command => { build(command, scene, 'Josh', area); o.setup?.(command) },
+    camera: o.camera ?? cameraFor(scene), view: { min: area.min, max: area.max },
     instructions: scene.instructions, timeoutMs: o.timeoutMs, during: o.during, verify: o.verify
   }
 }
@@ -71,6 +72,14 @@ const SCENARIOS: Record<string, Scenario> = {
       const n = chest.containerItems().filter(i => i.name === 'wooden_pickaxe').length
       chest.close()
       return { pass: n > 0, detail: `${n} wooden pickaxe in the chest` }
+    }
+  }),
+  // forage: "get me 16 logs" with every tree beyond sight: search. Scored on what Jeeve holds.
+  forage: fromScene(forageScene(SEED), {
+    timeoutMs: 10 * 60_000, area: FORAGE_AREA, camera: { at: [0, -14, 62], facing: [0, -60, 0] },
+    verify: async ({ agent }) => {
+      const n = agent.bot.inventory.items().filter(i => i.name.endsWith('_log')).reduce((s, i) => s + i.count, 0)
+      return { pass: n >= 16, detail: `Jeeve holds ${n} logs` }
     }
   }),
   // guard: at night, 3–5 waves of two zombies near Josh while he moves between four spots.
