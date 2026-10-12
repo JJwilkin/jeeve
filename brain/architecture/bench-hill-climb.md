@@ -72,6 +72,12 @@ On layouts it hadn't seen, Jeeve learned in the first round and reused after. 2A
 24. **2A couldn't pick search directions from a list of cells** (forage: west four times; the trees it never saw were north and south). **Fix, frontier exploration:** the runtime computes `explored.frontier`, the nearest unexplored spot in each of 8 directions, and 2A plans steps to it.
 25. **A frontier ranked from the bot drifts.** Each step pushed the frontier outward, and a search went 300 blocks east while every tree was within 60 of the start (the recorder lost Jeeve past its box). **Fix:** the frontier is ranked from the task's origin (where the instruction came), so the search widens in rings around the start.
 
+26. **2A named skills by id** (`clear_tall_tree@2`, as the module list shows them), and program validation knows only bare names. Every program it set was refused, silently: one orchard run made 36 2A calls re-setting it. **Fix:** a version suffix is accepted anywhere a module is named, and a refused program goes back to 2A at once.
+27. **Each plan step started on the default program.** 2A set guidance on the step it was answering, and the next step didn't inherit it. **Fix:** while a plan runs, a program 2A sets belongs to the instruction's goal and carries across steps.
+28. **The player Jeeve guards was invisible as a victim** (guard: Josh hit every second for 30 s while Jev stayed on a zombie walking away). **Fix:** the protected player is treated like the bot. Their attackers are marked for Jev ("zombie (attacking Josh)"), count as threats for `hostile_near`, and wake Jev. Three hits in 5 s escalate `owner_hurt`, past the backoff.
+
+Also: e2e expectations updated for the new design: the built-in `cleared` check counts as "tests that none are left", and "hears done" waits for the look before done. 2A matches logs only unless leaves are asked for ("break this tree": natural leaves decay).
+
 ## Open
 - **Trials still consume materials** ([[orchestrator-and-builder]] → Open questions). Workshop round 1 burned its wood on failed trials.
 - **Idle time** is still large while the builder works or 2A thinks. Jev could do the parts of a plan it can already do meanwhile.
