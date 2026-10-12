@@ -376,6 +376,17 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
     await new Promise(res => setTimeout(res, 50))
     assert.equal(ended, false)
   }
+  // A run whose actions keep failing at once still yields to the event loop, so timers (its time limit, the
+  // heartbeat, guards) still run. Settling in microtasks starved them: a Sonnet-written craft loop froze the agent.
+  {
+    let ticked = false
+    const r = startBehavior('async (api) => { for (;;) { try { await api.wait(1) } catch (e) {} } }', null, {
+      reads: [], actions: ['wait'], read: () => null, act: async () => { throw new Error('no') }, end: () => {}
+    })
+    await new Promise(res => setTimeout(() => { ticked = true; res(null) }, 30))
+    r.cancel()
+    assert.ok(ticked)
+  }
   const shape = { kind: 'behavior' as const, name: 'pillar', description: 'pillar up', code: 'async (api, t) => "done"', channels: ['legs', 'aim', 'hands'], targets: 'block' as const, timeout_s: 30 }
   compileBehavior(shape)
   compileBehavior({ ...shape, channels: ['hands'] })

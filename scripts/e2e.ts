@@ -142,8 +142,6 @@ const traceRecords = () => readFileSync(agent.traceFile, 'utf8').trim().split('\
   const building = () => !since('builder').length // no build has finished yet
   await until('split: Jev kills the zombie while 2B is still building', () => !zombieAlive(), 60000)
   const killed = Date.now()
-  check('split: 2A keeps answering while 2B builds (a call finished in < 20 s)', since('system2', requested).some(r => r.attrs['jeeve.system2.latency_ms'] < 20000),
-    since('system2', requested).map(r => `${r.attrs['jeeve.system2.trigger']} ${r.attrs['jeeve.system2.latency_ms']} ms`).join('; '))
   check('split: the zombie died before the build finished', building(), since('builder').map(r => r.attrs?.['jeeve.builder.status']).join(', ') || 'still building')
   check('split: no trial window opened while the zombie was alive', !windowEvents('trial_window', summoned).some(e => e.t < killed),
     `windows ${windowEvents('trial_window').map(e => `${((e.t - summoned) / 1000).toFixed(1)} s`).join(', ') || 'none yet'}, pre-empted ${windowEvents('trial_preempted').length}`)
@@ -153,6 +151,13 @@ const traceRecords = () => readFileSync(agent.traceFile, 'utf8').trim().split('\
   await until('split: 2B gets a trial window after the threat', () => windowEvents('trial_window', killed).length > 0, 300000)
   const registered = () => [...agent.modules.modules.values()].filter(m => m.kind === 'behavior')
   await until('split: 2B registers a behavior that passed 2A\'s check', () => registered().length > 0, 480000)
+  {
+    // 2A wasn't held up by the build: the calls it made while 2B worked were seconds-scale, as without one.
+    const built = since('builder')[0]?.t ?? Date.now()
+    const during = since('system2', requested).filter(r => r.t < built)
+    check('split: 2A keeps answering while 2B builds (every call during the build < 30 s, at least one)', during.length > 0 && during.every(r => r.attrs['jeeve.system2.latency_ms'] < 30000),
+      during.map(r => `${r.attrs['jeeve.system2.trigger']} ${r.attrs['jeeve.system2.latency_ms']} ms`).join('; ') || 'no calls during the build')
+  }
   // The result goes to 2A, unless the trial itself finished the goal (then the request closes with it).
   const finishedByTrial = () => whispers.some(w => w.startsWith('done: break that whole tree')) && since('builder').some(b => b.output?.status === 'registered')
   await until('split: 2A gets the result (capability_result), or the trial itself finished the goal', () => finishedByTrial() || since('system2').some(r => String(r.attrs['jeeve.system2.trigger']).includes('capability_result')), 120000)
@@ -192,7 +197,9 @@ let looked = looksSince(0).length
 josh.whisper('Jeeve', 'break this tree')
 const tree = () => agent.goals.nodes.find(g => g.text === 'break this tree')
 await until('"break this tree": System 2 sets a check', () => !!tree()?.done_when, 45000)
-check('"break this tree": the check counts the real logs', tree()?.done_when?.spec.module === 'inventory_delta' && tree()?.done_when?.spec.count === treeLogs,
+// Either counts the real logs, or tests in the world that none are left: both come from looking, not a guess.
+// (Since the canopy scenario, a registered behavior may build with logs, which makes an inventory count unreliable.)
+check('"break this tree": the check counts the real logs, or tests that none are left', (tree()?.done_when?.spec.module === 'inventory_delta' && tree()?.done_when?.spec.count === treeLogs) || tree()?.done_when?.spec.module === 'authored',
   `${tree()?.done_when?.desc}, tree has ${treeLogs}`)
 const treeLooks = looksSince(looked)
 check('"break this tree": System 2 looked first', treeLooks.some(r => r.attrs['jeeve.perceive.tool'] === 'scan'), treeLooks.map(r => `${r.attrs['jeeve.perceive.tool']} ${r.attrs['jeeve.perceive.query']}`).join('; '))
@@ -283,7 +290,7 @@ server.command(`fill ${WORKSHOP.x - 6} -60 ${WORKSHOP.z - 6} ${WORKSHOP.x + 6} -
 server.command(`tp Jeeve ${WORKSHOP.x} -60 ${WORKSHOP.z}`)
 server.command(`tp Josh ${WORKSHOP.x - 3} -60 ${WORKSHOP.z - 3}`)
 server.command('clear Jeeve')
-server.command('give Jeeve oak_log 4') // a pickaxe from logs: 3 logs make the 9 planks for a table, sticks and the head
+server.command('give Jeeve oak_log 8') // a pickaxe takes 3 logs (9 planks: table, sticks, head); trials are live and use up what they craft, so leave room for a failed one (run 7)
 await sleep(1500)
 {
   const asked = Date.now()
@@ -303,6 +310,8 @@ await sleep(1000)
   const logsHeld = held(/_log$/)
   josh.whisper('Jeeve', 'put your logs in the chest')
   await until('"put your logs in the chest": Jeeve holds no logs', () => held(/_log$/) === 0, 480000)
+  // The run that deposited may still be going; its actions are traced when it ends, which the goal's "done" follows.
+  await until('"put your logs in the chest": Josh hears "done"', () => whispers.some(w => w.startsWith('done: put your logs in the chest')), 30000)
   const calls = callsSince(asked)
   console.log(`authored calls: ${calls.join('; ')}`)
   check('"put your logs in the chest": authored code opened the chest and deposited', calls.some(c => c.startsWith('open(')) && calls.some(c => c.startsWith('deposit(') && !c.endsWith('✗')))

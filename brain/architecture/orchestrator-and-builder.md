@@ -105,7 +105,7 @@ window (2A's)                         builder (its own trace; links → request)
 ```
 - **`request`** (a child of the window): `jeeve.request.id`, `jeeve.goal.id`, `jeeve.program.cites` (the `system2` span that made it). Input: the request.
 - **`builder`** (a root): `jeeve.request.id`, `.request.span_id`, `.request.trace_id`, `jeeve.goal.id`, `jeeve.builder.model`, `.status` (`registered`, `failed`, `cancelled`), `.trials`, `.latency_ms`. It has an OTel link to the request span. Input: the brief. Output: the result.
-- **AI SDK spans** come from `@ai-sdk/otel`'s `OpenTelemetry` integration on `Tracer.getOTELTracer()`, the path Luna uses. `enrichSpan` adds `judgment.session_id` and `jeeve.request.id` to each one. judgeval registers no OTel context manager, so `src/trace.ts` registers `AsyncLocalStorageContextManager`; without it, the AI SDK's spans found no parent.
+- **AI SDK spans** come from `@ai-sdk/otel`'s `OpenTelemetry` integration on `Tracer.getOTELTracer()`, the path Luna uses. `enrichSpan` adds `judgment.session_id` and `jeeve.request.id` to each one. judgeval's tracer takes a span's parent from its own context, not OTel's global one, so `build()` runs the loop inside `JudgmentTracerProvider.getInstance().withContext(…)`. In e2e run 1, without it, the AI SDK's spans reached Judgment, but outside the builder trace.
 - **`trial`** (a child of `builder`): `jeeve.request.id`, `jeeve.module.id`, `jeeve.behavior.run_id` (joins to the `behavior.<name>` span in the window trace), `jeeve.trial.end`, `.passed`, `.preempted`.
 
 ## Harness (decided 2026-10-11, see [[system-2a-2b]])
@@ -118,7 +118,7 @@ window (2A's)                         builder (its own trace; links → request)
 - **Luna later,** when its packages can be used from a public repo. Durable runs and a native waiting state replace the in-process promise that waits for a trial window. `build()`'s arguments and result stay the contract.
 
 ## Implementation (2026-10-11)
-- **`src/builder.ts`:** `build()`, the request, result and trial-report types, and 2B's prompt, which embeds `API_DOCS` from `src/behaviors.ts` (the action API as authored code sees it, shared with [[full-player-action-api]]).
+- **`src/builder.ts`:** `build()`, the request, result and trial-report types, and 2B's prompt, which embeds `API_DOC` from `src/behaviors.ts` (the full player action API, generated from its tables by [[full-player-action-api]]).
 - **`src/system2.ts`:** `request_capability` replaces `write_behavior`. 2A's prompt no longer carries the action API, so its cached prefix is smaller.
 - **`src/main.ts`:**
   - the request queue (`request`, `cancelRequest`, `dropStaleRequests`, `pumpRequests`);
@@ -127,11 +127,50 @@ window (2A's)                         builder (its own trace; links → request)
   - 2A's context lists the requests in flight and their state.
 - **`npm run check`** drives `build()` with the AI SDK's mock model: it trials until one passes, then stops.
 
-## First results
-*(filled in from the e2e runs below)*
+## First results (e2e, 2026-10-11)
+The e2e's canopy scenario now runs right after "collect 10 logs", so it's the first instruction that needs a new behavior (the scratch library starts empty). A zombie is summoned once 2A has requested a behavior. The craft and chest scenarios from [[full-player-action-api]] also go through 2A → 2B now.
+
+**Run 4 (E2E PASS, all 58 checks; 2B on Opus 5.5 at `high`). Runs 6 and 8 passed again after the fixes below (59 checks in run 8):**
+- **Canopy.**
+  - 2A first let Jev collect what it could, then requested `need: "break leaf blocks that are too high to reach from the ground … build up a pillar"`, with its own check that no leaves were left near the spot.
+  - "working on it" came 71 s after the instruction. The call that made the request took 21 s.
+  - While 2B wrote code, Jev killed the zombie in 11 s, and 2A answered two escalations in 3–6 s.
+  - No window opened while the zombie lived. The window opened 41 s after it died.
+  - `pillar_up_and_clear@1` passed its first trial, 61 s from request to registration.
+- **"craft a wooden pickaxe":** `targets: item`, with 2A's check that a wooden pickaxe is in the inventory. `craft_with_table@1` passed its first trial, 53 s.
+- **"put your logs in the chest":** `deposit_in_chest@1` passed its first trial, 15 s.
+- **In Judgment,** each builder trace links to its request span and holds `invoke_agent`, `step`, `chat claude-opus-5-5`, `execute_tool write_behavior` / `scan`, `perceive` and `trial` spans (6–22 per request, more with more trials).
+
+**Earlier runs found:**
+- **Run 1: leftover world state.** An old oak from earlier runs sat in range. Jev walked to it on the raw instruction, and 2A targeted it. The scenario now clears that area too.
+- **Run 1: a passing trial was reported as cancelled.** It finished the goal, the goal's completion dropped the request, and the abort cut off the result. Now `build()` waits for a running trial when cancelled.
+- **Run 1: the AI SDK spans weren't in the builder trace.** judgeval's tracer uses its own context; fixed with `withContext`.
+- **Run 2: a different, valid check.** With a registered behavior that builds with logs, 2A chose a "no logs left in the trunk" check for the next tree over an inventory count. The perception check now accepts either.
+- **Run 3: a test race.** The chest check read the action log before the run ended.
+- **Run 7: trials use up what they consume.** Opus's first craft attempt turned the test's 4 logs into planks, then got `stuck`. The next two trials had no wood. 2B stopped after 3 trials and said why. 2A failed the goal and asked Josh for logs or a nearby tree. That's the failure path working. The e2e now gives 8 logs, so one bad attempt doesn't end the scenario.
+- **Run S3 (Sonnet): a check with nothing to measure.** "2A keeps answering" ran the moment the zombie died, 6 s after the request, before anything had escalated. It now checks every 2A call during the build (all under 30 s, at least one).
+
+**Most trials pass on goal completion.** 2A sets the goal's `done_when` to the same kind of check as `pass_when`. So the goal often completes while the trial runs, and the trial passes as `goal_closed`. The result then never reaches 2A as `capability_result`, because the request closes with its goal. That's fine for M1. A behavior that works only on its trial target is still possible, and the library curation loop should catch it.
+
+**Opus 5.5 vs. Sonnet 5.5 for 2B** (same e2e, parallel runs, `JEEVE_BUILDER_MODEL`):
+
+| Request | Opus 5.5 (runs 3, 4, 6, 7, 8) | Sonnet 5.5 (runs S1, S3) |
+|---|---|---|
+| Canopy (pillar up and break) | 1 trial in four runs (61–162 s); 3 trials in run 8 (178 s) | 3 trials each: 218 s, 141 s |
+| Craft a wooden pickaxe | 1 trial in four runs (47–78 s). Run 7: failed after 3 trials, because the first trial used up the logs (see above) | S1: froze the agent (the sandbox bug below). S3: failed 4 trials, one spent on a `debug_probe` behavior. 2A read the `capability_result`, asked again, and the second request passed on its 4th trial (97 s) |
+| Logs into the chest | 1 trial in every run (14–18 s) | 1 trial, 8 s |
+
+**Opus stays the default:** 15 requests, 13 passing on the first trial. Sonnet needs more trials, and more live trials mean more time holding the body (and more materials used up). Sonnet's e2e failures outside 2B are the known defend-me weaknesses (a slime in S1, a death to the zombie in S3), not the builder's doing.
+
+**Two runtime bugs older than the split, found by these runs:**
+- **The sandbox could starve the event loop.** Sonnet's craft code recursed through recipes with crafts and walks that failed at once. Each entry into the realm was short, so the 20 ms limit never fired, but settling actions in microtasks never let a timer run, including the run's own time limit. The agent froze at 99% CPU for 20 minutes. Actions now settle with `setImmediate` ([[behaviors-and-guards]] → Sandbox).
+- **The bot could spawn unheard.** `startAgent` created the bot, then awaited judgeval's `discoverSchema()`. When staging was slow (runs 5 and S2), the spawn fired during the await, before any handler was registered, and both runs sat idle. Every await now happens before the bot is created.
 
 ## Open questions
+- **Trials aren't free.** A live trial consumes materials, food and tool durability, and a failed one can leave the next attempt with nothing (run 7). Should the trial gate also check that the inputs are still there, or should 2B be told the inventory each attempt starts with? Today 2B sees it only in the failed trial's evidence.
 - **The window gate's thresholds** (8 blocks, 5 s, 3 pre-emptions) are guesses until traces show how often windows are refused or pre-empted.
 - **A trial that keeps the body for minutes** (up to its 120 s limit) blocks Jev from the goal meanwhile. Should 2A be able to refuse windows for a goal that's time-critical?
 - **Two capabilities for one goal.** One request per goal is the rule. A goal that needs two would chain them: the second request after the first result.
-- **Model comparison for 2B:** Opus 5.5 vs. Sonnet 5.5 on the e2e canopy request (see First results).
+- **Model comparison for 2B:** two models over one run each is a small sample. Compare more runs, and other providers (the AI SDK makes that a config change), once the curation loop gives more requests to build.
+- **Results that skip 2A.** When a trial finishes the goal, 2A never sees `capability_result`, so it never writes guidance for the new behavior. That's fine while the goal is done, but the guidance proposal (`usage`) is lost. Keep it in the library entry?
+- **The gate's hostile test** uses Mineflayer's entity type. Damage attribution from the defend-me fixes (recent attackers) could replace it.

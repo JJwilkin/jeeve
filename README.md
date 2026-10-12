@@ -24,7 +24,7 @@ The first milestone runs end to end on a local server:
 - System 1 decides on Jev, over the seed behaviors and both guard layers;
 - System 2 on Claude turns instructions into goals with success checks and tunes System 1's program;
 - System 2 looks at the world with `scan` and `reachable` ([perception](brain/architecture/perception.md));
-- System 2 writes, trials and saves new behaviors when none fits, on an API with every player action Mineflayer has, e.g. pillaring to reach a canopy, crafting a pickaxe from logs, or filling a chest ([behaviors and guards](brain/architecture/behaviors-and-guards.md));
+- when no behavior fits, System 2 (the orchestrator, 2A) asks a builder (2B, on the Vercel AI SDK) for one, with a pass check of its own. 2B writes, trials and saves it on an API with every player action Mineflayer has (e.g. pillaring to reach a canopy, crafting a pickaxe from logs, filling a chest), while 2A keeps playing ([orchestrator and builder](brain/architecture/orchestrator-and-builder.md), [behaviors and guards](brain/architecture/behaviors-and-guards.md)). `JEEVE_BUILDER_MODEL` picks 2B's model;
 - every episode is traced to Judgment.
 
 See the [roadmap](brain/roadmap.md).

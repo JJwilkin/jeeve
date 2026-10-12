@@ -247,9 +247,11 @@ export function startBehavior (code: string, target: unknown, host: BehaviorHost
     if (id === 0) {
       try { return JSON.stringify({ v: host.read(name, parsed) ?? null }) } catch (err) { return JSON.stringify({ e: String((err as Error).message ?? err) }) }
     }
+    // Settled in a macrotask: code whose actions keep failing at once would otherwise loop in microtasks and
+    // starve every timer, its own time limit included (a builder-written craft loop froze the agent that way).
     Promise.resolve().then(() => host.act(name, parsed)).then(
-      v => enter(SETTLE, JSON.stringify([id, true, v ?? null])),
-      err => enter(SETTLE, JSON.stringify([id, false, String((err as Error)?.message ?? err)])))
+      v => setImmediate(() => enter(SETTLE, JSON.stringify([id, true, v ?? null]))),
+      err => setImmediate(() => enter(SETTLE, JSON.stringify([id, false, String((err as Error)?.message ?? err)]))))
     return undefined
   })
   enter(START, JSON.stringify(target))

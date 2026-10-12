@@ -43,7 +43,7 @@ The library isn't fixed. When System 2 finds a missing capability ("I need to ri
 5. **Version:** every behavior is versioned, so a trace shows which version ran.
 
 ### How it's built (2026-10-11)
-*Refined by [[orchestrator-and-builder]]:* the builder (System 2B) now writes and trials behaviors, at 2A's request. `pass_when` is required, and it's 2A's check, not the writer's. Trials wait for a window that a code gate grants when nothing threatens the bot. Below, "System 2 writes" means 2B, and "System 2 adds it to `allowed_behaviors`" means 2A. The API docs are `API_DOCS` in `src/behaviors.ts`.
+*Refined by [[orchestrator-and-builder]]:* the builder (System 2B) now writes and trials behaviors, at 2A's request. `pass_when` is required, and it's 2A's check, not the writer's. Trials wait for a window that a code gate grants when nothing threatens the bot. Below, "System 2 writes" means 2B, and "System 2 adds it to `allowed_behaviors`" means 2A. 2B's prompt embeds `API_DOC`, as System 2's did.
 
 Decided with Joshua while working on [[runtime-authored-behaviors]]. Code is in `src/behaviors.ts` (`authoredSpec`, the action API), `src/modules.ts` (sandbox, library) and `src/main.ts` (trials).
 
@@ -70,6 +70,7 @@ Decided with Joshua while working on [[runtime-authored-behaviors]]. Code is in 
 **Sandbox: `node:vm` with a string-only bridge.**
 - **A fresh realm per run.** The realm gets one host function, captured in a closure and deleted from its globals. Arguments and results cross as JSON strings, and promises are made inside the realm and settled by the host running a script. No host function, object or Promise enters the realm, which closes the `.constructor` route back to host `Function`.
 - **Every entry into the realm is timed** (20 ms), and `microtaskMode: 'afterEvaluate'` puts promise jobs inside that timeout. A busy loop after an `await` is killed instead of freezing the bot.
+- **Every action settles in a macrotask** (`setImmediate`), so each action's round trip yields to the event loop. Found 2026-10-11 ([[orchestrator-and-builder]], Sonnet run). A builder-written craft loop recursed through recipes, with crafts and walks that failed at once. Each entry into the realm was short, so the 20 ms limit never fired. But settling in microtasks never let a timer run: not the run's own time limit, not the heartbeat. The agent froze at 99% CPU for 20 minutes.
 - **Not chosen:** a worker would still need vm inside it to block `require`, and makes every action a round trip. SES `lockdown()` still risks Mineflayer.
 - **The [[system-1]] caveat still holds locally.** The realm isn't a hardened boundary, but the capability boundary is now the API plus the guards. The risk that grows when code can act is prompt injection: an allowlisted player's text steers what System 2 writes. Revisit before Jeeve runs anywhere else.
 

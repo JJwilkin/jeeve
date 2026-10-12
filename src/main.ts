@@ -44,6 +44,9 @@ export async function startAgent (opts: AgentOptions) {
   const session = `jeeve-${new Date().toISOString().replace(/[:.]/g, '-')}`
   const recorder = await Recorder.init(project, session)
   const judgeval = recorder.exporting ? await Judgeval.create({ projectName: project, organizationId: judgmentOrg() }).catch(() => null) : null
+  // Every await happens before the bot exists: a spawn during an await would miss its handlers, and the agent would
+  // hang unspawned (e2e run 5, when discoverSchema was slow).
+  const schema = judgeval ? await judgeval.discoverSchema().catch(() => undefined) : undefined
 
   const bot = mineflayer.createBot({ host: opts.host ?? 'localhost', port: opts.port ?? 25565, username: opts.username ?? 'Jeeve', auth: 'offline' })
   bot.loadPlugin(pf.pathfinder)
@@ -263,7 +266,7 @@ export async function startAgent (opts: AgentOptions) {
     ? makeSystem2({
       perceive: (tool, input) => perceive(tool, input),
       sql: judgeval ? q => judgeval.sql(q) : undefined,
-      schema: judgeval ? await judgeval.discoverSchema().catch(() => undefined) : undefined,
+      schema,
       effort: trigger => trigger.includes('instruction') ? 'medium' : 'low'
     })
     : null
