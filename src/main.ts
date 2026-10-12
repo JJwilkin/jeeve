@@ -1,7 +1,7 @@
 // Jeeve client: joins a server like a player, takes instructions (whispers or a local API), keeps the goal
 // tree, runs System 1 on Jev under a program System 2A (Claude) shapes, has System 2B build the behaviors 2A
 // asks for, and traces everything to Judgment.
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import mineflayer from 'mineflayer'
@@ -653,7 +653,8 @@ export async function startAgent (opts: AgentOptions) {
       if (req.method === 'GET' && req.url === '/events') {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*' })
         const send = (line: string) => res.write(`data: ${line}\n\n`)
-        for (const line of readFileSync(recorder.file, 'utf8').split('\n')) if (line) send(line)
+        // The file appears with the first row; a monitor can connect before that (it reconnects as the agent starts).
+        if (existsSync(recorder.file)) for (const line of readFileSync(recorder.file, 'utf8').split('\n')) if (line) send(line)
         recorder.listeners.add(send)
         req.on('close', () => recorder.listeners.delete(send))
         return
