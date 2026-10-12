@@ -164,6 +164,17 @@ export function observe (bot: Bot, far = false) {
   if (ms > SEEN.warnMs) console.warn(`[world] observe${far ? ' (far)' : ''} took ${ms.toFixed(0)} ms`)
 }
 
+// Blocks the bot placed itself (scaffolding, a pillar), remembered until the bot sees them gone. A step that clears a
+// spot isn't done while its own placed blocks stand there (goals.ts cleared): an oak-only check passed with two
+// birch-log pillar blocks left (orchard bench, 2026-10-12).
+const placedBy = new WeakMap<Bot, Set<string>>()
+export const notePlaced = (bot: Bot, p: Pos) => { let s = placedBy.get(bot); if (!s) placedBy.set(bot, s = new Set()); s.add(p.join(',')) }
+// The bot's placed blocks it still believes are there (in the seen memory, which drops a spot once it's seen empty).
+export function placedStanding (bot: Bot): Pos[] {
+  const mem = memory(bot)
+  return [...placedBy.get(bot) ?? []].filter(k => mem.has(k)).map(k => k.split(',').map(Number) as Pos)
+}
+
 // Remembered blocks within radius of the feet, by type, nearest first.
 export function seenTypes (bot: Bot, radius: number): Map<string, Pos[]> {
   const me = feet(bot)

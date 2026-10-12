@@ -16,7 +16,7 @@ import { MockLanguageModelV4 } from 'ai/test'
 import { build, type CapabilityRequest } from './builder.ts'
 import { coalescing, makeDecider } from './decide.ts'
 import { direction, distanceBucket, makeEgocentric, newHandles, rawSnapshot } from './encoder.ts'
-import { blockAt, notableBlocks, observe, reachable, scan } from './world.ts'
+import { blockAt, notableBlocks, notePlaced, observe, reachable, scan } from './world.ts'
 import { compile, glob, Goals } from './goals.ts'
 import { controlVector, guardedMovements, unsafeAt } from './guards.ts'
 import { compileBehavior, compileModule, ModuleRegistry, startBehavior, type BehaviorHost } from './modules.ts'
@@ -380,6 +380,14 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.equal(gone.test(bot), false)
   const tree = [...world.entries()].filter(([, n]) => n !== 'grass_block')
   for (const [k] of tree) world.delete(k)
+  observe(bot)
+  assert.equal(gone.test(bot), true)
+  // ...but not while the bot's own scaffolding stands there, of any block.
+  world.set('3,0,1', 'dirt')
+  notePlaced(bot, [3, 0, 1])
+  observe(bot)
+  assert.equal(gone.test(bot), false)
+  world.delete('3,0,1')
   observe(bot)
   assert.equal(gone.test(bot), true)
   for (const [k, n] of tree) world.set(k, n)

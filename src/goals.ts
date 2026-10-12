@@ -4,7 +4,7 @@ import type { Bot } from 'mineflayer'
 import { checkSnapshot, inventoryCounts } from './encoder.ts'
 import type { Module } from './modules.ts'
 import type { Program } from './program.ts'
-import { seenTypes, type Pos } from './world.ts'
+import { placedStanding, seenTypes, type Pos } from './world.ts'
 
 // A check is a generic predicate over raw state; System 2 picks the module and fills in the values.
 export type CheckSpec = {
@@ -84,7 +84,8 @@ export function compile (spec: CheckSpec, goal: Pick<Goal, 'inventory' | 'place'
             const me = bot.entity.position
             if (!at || Math.max(Math.abs(me.x - at[0]), Math.abs(me.z - at[2])) > r + 4) return false
             for (const [name, ps] of seenTypes(bot, 24)) if (res.some(re => re.test(name)) && ps.some(p => near(p, at))) return false
-            return true
+            // Nor while the bot's own scaffolding stands there, whatever it's made of.
+            return !placedStanding(bot).some(p => near(p, at))
           }
         }
       }

@@ -8,6 +8,7 @@ import { Vec3 } from 'vec3'
 import { inventoryCounts } from './encoder.ts'
 import { glob } from './goals.ts'
 import { BEHAVIOR_ENDINGS, startBehavior, type Module } from './modules.ts'
+import { notePlaced } from './world.ts'
 
 const { goals } = pf
 
@@ -473,7 +474,7 @@ const ACTIONS: Record<string, Entry> = {
     }
   },
   stop_digging: { ch: 'hands', covers: ['stopDigging'], doc: 'stop_digging()', run: async ({ bot }) => { bot.stopDigging() } },
-  place: { ch: 'hands', covers: ['placeBlock'], doc: 'place(x, y, z): places the held block there, against any solid neighbour → the block placed', run: async ({ bot }, ...a) => { await against(bot, a, (ref, face) => bot.placeBlock(ref, face)); return bot.blockAt(new Vec3(...xyz(a)))?.name ?? null } },
+  place: { ch: 'hands', covers: ['placeBlock'], doc: 'place(x, y, z): places the held block there, against any solid neighbour → the block placed', run: async ({ bot }, ...a) => { await against(bot, a, (ref, face) => bot.placeBlock(ref, face)); const name = bot.blockAt(new Vec3(...xyz(a)))?.name ?? null; if (name) notePlaced(bot, xyz(a) as Xyz); return name } },
   place_entity: { ch: 'hands', covers: ['placeEntity'], doc: 'place_entity(x, y, z): places the held boat, minecart, armor stand or spawn egg there → the entity', run: async ({ bot }, ...a) => entityData(await against(bot, a, (ref, face) => bot.placeEntity(ref, face)) as Entity) },
   equip: {
     ch: 'hands', covers: ['equip'], doc: `equip(glob, dest = "hand"), dest one of ${DESTS.join(', ')} → the item equipped`,
