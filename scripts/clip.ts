@@ -62,8 +62,10 @@ const SCENARIOS: Record<string, Scenario> = {
   // workshop: 2–3 small trees and a chest at random spots: logs, a crafting table, a pickaxe, the chest.
   workshop: fromScene(workshopScene(SEED), {
     timeoutMs: 10 * 60_000,
-    verify: async ({ josh }) => {
+    verify: async ({ josh, command }) => {
       const at = new Vec3(...workshopScene(SEED).chest!)
+      command(`tp Josh ${at.x} ${at.y} ${at.z + 2}`) // the referee steps up to the chest to open it
+      await sleep(1500)
       await josh.lookAt(at.offset(0.5, 0.5, 0.5))
       const chest = await josh.openContainer(josh.blockAt(at)!)
       const n = chest.containerItems().filter(i => i.name === 'wooden_pickaxe').length
