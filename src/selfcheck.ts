@@ -14,6 +14,7 @@ import { API_ACTIONS, API_COVERS, API_DOC, API_READS, authoredSpec, BEHAVIORS, C
 import { trace } from '@opentelemetry/api'
 import { MockLanguageModelV4 } from 'ai/test'
 import { build, type CapabilityRequest } from './builder.ts'
+import { curate, gather, propose, type Sql } from './curate.ts'
 import { coalescing, makeDecider } from './decide.ts'
 import { direction, distanceBucket, makeEgocentric, newHandles, rawSnapshot } from './encoder.ts'
 import { blockAt, notableBlocks, reachable, scan } from './world.ts'
@@ -486,6 +487,42 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   }, new AbortController().signal, trace.getTracer('selfcheck').startSpan('builder'), 's', model)
   assert.equal(trials.length, 2) // stopped after the passing trial
   assert.deepEqual(result.status === 'registered' && [result.behavior, result.usage, result.attempts.map(a => a.end)], ['reach_up@2', 'pick it for blocks out of reach', ['stuck', 'done']])
+}
+
+// Curation (2B between episodes): facts come only from sessions where that version was in use, and the proposal
+// is files for review. Retired and merged-away behaviors leave the library; uncited ids are flagged.
+{
+  const beh = (name: string, session: string) => ({ kind: 'behavior' as const, name, description: name, code: 'async () => "done"', channels: ['legs'], targets: 'block' as const, timeout_s: 10, version: 1, origin: { session, goal: 'g-1', created_at: '' } })
+  const library = [beh('a', 's1'), beh('b', 's1'), { kind: 'check' as const, name: 'c', description: 'c', code: 's => true', version: 1 }]
+  const rows: Record<string, Record<string, string>[]> = {
+    loaded: [{ session: 's2', id: 'a@1' }],
+    behavior: [
+      { session: 's2', name: 'a', version: '1', end_reason: 'stuck', decided_by: 'd1', started_at: '2', run_id: 'r-1', trace_id: 't', span_id: 'x' },
+      { session: 's3', name: 'a', version: '1', end_reason: 'done', decided_by: 'd2', started_at: '2' }, // another library's a@1
+      { session: 's1', name: 'b', version: '1', end_reason: 'done', decided_by: 'builder:c-1', started_at: '1' }
+    ],
+    goal: [{ session: 's2', goal: 'g-1', transition: 'pushed', started_at: '1', input: '{"text":"go"}' }, { session: 's2', goal: 'g-1', transition: 'completed', started_at: '3', output: '{"summary":"ok"}' }],
+    program: [{ session: 's2', started_at: '1.5', output: '{"manifest":{"allowed_behaviors":["a"]}}' }]
+  }
+  const sql: Sql = async q => ({ rows: q.includes("'loaded'") ? rows.loaded : rows[['behavior', 'goal', 'program'].find(k => q.includes(`'${k}`)) ?? ''] ?? [] })
+  const seen = new Set<string>()
+  const facts = await gather(sql, library, 7, seen)
+  assert.deepEqual(facts.map(f => [f.id, f.sessions.sort(), f.picked, f.trial_runs]), [['a@1', ['s1', 's2'], { stuck: 1 }, {}], ['b@1', ['s1'], {}, { done: 1 }]])
+  assert.deepEqual(facts[0].goals.map(g => [g.goal, g.outcome, g.allowed, g.ran]), [['g-1', 'completed', true, 1]])
+  const proposal = {
+    decisions: [{ behavior: 'a@1', action: 'retire', reason: 'stuck', evidence: ['r-1'] }, { behavior: 'b', action: 'merge', reason: 'dup', evidence: [] }],
+    merges: [{ name: 'b_general', description: 'b', code: 'async () => "done"', channels: ['legs'], targets: 'block', timeout_s: 10, usage: 'u', replaces: ['b'], reason: 'general', evidence: [] },
+      { name: 'bad', description: 'x', code: 'async () => "done"', channels: ['legs'], targets: 'block', timeout_s: 10, usage: 'u', replaces: ['zzz'], reason: 'x', evidence: [] }],
+    lessons: [{ lesson: 'a gets stuck', evidence: ['r-1', 'deadbeefdeadbeef'], expires: '2026-11-01' }],
+    summary: 's'
+  }
+  const model = new MockLanguageModelV4({ doGenerate: [{ content: [{ type: 'tool-call', toolCallId: 'a', toolName: 'submit_curation', input: JSON.stringify(proposal) }], finishReason: { unified: 'tool-calls', raw: undefined }, usage: { inputTokens: {}, outputTokens: {} } as any, warnings: [] }] })
+  const p = await curate(library, facts, sql, seen, trace.getTracer('selfcheck').startSpan('curate'), 's', model)
+  assert.ok(p)
+  const out = propose(library, p, { session: 's', seen, facts, now: 'now' })
+  assert.deepEqual(JSON.parse(out.library).modules.map((m: any) => `${m.name}@${m.version}${m.trial ? '' : ' untrialled'}`), ['b_general@1 untrialled', 'c@1 untrialled'])
+  assert.match(out.review, /bad: replaces behaviors not in the library: zzz/)
+  assert.match(out.lessons, /`r-1`, `deadbeefdeadbeef` \(not in the queried traces\)/)
 }
 
 console.log('selfcheck ok')

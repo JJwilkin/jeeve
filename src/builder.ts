@@ -12,7 +12,7 @@ import { API_DOC } from './behaviors.ts'
 import { BEHAVIOR_ENDINGS, MODULE_LIMITS, type ModuleSource } from './modules.ts'
 
 export const BUILDER_MODEL = process.env.JEEVE_BUILDER_MODEL ?? 'claude-opus-5-5'
-const EFFORT = (process.env.JEEVE_BUILDER_EFFORT ?? 'high') as 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export const BUILDER_EFFORT = (process.env.JEEVE_BUILDER_EFFORT ?? 'high') as 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export const BUILDER_LIMITS = { trials: 4, steps: 16 }
 
 export type TrialTarget = { block?: string | null, item?: string | null, count?: number | null, entity?: string | null }
@@ -99,7 +99,7 @@ export async function build (req: CapabilityRequest, brief: Record<string, unkno
     tools,
     stopWhen: [stepCountIs(BUILDER_LIMITS.steps), () => !!passed || attempts.length >= BUILDER_LIMITS.trials],
     abortSignal: signal,
-    providerOptions: { anthropic: { effort: EFFORT } },
+    providerOptions: { anthropic: { effort: BUILDER_EFFORT } },
     telemetry: {
       functionId: 'builder',
       integrations: [new OpenTelemetry({ tracer: Tracer.getOTELTracer(), enrichSpan: () => ({ 'judgment.session_id': session, 'jeeve.request.id': req.id }) })]

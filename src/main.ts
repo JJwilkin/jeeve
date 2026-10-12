@@ -557,7 +557,7 @@ export async function startAgent (opts: AgentOptions) {
   }
 
   function startTrial (n: BehaviorDraft, o: { target: TrialTarget | null, passWhen: string | null, goal: Goal | null, decidedBy: string, ask?: WindowAsk, done?: TrialRun['done'] }): string | null {
-    const src: ModuleSource = { kind: 'behavior', name: n.name, description: n.description, code: n.code, channels: n.channels, targets: n.targets, timeout_s: n.timeout_s }
+    const src: ModuleSource = { kind: 'behavior', name: n.name, description: n.description, code: n.code, channels: n.channels, targets: n.targets, timeout_s: n.timeout_s, usage: n.usage }
     let problem: string | null = null
     try { compileBehavior(src) } catch (err) { problem = `behavior ${n.name} refused: ${String(err)}` }
     const t = o.target

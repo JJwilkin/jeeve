@@ -25,6 +25,7 @@ The first milestone runs end to end on a local server:
 - System 2 on Claude turns instructions into goals with success checks and tunes System 1's program;
 - System 2 looks at the world with `scan` and `reachable` ([perception](brain/architecture/perception.md));
 - when no behavior fits, System 2 (the orchestrator, 2A) asks a builder (2B, on the Vercel AI SDK) for one, with a pass check of its own. 2B writes, trials and saves it on an API with every player action Mineflayer has (e.g. pillaring to reach a canopy, crafting a pickaxe from logs, filling a chest), while 2A keeps playing ([orchestrator and builder](brain/architecture/orchestrator-and-builder.md), [behaviors and guards](brain/architecture/behaviors-and-guards.md)). `JEEVE_BUILDER_MODEL` picks 2B's model;
+- between episodes, `npm run curate` has 2B propose which library behaviors to keep, retire or merge, and lessons citing trace ids, for a person to review;
 - every episode is traced to Judgment.
 
 See the [roadmap](brain/roadmap.md).
@@ -45,10 +46,11 @@ npm run e2e          # local server + agent + a scripted player; real Jev, Claud
 JEEVE_PORT=25566 npm run e2e   # a parallel run: own port, own world in .server/runs/<port>/ (about 20 min)
 npm run server       # just the server (type console commands into it)
 JEEVE_ALLOWED=YourName npm run agent   # the agent; whisper it instructions in game
+npm run curate       # between episodes: 2B proposes library changes and lessons from recent traces
 ```
 The first server start needs `MINECRAFT_EULA=true` to accept the [Minecraft EULA](https://aka.ms/MinecraftEULA).
 
-**Modules System 2 writes** persist in `modules/library.json`. Runs update it and never commit it; review the diff and commit the modules worth keeping.
+**Modules System 2 writes** persist in `modules/library.json`. Runs update it and never commit it; review the diff and commit the modules worth keeping. `npm run curate` (`-- --days 7 --library <file>`) writes a proposal to `curation/<time>/`: `review.md`, `lessons.md` and `library.diff` (apply with `git apply`). It applies nothing.
 
 **Instructions from outside the game** go to the agent's local API, bound to 127.0.0.1:
 ```bash

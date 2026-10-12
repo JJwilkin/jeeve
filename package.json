@@ -10,6 +10,7 @@
     "agent": "node --env-file=../judgment/.env.jeeve src/main.ts",
     "check": "node src/selfcheck.ts",
     "e2e": "node --env-file=../judgment/.env.jeeve scripts/e2e.ts",
+    "curate": "node --env-file=../judgment/.env.jeeve scripts/curate.ts",
     "typecheck": "tsc"
   },
   "dependencies": {
