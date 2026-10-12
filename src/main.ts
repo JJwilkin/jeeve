@@ -476,11 +476,15 @@ export async function startAgent (opts: AgentOptions) {
     }, req.span.trace_id ? [{ context: { traceId: req.span.trace_id, spanId: req.span.span_id, traceFlags: 1 } }] : [])
     const check = modules.get(req.pass_when)!
     // Only 2A's structured words reach 2B, never the instruction's text (brain/architecture/system-2.md → "2A and 2B").
+    const snap = rawSnapshot(bot)
     const brief = {
       request: { id: req.id, need: req.need, constraints: req.constraints, targets: req.targets, trial: req.trial },
       pass_when: { id: check.id, description: check.description, code: check.code },
       library: [...modules.modules.values()].filter(m => m.kind === 'behavior').map(m => ({ id: m.id, description: m.description, channels: m.channels, targets: m.targets, disabled: m.disabled ?? null, code: m.code })),
-      self: rawSnapshot(bot).self
+      // The scene, so the build doesn't hinge on how 2A worded the request: what the bot carries, notable blocks and
+      // entities near it, and the trial target's clusters (exact counts, bounds, heights).
+      self: snap.self, inventory: snap.inventory, blocks: snap.blocks, entities: snap.entities,
+      trial_target: req.targets === 'block' && req.trial.block ? scan(bot, { match: req.trial.block }) : undefined
     }
     console.log(`[builder] ${req.id} started: ${req.need}`)
     build(req, brief, { trial: (d, _r, signal) => trialPort(d, req, signal, span), perceive: (tool, input) => perceive(tool, input, span), log: row => recorder.jsonl({ request: req.id, ...row }) }, req.abort.signal, span, session)

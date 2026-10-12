@@ -69,7 +69,7 @@ On `registered`, 2A adds the behavior to `allowed_behaviors` and writes guidance
 - **2A's structured request:** need, constraints, target type, trial target;
 - **the pass check:** id, description and code;
 - **the library's authored behaviors,** with their code;
-- **the bot's own state.**
+- **the bot's own state, and the scene** (since 2026-10-12): its inventory, notable blocks and entities near it, and a `scan` of the trial target. Added when 2A moved to Sonnet 5.5: its vaguer request ("climbing or building up") left the builder blind to the target's height and the logs it could build with, and two trials failed.
 
 It never gets the goal text, which is the player's raw instruction.
 
