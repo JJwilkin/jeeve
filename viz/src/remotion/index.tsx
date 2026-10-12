@@ -10,7 +10,8 @@ import { WorldScene } from '../WorldScene.tsx'
 import { activity, captionAt, duration, speedups, stateAt, traceTime, type Beat, type Row, type Segment } from '../timeline.ts'
 
 export type ClipData = { start: number, end: number, recordStart: number | null, footage: string | null, world?: string, captions: Beat[], rows: Row[], worldRows?: WorldRow[] }
-type Props = { layout: Layout, clip?: ClipData, segs?: Segment[] }
+// maxSeconds: speed the whole clip up evenly to fit (for posting); the badge shows the rate.
+type Props = { layout: Layout, maxSeconds?: number, clip?: ClipData, segs?: Segment[] }
 const FPS = 30
 
 // The footage, cut into the same segments as the trace: each plays from its own spot at its own rate.
@@ -50,7 +51,9 @@ const metadata: CalculateMetadataFunction<Props> = async ({ props }) => {
   const [data, captions] = await Promise.all(['clip.json', 'captions.json'].map(f => fetch(staticFile(f)).then(r => r.json())))
   const worldRows = data.world ? parseWorld(await fetch(staticFile(data.world)).then(r => r.text())) : undefined
   const clip: ClipData = { ...data, captions, worldRows }
-  const segs = speedups(activity(clip.rows), clip.start, clip.end)
+  let segs = speedups(activity(clip.rows), clip.start, clip.end)
+  const over = props.maxSeconds ? duration(segs) / 1000 / props.maxSeconds : 1
+  if (over > 1) segs = segs.map(s => ({ ...s, rate: s.rate * over }))
   return { durationInFrames: Math.max(1, Math.ceil(duration(segs) / 1000 * FPS)), props: { ...props, clip, segs } }
 }
 

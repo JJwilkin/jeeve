@@ -3,7 +3,7 @@
 //   npm run clip canopy                  record and render (JEEVE_CAMERA=<your player> frames your spectator client)
 //   npm run clip canopy -- --no-record   run and render the panels without footage
 //   npm run clip -- --captions clips/<dir>  rewrite captions.json from the clip's trace
-//   npm run clip -- --render clips/<dir>    re-render, e.g. after editing captions.json
+//   npm run clip -- --render clips/<dir>    re-render, e.g. after editing captions.json (CLIP_SECONDS=75: fit to a length)
 // Joshua's client joins localhost:<JEEVE_PORT> as JEEVE_CAMERA; OBS's websocket server: OBS_URL, OBS_PASSWORD.
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -41,7 +41,7 @@ const SCENARIOS: Record<string, Scenario> = {
   canopy: {
     setup: command => { canopy(command); command('give Jeeve oak_log 16') },
     camera: { at: [CANOPY.x - 10, -55, CANOPY.z + 10], facing: [CANOPY.x - 1, -56, CANOPY.z] },
-    view: { min: [CANOPY.x - 12, -61, CANOPY.z - 8], max: [CANOPY.x + 8, -46, CANOPY.z + 8] },
+    view: { min: [CANOPY.x - 12, -61, CANOPY.z - 8], max: [CANOPY.x + 8, -36, CANOPY.z + 8] },
     instructions: [CANOPY.instruction],
     timeoutMs: 10 * 60_000,
     verify: async ({ josh }) => treeLeft(josh, [CANOPY.x - 2, -61, CANOPY.z - 2], [CANOPY.x + 2, -49, CANOPY.z + 2])
@@ -51,7 +51,7 @@ const SCENARIOS: Record<string, Scenario> = {
   orchard: {
     setup: command => { orchard(command); command('give Jeeve oak_log 32') },
     camera: { at: [39, -52, 6], facing: [39, -56, -12] },
-    view: { min: [22, -61, -20], max: [56, -46, -4] },
+    view: { min: [22, -61, -20], max: [56, -36, -4] },
     instructions: ORCHARD.instructions,
     timeoutMs: 10 * 60_000,
     verify: async ({ josh }) => treeLeft(josh, [27, -61, -15], [51, -49, -9])
@@ -60,7 +60,7 @@ const SCENARIOS: Record<string, Scenario> = {
   workshop: {
     setup: command => workshop(command),
     camera: { at: [22, -54, -1], facing: [31, -58, -12] },
-    view: { min: [18, -61, -24], max: [44, -48, 0] },
+    view: { min: [18, -61, -24], max: [44, -40, 0] },
     instructions: [WORKSHOP.instruction],
     timeoutMs: 10 * 60_000,
     verify: async ({ josh }) => {
@@ -75,7 +75,7 @@ const SCENARIOS: Record<string, Scenario> = {
   guard: {
     setup: command => guard(command),
     camera: { at: [31, -51, 4], facing: [31, -58, -12] },
-    view: { min: [14, -61, -28], max: [48, -50, 4] },
+    view: { min: [14, -61, -28], max: [48, -44, 4] },
     instructions: [GUARD.instruction],
     timeoutMs: GUARD.waves * GUARD.waveEveryMs + 20_000,
     during: async ({ josh, command, done }) => {
@@ -166,7 +166,8 @@ For each beat, write one plain sentence of at most 14 words for a viewer who has
 function render (dir: string) {
   for (const [layout, name] of [['wide', 'clip-16x9.mp4'], ['tall', 'clip-9x16.mp4']]) {
     // --gl=angle: WebGL for the recorded-world camera (three.js) in headless Chrome on macOS.
-    const r = spawnSync('npx', ['remotion', 'render', 'src/remotion/index.tsx', layout, resolve(dir, name), '--public-dir', resolve(dir), '--gl=angle'], { cwd: 'viz', stdio: 'inherit' })
+    const props = process.env.CLIP_SECONDS ? ['--props', JSON.stringify({ layout, maxSeconds: Number(process.env.CLIP_SECONDS) })] : []
+    const r = spawnSync('npx', ['remotion', 'render', 'src/remotion/index.tsx', layout, resolve(dir, name), '--public-dir', resolve(dir), '--gl=angle', ...props], { cwd: 'viz', stdio: 'inherit' })
     if (r.status !== 0) throw new Error(`remotion render ${layout} failed`)
     console.log(`[clip] ${resolve(dir, name)}`)
   }
@@ -252,7 +253,9 @@ josh.on('blockUpdate', (old, now) => {
 })
 const r2 = (v: number) => Math.round(v * 100) / 100
 const entityTimer = setInterval(() => {
-  const list = Object.values(josh.entities).filter(e => e.position && inView(e.position.floored()) && e.name !== 'item')
+  // Entities by x and z only: a bot pillaring up stays in the shot above the box.
+  const near = (p: { x: number, z: number }) => p.x >= scenario.view.min[0] && p.x <= scenario.view.max[0] && p.z >= scenario.view.min[2] && p.z <= scenario.view.max[2]
+  const list = Object.values(josh.entities).filter(e => e.position && near(e.position) && e.name !== 'item')
     .map(e => ({ id: e.id, name: e.name, username: e.username, pos: [r2(e.position.x), r2(e.position.y), r2(e.position.z)], yaw: r2(e.yaw), pitch: r2(e.pitch), held: e === josh.entity ? undefined : (e as any).heldItem?.name }))
   world.write(JSON.stringify({ t: Date.now(), kind: 'entities', list }) + '\n')
 }, 100)
