@@ -16,7 +16,7 @@ import { MockLanguageModelV4 } from 'ai/test'
 import { build, type CapabilityRequest } from './builder.ts'
 import { coalescing, makeDecider } from './decide.ts'
 import { direction, distanceBucket, makeEgocentric, newHandles, rawSnapshot } from './encoder.ts'
-import { blockAt, notableBlocks, notePlaced, observe, reachable, scan } from './world.ts'
+import { blockAt, explored, notableBlocks, notePlaced, observe, reachable, scan } from './world.ts'
 import { compile, glob, Goals } from './goals.ts'
 import { controlVector, guardedMovements, unsafeAt } from './guards.ts'
 import { compileBehavior, compileModule, ModuleRegistry, startBehavior, type BehaviorHost } from './modules.ts'
@@ -363,6 +363,9 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.equal(scan(bot, { match: 'diamond_ore' }).total, 0)
   assert.equal(blockAt(bot, [3, 2, 0]), 'oak_log')
 
+  // Coverage: a far look marks the 16-block cells it swept; the bot at the origin covers the cell around it.
+  observe(bot, true)
+  assert.ok(explored(bot).some(([x, z]) => x === 8 && z === 8) && !explored(bot).some(([x]) => Math.abs(x) > 40))
   // The block view is what the bot has seen, the same blocks scan sees.
   observe(bot)
   const notable = notableBlocks(bot, 8, 64)

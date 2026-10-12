@@ -161,6 +161,16 @@ export function observe (bot: Bot, far = false) {
     if (visible(bot, eyes, p)) mem.set(key, { name, pos: [p.x, p.y, p.z], t: now })
   })
   if (mem.size > 20_000) for (const [k, v] of mem) if (Math.abs(v.pos[0] - me.x) + Math.abs(v.pos[2] - me.z) > SEEN.keepWithin) mem.delete(k)
+  // Coverage: the 16-block cells the far look has swept (its whole box), for System 2 to search where it hasn't looked.
+  if (far) {
+    let cells = coveredBy.get(bot)
+    if (!cells) coveredBy.set(bot, cells = new Set())
+    for (let cx = Math.floor((me.x - r) / 16); cx <= Math.floor((me.x + r) / 16); cx++) for (let cz = Math.floor((me.z - r) / 16); cz <= Math.floor((me.z + r) / 16); cz++) {
+      // A cell counts once the look's box covers most of it.
+      const ox = Math.min(me.x + r, cx * 16 + 15) - Math.max(me.x - r, cx * 16), oz = Math.min(me.z + r, cz * 16 + 15) - Math.max(me.z - r, cz * 16)
+      if (ox >= 10 && oz >= 10) cells.add(`${cx * 16 + 8},${cz * 16 + 8}`)
+    }
+  }
   const ms = performance.now() - t0
   if (ms > SEEN.warnMs) console.warn(`[world] observe${far ? ' (far)' : ''} took ${ms.toFixed(0)} ms`)
 }
@@ -175,6 +185,11 @@ export function placedStanding (bot: Bot): Pos[] {
   const mem = memory(bot)
   return [...placedBy.get(bot) ?? []].filter(k => mem.has(k)).map(k => k.split(',').map(Number) as Pos)
 }
+
+// Where the bot has looked: centres [x, z] of the 16-block cells its far look has swept. A forage search went west,
+// north and south, then said it had covered the east too: every tree it never saw was east (bench, 2026-10-12).
+const coveredBy = new WeakMap<Bot, Set<string>>()
+export const explored = (bot: Bot) => [...coveredBy.get(bot) ?? []].map(k => k.split(',').map(Number))
 
 // Remembered blocks within radius of the feet, by type, nearest first.
 export function seenTypes (bot: Bot, radius: number): Map<string, Pos[]> {

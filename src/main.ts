@@ -19,7 +19,7 @@ import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type ModuleSource, type
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
 import { makeSystem2, type Decision, type RequestDraft } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
-import { blockAt, observe, placedStanding, reachable, scan, seenMap, seenTypes, type Pos } from './world.ts'
+import { blockAt, explored, observe, placedStanding, reachable, scan, seenMap, seenTypes, type Pos } from './world.ts'
 
 export type AgentOptions = {
   host?: string
@@ -453,6 +453,7 @@ export async function startAgent (opts: AgentOptions) {
       program: { version: version(program), guidance: program.guidance, allowed_behaviors: program.allowed_behaviors, heartbeat_ms: program.triggers.heartbeat_ms },
       fast_model_view: lastView,
       seen_map: seenMap(bot), // everything the bot has seen around it, so the scene doesn't hinge on this turn's scans
+      explored: { cell: 16, bot_at: [Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.z)], centers: explored(bot) }, // where it has looked
       modules: modules.list(),
       requests: requests.map(r => ({ id: r.id, goal: r.goal.id, need: r.need, status: windowAsk?.req === r ? 'waiting_for_trial_window' : trial?.ask?.req === r ? 'trialling' : r.status })),
       recent_events: recentFor(30_000),

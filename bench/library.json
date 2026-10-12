@@ -29,25 +29,6 @@
       "idle_rounds": 0
     },
     {
-      "kind": "check",
-      "name": "tree_at_35_cleared",
-      "description": "No oak_log/oak_leaves seen within 3 blocks horizontally of the trunk column x=35,z=-11 (y -61..-47), with the bot within 8 blocks of the trunk base",
-      "code": "(s) => { if (dist(s.self.pos, [35, -60, -11]) > 8) return false; if ((s.crowded || []).some(n => n === 'oak_log' || n === 'oak_leaves')) return false; for (const n of ['oak_log', 'oak_leaves']) { for (const p of (s.blocks[n] || [])) { if (Math.abs(p[0] - 35) <= 3 && Math.abs(p[2] + 11) <= 3 && p[1] >= -61 && p[1] <= -47) return false; } } return true; }",
-      "version": 1,
-      "origin": {
-        "session": "jeeve-2026-10-12T08-56-41-845Z",
-        "goal": "g-1: break the tree closest to you, leaves included. The leaves won't decay on their own",
-        "created_at": "2026-10-12T08:57:24.154Z"
-      },
-      "trial": {
-        "states": 31,
-        "trues": 0,
-        "errors": 0,
-        "maxMs": 0.155
-      },
-      "idle_rounds": 1
-    },
-    {
       "kind": "behavior",
       "name": "craft_wooden_pickaxe",
       "description": "Crafts a wooden pickaxe: chops nearby tree logs if the inventory lacks wood, turns logs into planks, makes sticks, finds or places a crafting table next to the bot (crafting one if needed), and crafts the pickaxe at it.",
@@ -105,25 +86,6 @@
     },
     {
       "kind": "check",
-      "name": "has_wooden_pickaxe",
-      "description": "Bot holds at least one wooden pickaxe",
-      "code": "(s) => count(s, \"wooden_pickaxe\") >= 1",
-      "version": 1,
-      "origin": {
-        "session": "jeeve-2026-10-12T08-56-41-939Z",
-        "goal": "g-1: make a wooden pickaxe and put it in the chest",
-        "created_at": "2026-10-12T08:57:36.082Z"
-      },
-      "trial": {
-        "states": 31,
-        "trues": 0,
-        "errors": 0,
-        "maxMs": 0.447
-      },
-      "idle_rounds": 1
-    },
-    {
-      "kind": "check",
       "name": "pickaxe_deposited",
       "description": "No wooden_pickaxe in inventory and bot within 4 blocks of a seen chest",
       "code": "(s) => { const c = (s.blocks[\"chest\"]||[]); return !(s.inventory[\"wooden_pickaxe\"]>0) && c.length>0 && dist(s.self.pos, c[0]) <= 4; }",
@@ -142,101 +104,6 @@
       "idle_rounds": 0
     },
     {
-      "kind": "check",
-      "name": "birch_tree_43_cleared",
-      "description": "No birch_log/birch_leaves seen within 3 blocks horizontally of the trunk column x=43,z=-13 (y -61..-47), with the bot within 8 blocks of the trunk base",
-      "code": "(s) => { if (dist(s.self.pos, [43,-60,-13]) > 8) return false; if ((s.crowded||[]).some(n => n === 'birch_log' || n === 'birch_leaves')) return false; for (const n of ['birch_log','birch_leaves']) { const list = s.blocks[n] || []; for (const p of list) { if (Math.abs(p[0]-43) <= 3 && Math.abs(p[2]+13) <= 3 && p[1] >= -61 && p[1] <= -47) return false; } } return true; }",
-      "version": 1,
-      "origin": {
-        "session": "jeeve-2026-10-12T09-05-32-833Z",
-        "goal": "g-1: break the tree closest to you, leaves included. The leaves won't decay on their own",
-        "created_at": "2026-10-12T09:05:56.903Z"
-      },
-      "trial": {
-        "states": 24,
-        "trues": 2,
-        "errors": 0,
-        "maxMs": 0.156
-      },
-      "idle_rounds": 1
-    },
-    {
-      "kind": "check",
-      "name": "birch_tree_26_cleared",
-      "description": "No birch_log/birch_leaves seen within 3 blocks horizontally of the trunk column x=26,z=-11 (y -61..-47), with the bot within 8 blocks of the trunk base",
-      "code": "(s) => { const tx=26,tz=-11,by=-60; if (dist(s.self.pos,[tx,by,tz])>8) return false; for (const n of [\"birch_log\",\"birch_leaves\"]) { if ((s.crowded||[]).includes(n)) return false; for (const p of (s.blocks[n]||[])) { if (Math.abs(p[0]-tx)<=3 && Math.abs(p[2]-tz)<=3 && p[1]>=-61 && p[1]<=-47) return false; } } return true; }",
-      "version": 1,
-      "origin": {
-        "session": "jeeve-2026-10-12T09-12-54-247Z",
-        "goal": "g-2: now break the other 3 trees the same way, leaves included",
-        "created_at": "2026-10-12T09:14:20.281Z"
-      },
-      "trial": {
-        "states": 31,
-        "trues": 0,
-        "errors": 0,
-        "maxMs": 0.278
-      },
-      "idle_rounds": 1
-    },
-    {
-      "kind": "check",
-      "name": "birch_tree_30_cleared",
-      "description": "No birch_log/birch_leaves seen within 3 blocks horizontally of the trunk column x=30,z=-5 (y -61..-47), with the bot within 8 blocks of the trunk base",
-      "code": "(s) => { const base=[30,-60,-5]; if (dist(s.self.pos, base) > 8) return false; const cr = s.crowded || []; if (cr.indexOf('birch_log') >= 0 || cr.indexOf('birch_leaves') >= 0) return false; const names=['birch_log','birch_leaves']; for (let i=0;i<names.length;i++) { const arr = (s.blocks && s.blocks[names[i]]) || []; for (let j=0;j<arr.length;j++) { const p=arr[j]; const dx=p[0]-30, dz=p[2]+5; if (dx*dx+dz*dz<=9 && p[1]>=-61 && p[1]<=-47) return false; } } return true; }",
-      "version": 1,
-      "origin": {
-        "session": "jeeve-2026-10-12T09-12-54-247Z",
-        "goal": "g-1: break the tree closest to you, leaves included. The leaves won't decay on their own",
-        "created_at": "2026-10-12T09:13:20.999Z"
-      },
-      "trial": {
-        "states": 27,
-        "trues": 2,
-        "errors": 0,
-        "maxMs": 0.166
-      },
-      "idle_rounds": 1
-    },
-    {
-      "kind": "check",
-      "name": "birch_tree_44_cleared",
-      "description": "No birch_log/birch_leaves seen within 3 blocks horizontally of the trunk column x=44,z=-3 (y -61..-47), with the bot within 8 blocks of the trunk base",
-      "code": "(s) => { const tx=44,tz=-3,by=-60; if (dist(s.self.pos,[tx,by,tz])>8) return false; for (const n of [\"birch_log\",\"birch_leaves\"]) { if ((s.crowded||[]).includes(n)) return false; for (const p of (s.blocks[n]||[])) { if (Math.abs(p[0]-tx)<=3 && Math.abs(p[2]-tz)<=3 && p[1]>=-61 && p[1]<=-47) return false; } } return true; }",
-      "version": 1,
-      "origin": {
-        "session": "jeeve-2026-10-12T09-12-54-247Z",
-        "goal": "g-2: now break the other 3 trees the same way, leaves included",
-        "created_at": "2026-10-12T09:14:20.289Z"
-      },
-      "trial": {
-        "states": 31,
-        "trues": 0,
-        "errors": 0,
-        "maxMs": 0.147
-      },
-      "idle_rounds": 1
-    },
-    {
-      "kind": "check",
-      "name": "oak_tree_36_cleared",
-      "description": "No oak_log/oak_leaves seen within 3 blocks horizontally of the trunk column x=36,z=-14 (y -61..-47), with the bot within 8 blocks of the trunk base",
-      "code": "(s) => { const tx=36,tz=-14,by=-60; if (dist(s.self.pos,[tx,by,tz])>8) return false; for (const n of [\"oak_log\",\"oak_leaves\"]) { if ((s.crowded||[]).includes(n)) return false; for (const p of (s.blocks[n]||[])) { if (Math.abs(p[0]-tx)<=3 && Math.abs(p[2]-tz)<=3 && p[1]>=-61 && p[1]<=-47) return false; } } return true; }",
-      "version": 1,
-      "origin": {
-        "session": "jeeve-2026-10-12T09-12-54-247Z",
-        "goal": "g-2: now break the other 3 trees the same way, leaves included",
-        "created_at": "2026-10-12T09:14:20.285Z"
-      },
-      "trial": {
-        "states": 31,
-        "trues": 0,
-        "errors": 0,
-        "maxMs": 0.14
-      },
-      "idle_rounds": 1
-    },
-    {
       "kind": "watch",
       "name": "hostile_near_josh_or_bot",
       "description": "A hostile mob is within 10 blocks of Josh or of the bot",
@@ -253,26 +120,7 @@
         "errors": 0,
         "maxMs": 0.168
       },
-      "idle_rounds": 1
-    },
-    {
-      "kind": "check",
-      "name": "fourth_tree_pending",
-      "description": "Placeholder: never passes. Keeps the 'break 4 trees' goal open until the orchestrator finds and plans the fourth tree (then replaces done_when).",
-      "code": "(s) => false",
-      "version": 1,
-      "origin": {
-        "session": "jeeve-2026-10-12T09-40-59-824Z",
-        "goal": "g-5: now break the other 4 trees the same way, leaves included",
-        "created_at": "2026-10-12T09:43:32.494Z"
-      },
-      "trial": {
-        "states": 31,
-        "trues": 0,
-        "errors": 0,
-        "maxMs": 0.09
-      },
-      "idle_rounds": 1
+      "idle_rounds": 0
     }
   ]
 }
