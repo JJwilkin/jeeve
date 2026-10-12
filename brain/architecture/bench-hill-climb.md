@@ -62,6 +62,12 @@ On layouts it hadn't seen, Jeeve learned in the first round and reused after. 2A
 16. **Busy isn't progress.** 2A asked the (scripted, silent) player to lead it to trees, and Jeeve followed him in place for 10 minutes. `idle` never fired, because following counts as busy. **Fix:** `stalled`, a goal whose progress (the root's measure, or which step runs) hasn't moved for 60 s escalates. 2A is told players may not answer or lead.
 17. **No eating** (guard deaths). Health came back between waves only if Jeeve ate, and it had no food and no way to eat. The guard scene now gives it bread, and nothing tells it to eat: a learning test.
 
+18. **The library filled with one-off checks** tied to one layout (`birch_tree_43_cleared`, `tree_at_35_cleared`). They're useless elsewhere and crowd 2A's context. **Fix, curation (the between-episode loop, minimal):** modules record when they were last used (a check evaluated, a behavior run, `used_at`). After each round, `bench` retires checks and watches unused for 2 rounds in a row. Skills stay.
+19. **A false done from a canopy-height place.** 2A put a step's place at the leaves, and `cleared` only counted blocks at or above the place, so the trunk below was missed. **Fix:** `cleared` checks the whole column (12 up and down).
+20. **A whole-body skill cut off by one channel** (9 times in one run). Jev's legs question chose "walk to the place", which stole the legs from the running tree skill. **Fix:** a running whole-body behavior is only the body question's to change; a channel's own answer is held. Orchard on random layouts went to 118–128 s.
+21. **Skills have to generalize.** The workshop asks for a different wooden tool each run (pickaxe, axe, sword, shovel), so a `craft_wooden_pickaxe` skill isn't enough.
+22. **2A didn't know where it had looked** (forage). It searched west, north and south, then said it had covered the east, where every unseen tree was. **Fix:** `explored`, the centres of the 16-block cells the far look has swept, in 2A's context. 2A is told to aim searches at cells not in it.
+
 ## Open
 - **Trials still consume materials** ([[orchestrator-and-builder]] → Open questions). Workshop round 1 burned its wood on failed trials.
 - **Idle time** is still large while the builder works or 2A thinks. Jev could do the parts of a plan it can already do meanwhile.
