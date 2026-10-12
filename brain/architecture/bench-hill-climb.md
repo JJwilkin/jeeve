@@ -68,6 +68,10 @@ On layouts it hadn't seen, Jeeve learned in the first round and reused after. 2A
 21. **Skills have to generalize.** The workshop asks for a different wooden tool each run (pickaxe, axe, sword, shovel), so a `craft_wooden_pickaxe` skill isn't enough.
 22. **2A didn't know where it had looked** (forage). It searched west, north and south, then said it had covered the east, where every unseen tree was. **Fix:** `explored`, the centres of the 16-block cells the far look has swept, in 2A's context. 2A is told to aim searches at cells not in it.
 
+23. **Item skills didn't generalize.** For a shovel, the builder wrote `craft_and_deposit_wooden_shovel` instead of extending `craft_wooden_pickaxe`. **Fix:** the builder is told an item behavior must make whatever its target names, and 2A to try an item behavior on a new item before asking for another. A sword, never made before, then passed on its first try.
+24. **2A couldn't pick search directions from a list of cells** (forage: west four times; the trees it never saw were north and south). **Fix, frontier exploration:** the runtime computes `explored.frontier`, the nearest unexplored spot in each of 8 directions, and 2A plans steps to it.
+25. **A frontier ranked from the bot drifts.** Each step pushed the frontier outward, and a search went 300 blocks east while every tree was within 60 of the start (the recorder lost Jeeve past its box). **Fix:** the frontier is ranked from the task's origin (where the instruction came), so the search widens in rings around the start.
+
 ## Open
 - **Trials still consume materials** ([[orchestrator-and-builder]] → Open questions). Workshop round 1 burned its wood on failed trials.
 - **Idle time** is still large while the builder works or 2A thinks. Jev could do the parts of a plan it can already do meanwhile.
