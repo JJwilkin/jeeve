@@ -20,7 +20,7 @@ System 2 is two agents. **2A, the orchestrator,** runs the game: the goal tree, 
 | Speed | Seconds per call | Minutes per request |
 | Context | Goal path, program, recent events, the module list | The action API, the request, its pass check, the library's behavior code |
 | Writes | Goals, guidance, allowed behaviors, check and watch modules. It stays the **only writer of commitments** ([[system-2]]) | Library entries only (behaviors). It *proposes* guidance; 2A decides |
-| Model | `claude-opus-5-5`, `medium` for instructions, `low` for escalations (unchanged) | `JEEVE_BUILDER_MODEL`, default `claude-opus-5-5` at `high` (`JEEVE_BUILDER_EFFORT`) |
+| Model | `claude-opus-5-5`, `medium` for instructions, `low` for escalations (unchanged) | `JEEVE_BUILDER_MODEL`, default `claude-sonnet-5-5` at `low` (`JEEVE_BUILDER_EFFORT`) since 2026-10-12; was `claude-opus-5-5` at `high` |
 
 ## Capability requests
 2A calls a `request_capability` tool, next to `submit_decision`. It's not a `submit_decision` field, because the strict grammar is already at its size limit. The request is applied with the decision, after `new_modules`, so its pass check can be registered in the same decision.
@@ -160,7 +160,9 @@ The e2e's canopy scenario now runs right after "collect 10 logs", so it's the fi
 | Craft a wooden pickaxe | 1 trial in four runs (47–78 s). Run 7: failed after 3 trials, because the first trial used up the logs (see above) | S1: froze the agent (the sandbox bug below). S3: failed 4 trials, one spent on a `debug_probe` behavior. 2A read the `capability_result`, asked again, and the second request passed on its 4th trial (97 s) |
 | Logs into the chest | 1 trial in every run (14–18 s) | 1 trial, 8 s |
 
-**Opus stays the default:** 15 requests, 13 passing on the first trial. Sonnet needs more trials, and more live trials mean more time holding the body (and more materials used up). Sonnet's e2e failures outside 2B are the known defend-me weaknesses (a slime in S1, a death to the zombie in S3), not the builder's doing.
+**Default switched to Sonnet 5.5 at `low` (2026-10-12, Joshua's call, no comparison run):** draft fast and fix from the trial's evidence, instead of spending ~80 s per draft to get it right first ([[brain-monitor]] → "First clips": in the recorded canopy run, 2B's writing was 112 of 168 s). The pass check still gates registration. Watch for more trials, more body time and used-up materials; `JEEVE_BUILDER_MODEL=claude-opus-5-5 JEEVE_BUILDER_EFFORT=high` restores the old default.
+
+~~**Opus stays the default:**~~ (superseded above) 15 requests, 13 passing on the first trial. Sonnet needs more trials, and more live trials mean more time holding the body (and more materials used up). Sonnet's e2e failures outside 2B are the known defend-me weaknesses (a slime in S1, a death to the zombie in S3), not the builder's doing.
 
 **Two runtime bugs older than the split, found by these runs:**
 - **The sandbox could starve the event loop.** Sonnet's craft code recursed through recipes with crafts and walks that failed at once. Each entry into the realm was short, so the 20 ms limit never fired, but settling actions in microtasks never let a timer run, including the run's own time limit. The agent froze at 99% CPU for 20 minutes. Actions now settle with `setImmediate` ([[behaviors-and-guards]] → Sandbox).
