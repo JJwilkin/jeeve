@@ -5,7 +5,7 @@
 //   npm run bench -- 3 --fresh              start from an empty skill library
 // Learning: every run starts from bench/library.json, the skills and checks Jeeve learned in earlier runs, and what
 // a run learns is merged back after its round. One Jeeve that keeps what it learned, across runs and scenarios.
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
 const flags = process.argv.slice(2).filter(a => a.startsWith('--'))
@@ -37,7 +37,13 @@ const run = (scenario: string, port: number, round: number) => new Promise<void>
   child.stdout.on('data', d => { for (const line of String(d).split('\n')) if (/^\[(bench|clip)\] (verify|"|\{)/.test(line)) console.log(`${scenario}#${round}: ${line.slice(0, 300)}`) })
   // A run that hangs past 20 min is killed; it then has no results row.
   const timer = setTimeout(() => child.kill('SIGINT'), 20 * 60_000)
-  child.on('exit', () => { clearTimeout(timer); resolve() })
+  child.on('exit', () => {
+    clearTimeout(timer)
+    // The all-seeing eye on every run: <dir>/gaps.md (scripts/gaps.ts).
+    const row = readFileSync('bench/results.jsonl', 'utf8').trim().split('\n').map(l => JSON.parse(l)).findLast(r => r.scenario === scenario)
+    if (row?.dir) spawnSync('node', ['scripts/gaps.ts', row.dir], { stdio: 'ignore' })
+    resolve()
+  })
 })
 
 const before = readFileSync('bench/results.jsonl', { flag: 'a+' }).toString().split('\n').filter(Boolean).length
