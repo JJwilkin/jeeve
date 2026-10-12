@@ -227,7 +227,7 @@ All three are sensible with no prompt tuning.
 ## Open questions
 - **The no-repeat window.** Is 30 s right? It's a guess until traces show escalation rates.
   - **Evidence it can be fatal (2026-10-11, run `jeeve-2026-10-11T16-36-51-167Z`):** five slimes hit Jeeve for ~2 HP every 0.5 s. After the first escalation on the new goal, every later `jev_escalate` was suppressed while health fell from 11 to 1, and he died. System 2's fix arrived after the death.
-  - **Proposed:** a fast health drop bypasses the window, the same way `instruction` and `behavior_trial` already do.
+  - ~~**Proposed:** a fast health drop bypasses the window~~ Built 2026-10-11: while the bot has lost 4 HP or more in the last 5 s, every escalation bypasses the window, the same way `instruction` and `behavior_trial` always do. Both numbers are guesses. The coalescing still holds: one System 2 call in flight, with the triggers merged. System 2 takes 5–15 s, so this doesn't save a fight by itself; Jev fighting back does ([[system-1]] → "Threats").
 - **Clarifying questions.** If System 2 asks "which logs?", does the root stay active with Jev running on the raw text, or wait?
 - **Several players.** Two allowlisted players give conflicting instructions. For now the latest wins, whoever sent it.
 - **Which Claude model and effort per trigger.** Instructions may deserve more reasoning than a repeated `stuck`.

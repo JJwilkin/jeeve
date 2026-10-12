@@ -64,13 +64,13 @@ All three instructions pass, and so do a live guard veto and the local API. Syst
 - guards chosen per context by the runtime (an arena vs. a co-op server), when a context needs one ([[behaviors-and-guards]] → "The player action API");
 - ~~System 2A (orchestrator) / 2B (builder) split~~ ([[system-2a-2b]], done 2026-10-11 → [[orchestrator-and-builder]]: 2A asks for behaviors with a pass check it writes, 2B builds them on the Vercel AI SDK in trial windows a code gate grants);
 - 2B's between-episode loop: library curation, retiring behaviors, trace mining (designed in [[orchestrator-and-builder]], not built);
-- "defend me" fixes: attribute damage to its source, let a fast health drop bypass the no-repeat window, fail the e2e on any death ([[system-1]] and [[system-2]] → Open questions);
+- ~~"defend me" fixes~~: done 2026-10-11. Damage is attributed to its source, a fast health drop bypasses the no-repeat window, and the e2e fails on any death and has a slime scenario ([[system-1]] → "Threats", [[system-2]] → Open questions);
 - lessons that outlive their goal;
 - judges and the outer loop (stage 4);
 - the PvP arena and benchmarks ([[benchmarks]]).
 
 ## Order after the current work (decided 2026-10-11)
-1. **"Defend me" fixes:** small, and they unblock combat evaluation.
+1. ~~**"Defend me" fixes:**~~ done 2026-10-11.
 2. **Faster e2e:** split the 20-minute e2e into small independent scenarios that run in parallel (each on its own `JEEVE_PORT` and world), plus a quick smoke subset. Do this after the in-flight sessions ([[full-player-action-api]], [[system-2a-2b]]) land, because both add e2e scenarios.
 3. **Online infrastructure:** a hosted server (e.g. GCP), and the ability to spawn one or many agents on running infrastructure somewhere. This comes **before** stage 4's benchmarks, so scenarios and benchmarks run on real infrastructure, not only this laptop.
 4. **Stage 4, goals and reward,** plus the first benchmarks (tech-tree ladder, PvP arena), run on that infrastructure. The judge design can be scoped in parallel, as notes only.

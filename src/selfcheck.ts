@@ -177,6 +177,15 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.deepEqual(there.trace.output.applied.legs, 'unknown_option')
 }
 
+// Threats come from damage, not Mineflayer's type: a slime (type `mob`) that hurt the bot is marked as attacking it.
+{
+  const me = { id: 1, position: new Vec3(0, 0, 0), velocity: new Vec3(0, 0, 0), yaw: 0, type: 'player', username: 'Jeeve' }
+  const slime = (id: number) => ({ id, name: 'slime', type: 'mob', position: new Vec3(0, 0, -2 * id), velocity: new Vec3(0, 0, 0) })
+  const bot: any = { entity: me, entities: { 1: me, 2: slime(2), 3: slime(3) }, health: 20, food: 20, heldItem: null, inventory: { items: () => [] }, blockAt: () => null }
+  const encoded = makeEgocentric(DEFAULT_PROGRAM.encoder.params)(bot, { handles: newHandles(), directive: null, channels: {}, events: [], attackers: new Map([[2, Date.now()], [3, Date.now() - 60_000]]) })
+  assert.deepEqual((encoded.state.entities as any[]).map(e => e.what), ['slime (attacking you)', 'slime']) // the hit a minute ago is forgotten
+}
+
 // navigate walks to a place by x and z only: the block System 2 named may be up in a canopy.
 {
   let goal: any
