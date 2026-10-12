@@ -156,6 +156,19 @@ Built in `src/trace.ts`, exporting to staging project `jeeve-dev` via judgeval-j
 - **`perceive` spans** are children of the `system2` span, which now opens when the call starts rather than being recorded after it.
 - **The raw snapshot carries notable blocks** with positions instead of a block cube.
 
+**Since 2026-10-12 ([[brain-monitor]]): JSONL-only rows for the monitor and clips.** These go to `traces/<session>.jsonl` only, not to Judgment, to keep span volume down. Every row has `t` (ms since the epoch) and `kind`.
+
+| `kind` | Written when | Fields |
+|---|---|---|
+| `start` | a span that stays open starts (`system2`, `builder`); its own row comes when it ends | `name`, `span_id` (joins the span's row), `attrs` (the trigger; the request id) |
+| `api_call` | each action of an authored behavior starts (`phase: start`) and settles (`phase: end`) | `run_id`, `call` (e.g. `place([30,-59,-12], "oak_log")`), `line` (the line of the authored code that called it, from the sandbox's stack), `phase`; at end also `ok`, `out` (cut to 500 chars), `ms`. Reads aren't logged (they're synchronous, and loops call them often) |
+| `builder_tool` | each tool call of 2B starts and returns | `request`, `tool` (`write_behavior`, `scan`, `reachable`), `phase`; start: `input` (a draft's full code is `write_behavior`'s input); end: `output` (cut to 4000 chars), `ms` |
+| `builder_step` | each AI SDK step of 2B finishes | `request`, `text`, `reasoning`, `tools` (names called), `finish`, `usage` |
+| `escalation_sent` | an escalation passes the gate and is queued for 2A (suppressed ones stay `escalation_suppressed`) | `reason`, `goal`, `detail` |
+| `marker` | clock sync: `POST /marker` on the local API, or `npm run clip` when OBS reports the recording started (`label: record_start`) and stopped (`record_stop`, with the file's `path`) | `label`, and whatever else the caller sends |
+
+**The local API also streams the JSONL:** `GET /events` sends the session's rows so far, then every new row, as server-sent events ([[brain-monitor]]).
+
 **Not yet:**
 - **Semantic search isn't used.** System 2 has SQL only (`run_sql`).
 

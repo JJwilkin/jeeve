@@ -1,6 +1,7 @@
 // Jeeve client: joins a server like a player, takes instructions (whispers or a local API), keeps the goal
 // tree, runs System 1 on Jev under a program System 2A (Claude) shapes, has System 2B build the behaviors 2A
 // asks for, and traces everything to Judgment.
+import { readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import mineflayer from 'mineflayer'
@@ -38,6 +39,8 @@ const EVENT_WINDOW_MS = 5_000
 // A trial window opens only while nothing threatens the bot: no hostile this close, no damage this recently.
 // The same test pre-empts a running trial; past maxPreempts the trial goes back to 2B as pre-empted.
 const TRIAL_WINDOW = { hostileWithin: 8, quietMs: 5_000, maxPreempts: 3 }
+// Trace rows stay small: long outputs (a scan, an event's data) are cut.
+const short = (v: unknown, max = 500) => { const s = JSON.stringify(v); return s && s.length > max ? s.slice(0, max) + '…' : v }
 
 export async function startAgent (opts: AgentOptions) {
   const project = opts.project ?? process.env.JEEVE_PROJECT ?? 'jeeve-dev'
@@ -89,7 +92,8 @@ export async function startAgent (opts: AgentOptions) {
   }, library)
   const libraryLoad = modules.load()
   const lookup = (name: string) => modules.get(name)
-  const world: ApiHost = { blockAt, scan, reachable, allowed: opts.allowed } // the shared block view (src/world.ts) and who code may whisper to
+  // The shared block view (src/world.ts), who code may whisper to, and each authored action as a trace row.
+  const world: ApiHost = { blockAt, scan, reachable, allowed: opts.allowed, onCall: c => recorder.jsonl({ kind: 'api_call', ...c, out: short(c.out) }) }
   // Behaviors from the library join the seed set; Jev sees them wherever System 2's program allows them.
   for (const m of modules.modules.values()) if (m.kind === 'behavior') BEHAVIORS[m.name] = { ...authoredSpec(m, world), disabled: m.disabled }
   const authoredFailures = new Map<string, number>() // behavior name → failed runs in a row
@@ -295,6 +299,7 @@ export async function startAgent (opts: AgentOptions) {
     }
     lastSent.set(key, Date.now())
     if (!system2) { recorder.jsonl({ kind: 'escalation_unhandled', reason, goal: goal.id }); return }
+    recorder.jsonl({ kind: 'escalation_sent', reason, goal: goal.id, detail })
     pending.push({ reason, detail, goal: goal.id })
     wakeSystem2(reason)
   }
@@ -478,7 +483,7 @@ export async function startAgent (opts: AgentOptions) {
       self: rawSnapshot(bot).self
     }
     console.log(`[builder] ${req.id} started: ${req.need}`)
-    build(req, brief, { trial: (d, _r, signal) => trialPort(d, req, signal, span), perceive: (tool, input) => perceive(tool, input, span) }, req.abort.signal, span, session)
+    build(req, brief, { trial: (d, _r, signal) => trialPort(d, req, signal, span), perceive: (tool, input) => perceive(tool, input, span), log: row => recorder.jsonl({ request: req.id, ...row }) }, req.abort.signal, span, session)
       .catch((err): BuildResult => ({ request: req.id, status: 'failed', reason: req.abort.signal.aborted ? `cancelled: ${req.abort.signal.reason}` : String(err), attempts: [] }))
       .then(result => {
         const cancelled = req.abort.signal.aborted
@@ -639,20 +644,32 @@ export async function startAgent (opts: AgentOptions) {
       if (req.method === 'GET' && req.url === '/status') {
         return reply(200, { goals: goals.status(bot), program: version(program), channels: channels.describe(), modules: modules.list(), session, trace_window: recorder.index })
       }
-      if (req.method === 'POST' && req.url === '/instructions') {
-        let body = ''
-        req.on('data', c => { body += c })
-        req.on('end', () => {
-          try {
-            const { from, text } = JSON.parse(body)
-            if (typeof text !== 'string' || !text.trim()) return reply(400, { error: 'text is required' })
-            const root = instruct(text.trim(), { player: typeof from === 'string' ? from : 'operator', via: 'api' })
-            reply(202, { goal: root.id })
-          } catch { reply(400, { error: 'body must be JSON {from, text}' }) }
-        })
+      // The trace as server-sent events: the session's rows so far, then each new one (the monitor, viz/).
+      if (req.method === 'GET' && req.url === '/events') {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*' })
+        const send = (line: string) => res.write(`data: ${line}\n\n`)
+        for (const line of readFileSync(recorder.file, 'utf8').split('\n')) if (line) send(line)
+        recorder.listeners.add(send)
+        req.on('close', () => recorder.listeners.delete(send))
         return
       }
-      reply(404, { error: 'POST /instructions or GET /status' })
+      const body = (then: (b: Record<string, unknown>) => void) => {
+        let s = ''
+        req.on('data', c => { s += c })
+        req.on('end', () => { try { then(JSON.parse(s)) } catch { reply(400, { error: 'body must be JSON' }) } })
+      }
+      if (req.method === 'POST' && req.url === '/instructions') {
+        return body(({ from, text }) => {
+          if (typeof text !== 'string' || !text.trim()) return reply(400, { error: 'text is required' })
+          const root = instruct(text.trim(), { player: typeof from === 'string' ? from : 'operator', via: 'api' })
+          reply(202, { goal: root.id })
+        })
+      }
+      // A clock-sync row, e.g. when a recording starts (scripts/clip.ts), so footage lines up with the trace.
+      if (req.method === 'POST' && req.url === '/marker') {
+        return body(b => { recorder.jsonl({ ...b, kind: 'marker' }); reply(202, {}) })
+      }
+      reply(404, { error: 'POST /instructions, POST /marker, GET /status or GET /events' })
     })
     // Bound to localhost only: anyone who can reach it is the operator.
     api.listen(opts.apiPort ?? 7777, '127.0.0.1')

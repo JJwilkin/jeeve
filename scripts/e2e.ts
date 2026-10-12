@@ -2,6 +2,7 @@
 // checks the outcomes, a live guard veto, behaviors System 2 writes (pillaring, crafting, a chest), the local API, and
 // that the episode landed in Judgment.
 // Uses the real Jev, Claude (System 2) and Judgment staging. Run: MINECRAFT_EULA=true npm run e2e (EULA once).
+// Watch: join localhost:<port> from your own client (spectator), and/or open the monitor (viz/) on the API.
 // Parallel runs (e.g. one per worktree): give each its own port, JEEVE_PORT=25566 npm run e2e. The server then runs
 // in .server/runs/<port>/ (own world and logs, shared jar) and the API listens on 7790 + (port - 25565).
 import { existsSync, readFileSync, rmSync } from 'node:fs'
@@ -11,6 +12,7 @@ import { Judgeval } from 'judgeval'
 import { startAgent } from '../src/main.ts'
 import { ModuleRegistry } from '../src/modules.ts'
 import { judgmentOrg } from '../src/trace.ts'
+import { canopy, CANOPY } from './scenes.ts'
 import { PORT, startServer } from './server.ts'
 
 const API = 7790 + PORT - 25565
@@ -28,7 +30,12 @@ async function until (what: string, cond: () => boolean, ms: number) {
 }
 const check = (what: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${what}${detail ? ` (${detail})` : ''}`); results.push([what, ok]) }
 
-const server = startServer(line => { if (/ERROR|joined the game|left the game|Done \(|[Gg]ame ?rule|feature|Unknown|Incorrect/.test(line) && !/No key layers/.test(line)) console.log('[server]', line) })
+// Anyone else who joins (your own client, to watch) becomes a spectator next to Jeeve, so they can't change the test.
+const server = startServer(line => {
+  if (/ERROR|joined the game|left the game|Done \(|[Gg]ame ?rule|feature|Unknown|Incorrect/.test(line) && !/No key layers/.test(line)) console.log('[server]', line)
+  const watcher = line.match(/: (\w+) joined the game/)?.[1]
+  if (watcher && watcher !== 'Josh' && watcher !== 'Jeeve') { server.command(`gamemode spectator ${watcher}`); server.command(`tp ${watcher} Jeeve`) }
+})
 await server.ready
 
 const LIBRARY = `traces/e2e-module-library-${PORT}.json` // a scratch library, so test runs don't rewrite modules/library.json
@@ -99,20 +106,14 @@ await until('"collect 10 logs": System 2 sets inventory_delta(*_log, 10)', () =>
 await until('"collect 10 logs": 10 logs in inventory', () => logs() >= 10, 120000)
 await until('"collect 10 logs": Josh hears "done"', () => whispers.some(w => w.startsWith('done: collect 10 logs')), 20000)
 
-// Behaviors the builder (System 2B) writes, asked for by the orchestrator (2A): a tree whose canopy is out of
-// reach from the ground (eyes at -58.4, lowest leaf centre at -53.5). Collect can't get the leaves, and the
-// scratch library starts empty, so 2A has to request a behavior that builds up. A zombie is summoned while 2B
-// works: 2A keeps the game going (Jev fights it) and no trial window opens until it's dead.
-// Persistent leaves, so none decay instead of being broken.
+// Behaviors the builder (System 2B) writes, asked for by the orchestrator (2A): the canopy scene (scripts/scenes.ts).
+// Collect can't get the leaves, and the scratch library starts empty, so 2A has to request a behavior that builds
+// up. A zombie is summoned while 2B works: 2A keeps the game going (Jev fights it) and no trial window opens until
+// it's dead.
 const traceRecords = () => readFileSync(agent.traceFile, 'utf8').trim().split('\n').map(l => JSON.parse(l))
 {
-  const TREE = { x: 30, z: -12 }
-  server.command(`fill ${TREE.x - 6} -60 ${TREE.z - 6} ${TREE.x + 6} -45 ${TREE.z + 6} air`) // the world persists between runs
-  server.command('fill 4 -60 6 20 -50 20 air') // logs "collect 10 logs" left, and older runs' oaks: collect would walk off to them
-  server.command(`fill ${TREE.x} -60 ${TREE.z} ${TREE.x} -55 ${TREE.z} oak_log`)
-  server.command(`fill ${TREE.x - 1} -54 ${TREE.z - 1} ${TREE.x + 1} -52 ${TREE.z + 1} oak_leaves[persistent=true]`)
-  server.command(`tp Jeeve ${TREE.x - 3} -60 ${TREE.z}`)
-  server.command(`tp Josh ${TREE.x - 6} -60 ${TREE.z + 4}`)
+  const TREE = CANOPY
+  canopy(server.command)
   await sleep(2000)
   // Logs and leaves around the tree. Logs alone can't be checked: Jeeve may pillar with the logs he collected.
   const treeLeft = (kind: 'log' | 'leaves') => {
@@ -128,7 +129,7 @@ const traceRecords = () => readFileSync(agent.traceFile, 'utf8').trim().split('\
   const asked = Date.now()
   const since = (kind: string, t = asked) => traceRecords().filter(r => r.kind === kind && r.t > t)
   const windowEvents = (name: string, t = asked) => traceRecords().filter(r => r.kind === 'event' && r.name === name && r.t > t)
-  josh.whisper('Jeeve', "break that whole tree, leaves included. The leaves won't decay on their own")
+  josh.whisper('Jeeve', CANOPY.instruction)
   await until('split: 2A requests a behavior and Josh hears "working on it"', () => whispers.some(w => w.startsWith('working on it')) && since('request').length > 0, 120000)
   const requested = Date.now()
   console.log(`INFO split: "working on it" ${((requested - asked) / 1000).toFixed(1)} s after the instruction; request ${JSON.stringify(since('request')[0]?.input)}`)

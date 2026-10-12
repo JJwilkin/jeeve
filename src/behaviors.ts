@@ -22,7 +22,7 @@ export type Spec = {
   targets: 'entity' | 'block' | 'item' // block and item targets are { name, count }
   describe: (target: string) => string
   describePlace?: (where: string) => string // also takes the goal's place as a target ({ place: [x, y, z] })
-  start: (bot: Bot, target: any, emit: Emit) => Running
+  start: (bot: Bot, target: any, emit: Emit, runId: string) => Running
   version?: number // authored behaviors; seed behaviors are version 1
   disabled?: string // an authored behavior that kept failing: no longer offered
 }
@@ -176,7 +176,7 @@ export class Channels {
     }
     for (const c of spec.channels) this.slots[c] = slot
     this.hooks.start(slot)
-    slot.run = spec.start(this.bot, target, slot.emit)
+    slot.run = spec.start(this.bot, target, slot.emit, slot.runId)
   }
 
   // Stop whatever holds any of these channels (a multi-channel behavior is stopped as a whole).
@@ -224,7 +224,9 @@ export type ApiHost = {
   scan: (bot: Bot, opts: { match: string, radius?: number, los?: boolean, max?: number }) => unknown
   reachable: (bot: Bot, pos: [number, number, number]) => Promise<unknown>
   allowed: string[] // players authored code may whisper to: the instruction allowlist
+  onCall?: (row: ApiCall) => void // each action as it starts and as it settles (a trace row, for the monitor)
 }
+export type ApiCall = { run_id: string, call: string, line?: number, phase: 'start' | 'end', ok?: boolean, out?: unknown, ms?: number }
 type Xyz = [number, number, number]
 // One run's state: the window it opened (hands own windows; closed when the run ends) and its event listeners.
 type Ctx = { bot: Bot, host: ApiHost, win: any, offs: Set<() => void> }
@@ -520,7 +522,7 @@ export function authoredSpec (m: Pick<Module, 'name' | 'description' | 'code' | 
     targets: m.targets!,
     version: m.version,
     describe: t => `${m.description} (target: ${t})`,
-    start (bot, target, emit) {
+    start (bot, target, emit, runId) {
       const c: Ctx = { bot, host, win: null, offs: new Set() }
       const log: Array<{ call: string, ok: boolean, out: unknown, ms: number }> = [] // the last 30 actions, for System 2
       const inflight = new Set<(err: Error) => void>()
@@ -536,9 +538,15 @@ export function authoredSpec (m: Pick<Module, 'name' | 'description' | 'code' | 
         reads: API_READS,
         actions: API_ACTIONS,
         read: (name, args) => READS[name].run(c, ...args),
-        act: (name, args) => {
+        act: (name, args, line) => {
           const t0 = Date.now()
           const call = `${name}(${args.map(a => JSON.stringify(a)).join(', ')})`
+          host.onCall?.({ run_id: runId, call, line, phase: 'start' })
+          const settled = (ok: boolean, out: unknown) => {
+            const r = { call, ok, out, ms: Date.now() - t0 }
+            log.push(r)
+            host.onCall?.({ run_id: runId, line, phase: 'end', ...r })
+          }
           let reject: (err: Error) => void = () => {}
           return new Promise((resolve, rej) => {
             reject = rej
@@ -549,8 +557,8 @@ export function authoredSpec (m: Pick<Module, 'name' | 'description' | 'code' | 
               return e.run(c, ...args)
             }).then(resolve, rej)
           }).then(
-            out => { log.push({ call, ok: true, out, ms: Date.now() - t0 }); return out },
-            err => { log.push({ call, ok: false, out: String(err.message ?? err), ms: Date.now() - t0 }); throw err }
+            out => { settled(true, out); return out },
+            err => { settled(false, String(err.message ?? err)); throw err }
           ).finally(() => { inflight.delete(reject); if (log.length > 30) log.shift() })
         },
         // Deferred: code that fails at once would otherwise end the run inside Channels.set, before it has a slot.

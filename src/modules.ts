@@ -176,7 +176,7 @@ export type BehaviorHost = {
   reads: string[] // synchronous: return a value, or throw
   actions: string[] // asynchronous
   read: (name: string, args: unknown[]) => unknown
-  act: (name: string, args: unknown[]) => Promise<unknown>
+  act: (name: string, args: unknown[], line?: number) => Promise<unknown> // line: where in the authored code it was called
   end: (r: { value?: unknown, error?: string }) => void // called once, unless cancelled first
 }
 
@@ -184,7 +184,9 @@ const realmPrelude = (reads: string[], actions: string[]) => String.raw`(() => {
   const bridge = globalThis.__bridge; delete globalThis.__bridge;
   const pending = new Map(); let next = 0;
   const read = name => (...args) => { const r = JSON.parse(bridge(0, name, JSON.stringify(args))); if ('e' in r) throw new Error(r.e); return r.v };
-  const act = name => (...args) => new Promise((resolve, reject) => { const id = ++next; pending.set(id, { resolve, reject }); bridge(id, name, JSON.stringify(args)) });
+  // The calling line of the authored code (lineOffset makes it line 1), so a monitor can show which line runs.
+  const line = () => { for (const m of String(new Error().stack).matchAll(/behavior:(\d+):/g)) if (+m[1] > 0) return +m[1] };
+  const act = name => (...args) => new Promise((resolve, reject) => { const id = ++next; pending.set(id, { resolve, reject }); bridge(id, name, JSON.stringify(args), line()) });
   const api = {};
   for (const n of ${JSON.stringify(reads)}) api[n] = read(n);
   for (const n of ${JSON.stringify(actions)}) api[n] = act(n);
@@ -200,10 +202,12 @@ const realmPrelude = (reads: string[], actions: string[]) => String.raw`(() => {
 const SETTLE = new vm.Script('__settle(__arg)')
 const START = new vm.Script('__start(__arg)')
 
-function behaviorRealm (code: string, reads: string[], actions: string[], bridge: (id: number, name: string, args: string) => string | undefined) {
+function behaviorRealm (code: string, reads: string[], actions: string[], bridge: (id: number, name: string, args: string, line?: number) => string | undefined) {
   const ctx = vm.createContext({}, { codeGeneration: { strings: false, wasm: false }, microtaskMode: 'afterEvaluate' })
   ctx.__bridge = bridge
-  new vm.Script(`'use strict';${PRELUDE}\n${realmPrelude(reads, actions)}\nglobalThis.__fn = (${code});\nif (typeof __fn !== 'function') throw new TypeError('code must be a function expression');`)
+  const head = `'use strict';${PRELUDE}\n${realmPrelude(reads, actions)}\n`
+  new vm.Script(`${head}globalThis.__fn = (${code});\nif (typeof __fn !== 'function') throw new TypeError('code must be a function expression');`,
+    { filename: 'behavior', lineOffset: -head.split('\n').length + 1 })
     .runInContext(ctx, { timeout: 50 })
   return ctx
 }
@@ -240,7 +244,7 @@ export function startBehavior (code: string, target: unknown, host: BehaviorHost
     ctx.__arg = arg
     try { script.runInContext(ctx, { timeout: MODULE_LIMITS.timeoutMs }) } catch (err) { finish({ error: String((err as Error).message ?? err) }) }
   }
-  const ctx = behaviorRealm(code, host.reads, host.actions, (id, name, args) => {
+  const ctx = behaviorRealm(code, host.reads, host.actions, (id, name, args, line) => {
     if (!live) return JSON.stringify({ e: 'cancelled' })
     if (name === '__end') { finish(JSON.parse(args)); return undefined }
     const parsed = JSON.parse(args) as unknown[]
@@ -249,7 +253,7 @@ export function startBehavior (code: string, target: unknown, host: BehaviorHost
     }
     // Settled in a macrotask: code whose actions keep failing at once would otherwise loop in microtasks and
     // starve every timer, its own time limit included (a builder-written craft loop froze the agent that way).
-    Promise.resolve().then(() => host.act(name, parsed)).then(
+    Promise.resolve().then(() => host.act(name, parsed, line)).then(
       v => setImmediate(() => enter(SETTLE, JSON.stringify([id, true, v ?? null]))),
       err => setImmediate(() => enter(SETTLE, JSON.stringify([id, false, String((err as Error)?.message ?? err)]))))
     return undefined

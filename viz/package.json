@@ -1,0 +1,25 @@
+{
+  "name": "jeeve-viz",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "monitor": "vite",
+    "build": "vite build",
+    "check": "node src/timeline.check.ts",
+    "typecheck": "tsc",
+    "studio": "remotion studio src/remotion/index.tsx"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.534",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "remotion": "4.0.534"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}

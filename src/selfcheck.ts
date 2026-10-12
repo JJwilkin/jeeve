@@ -372,6 +372,10 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   // Sync reads, awaited actions, the target as plain data.
   assert.deepEqual(await run('async (api, t) => [api.blockAt(0, 0, 0), api.blockAt(1, 0, 0), await api.wait(3), t.name].join(",")'), { value: 'oak_log,,3,oak_leaves' })
   assert.deepEqual(await run('async (api) => { await api.wait(1); throw new Error("boom") }'), { error: 'boom' })
+  // Each action reports the line of the authored code that called it (the monitor highlights it).
+  const lines: unknown[] = []
+  await run('async (api) => {\n  const step = () => api.wait(1)\n  await api.wait(0)\n  await step()\n}', { act: async (_n, _a, line) => { lines.push(line) } })
+  assert.deepEqual(lines, [3, 2])
   // No way back to the host: no bridge, no host Function through the api, no Node, no string eval.
   assert.deepEqual(await run('async (api) => [typeof __bridge, typeof process, typeof require].join()'), { value: 'undefined,undefined,undefined' })
   assert.match((await run('async (api) => api.blockAt.constructor("return process")()')).error!, /Code generation from strings disallowed/)

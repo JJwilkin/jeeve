@@ -53,7 +53,12 @@ export class Recorder {
     return r
   }
 
-  jsonl (record: Record<string, unknown>) { appendFileSync(this.file, JSON.stringify({ t: Date.now(), ...record }) + '\n') }
+  listeners = new Set<(line: string) => void>() // live readers of the JSONL (the monitor's event stream)
+  jsonl (record: Record<string, unknown>) {
+    const line = JSON.stringify({ t: Date.now(), ...record })
+    appendFileSync(this.file, line + '\n')
+    for (const l of this.listeners) l(line)
+  }
 
   private start (name: string, attrs: Attrs, parent: Span | null, links?: Link[]): Span {
     const ctx = parent ? trace.setSpan(context.active(), parent) : context.active()
@@ -113,10 +118,16 @@ export class Recorder {
   }
 
   // A span left open while work happens under it (a System 2 call); end it with finish().
-  open (name: string, attrs: Attrs = {}) { return this.start(name, attrs, this.window) }
+  open (name: string, attrs: Attrs = {}) { return this.started(name, attrs, this.start(name, attrs, this.window)) }
 
   // A trace of its own in this session, for work that outlives windows (a 2B build). Links point at its cause.
-  openTrace (name: string, attrs: Attrs, links: Link[] = []) { return this.start(name, attrs, null, links) }
+  openTrace (name: string, attrs: Attrs, links: Link[] = []) { return this.started(name, attrs, this.start(name, attrs, null, links)) }
+
+  // A `start` row for spans that stay open, so a live view can show "thinking…"; the span's own row comes at finish.
+  private started (name: string, attrs: Attrs, span: Span) {
+    this.jsonl({ kind: 'start', name, span_id: this.ids(span).span_id, attrs })
+    return span
+  }
 
   finish (span: Span, name: string, o: Finish): string {
     if (o.attrs) span.setAttributes(clean(o.attrs))

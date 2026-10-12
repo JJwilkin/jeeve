@@ -31,6 +31,7 @@ export type BuildResult =
 export type BuilderPorts = {
   trial: (draft: BehaviorDraft, req: CapabilityRequest, signal: AbortSignal) => Promise<TrialReport>
   perceive: (tool: string, input: Record<string, unknown>) => Promise<unknown>
+  log?: (row: Record<string, unknown>) => void // 2B's steps and tool calls as trace rows (the AI SDK spans reach Judgment only)
 }
 
 const WRITE_BEHAVIOR = {
@@ -64,16 +65,24 @@ export async function build (req: CapabilityRequest, brief: Record<string, unkno
   const attempts: TrialReport[] = []
   let passed: { behavior: string, usage: string | null } | null = null
   let inflight: Promise<TrialReport> | null = null // the trial running now, if any
+  // Each tool call as a start row (a draft's full code is write_behavior's input) and an end row.
+  const logged = <I, O>(name: string, run: (input: I) => Promise<O>) => async (input: I) => {
+    const t0 = Date.now()
+    ports.log?.({ kind: 'builder_tool', phase: 'start', tool: name, input })
+    const output = await run(input)
+    ports.log?.({ kind: 'builder_tool', phase: 'end', tool: name, output: JSON.stringify(output).slice(0, 4000), ms: Date.now() - t0 })
+    return output
+  }
   const perceive = (name: string, description: string, properties: Record<string, unknown>, required: string[]) => tool({
     description,
     inputSchema: jsonSchema<Record<string, unknown>>({ type: 'object', additionalProperties: false, required, properties }),
-    execute: input => ports.perceive(name, input)
+    execute: logged(name, input => ports.perceive(name, input))
   })
   const tools = {
     write_behavior: tool({
       description: 'Write a behavior (or a new version of one) and trial it on the request\'s trial target. Returns the trial result.',
       inputSchema: jsonSchema<BehaviorDraft>(WRITE_BEHAVIOR),
-      execute: async draft => {
+      execute: logged('write_behavior', async (draft: BehaviorDraft) => {
         if (attempts.length >= BUILDER_LIMITS.trials) return { error: 'no trials left' }
         inflight = ports.trial(draft, req, signal).then(r => {
           attempts.push(r)
@@ -81,7 +90,7 @@ export async function build (req: CapabilityRequest, brief: Record<string, unkno
           return r
         })
         return await inflight
-      }
+      })
     }),
     scan: perceive('scan', 'Find blocks matching a glob (e.g. "*_log", "oak_leaves") within a radius (1-32, default 16), grouped into connected clusters with exact counts, bounds (absolute [x, y, z]), position relative to the feet (rel) and height range (y_rel). los: only blocks in line of sight.',
       { match: { type: 'string' }, radius: { type: 'integer' }, los: { type: 'boolean' } }, ['match']),
@@ -99,6 +108,7 @@ export async function build (req: CapabilityRequest, brief: Record<string, unkno
     tools,
     stopWhen: [stepCountIs(BUILDER_LIMITS.steps), () => !!passed || attempts.length >= BUILDER_LIMITS.trials],
     abortSignal: signal,
+    onStepFinish: step => ports.log?.({ kind: 'builder_step', text: step.text, reasoning: step.reasoningText, tools: step.toolCalls.map(c => c.toolName), finish: step.finishReason, usage: step.usage }),
     providerOptions: { anthropic: { effort: EFFORT } },
     telemetry: {
       functionId: 'builder',

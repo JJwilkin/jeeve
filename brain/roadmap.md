@@ -76,4 +76,4 @@ All three instructions pass, and so do a live guard veto and the local API. Syst
 4. **Stage 4, goals and reward,** plus the first benchmarks (tech-tree ladder, PvP arena), run on that infrastructure. The judge design can be scoped in parallel, as notes only.
 5. **The outer loop** on 2B, once there's a signal to climb.
 
-**In parallel (distribution):** the brain monitor and clip pipeline ([[brain-monitor-and-clips]], task), so progress can be shared as video.
+**In parallel (distribution):** ~~the brain monitor and clip pipeline~~ ([[brain-monitor-and-clips]], done 2026-10-12 → [[brain-monitor]]: a live monitor on the agent's event stream, and `npm run clip <scenario>` rendering 16:9 and 9:16 clips with Remotion), so progress can be shared as video.
