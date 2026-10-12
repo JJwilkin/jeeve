@@ -53,7 +53,8 @@ for (const r of trace.filter(r => r.kind === 'system2' && r.input?.seen_map)) {
   const seen = r.input.seen_map as Cluster[]
   const unseen = truth.filter(c => !seen.some(s => overlaps(s, c)))
   const stale = seen.filter(s => !truth.some(c => overlaps(s, c)))
-  const off = truth.flatMap(c => { const s = seen.find(x => overlaps(x, c)); return s && total(s) !== total(c) ? [`${label(c)} believed ${total(s)}`] : [] })
+  // A canopy's hidden inside is expected under line of sight: flag only counts under half the truth, or above it.
+  const off = truth.flatMap(c => { const s = seen.find(x => overlaps(x, c)); return s && (total(s) < total(c) / 2 || total(s) > total(c)) ? [`${label(c)} believed ${total(s)}`] : [] })
   const trig = r.attrs?.['jeeve.system2.trigger']
   if (!unseen.length && !stale.length && !off.length) { say(`- ${sec(r.t)} ${trig}: matches (${truth.length} clusters)`); continue }
   say(`- ${sec(r.t)} ${trig}:${unseen.length ? ` **unseen** ${unseen.map(label).join('; ')}.` : ''}${stale.length ? ` **stale** ${stale.map(label).join('; ')}.` : ''}${off.length ? ` **counts off** ${off.join('; ')}.` : ''}`)
