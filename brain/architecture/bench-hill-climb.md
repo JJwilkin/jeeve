@@ -32,6 +32,14 @@ Three scored scenes, run unattended, and what each round changed. Started with J
 
 From round 7 the scenes are randomized per run (seeded: 3–5 trees of oak or birch, trunks 5–7, at random spots; workshop trees and chest at random spots; 3–5 guard waves; no free building blocks), and the library starts fresh, so what's measured is generalization, not one layout. `bench/library-fixed-scenes.json` keeps what rounds 1–6 learned.
 
+| Random round | Commit | orchard | workshop | guard |
+|---|---|---|---|---|
+| 1 (empty library) | 8c4235f | PASS 330 s, 5 trees; built `clear_tall_tree` in 2 trials, 123 s, with no free blocks | unscored: Jeeve finished, but the referee couldn't reach the chest (fixed) | PASS |
+| 2 | d445ae0 | PASS 164 s | PASS 106 s | PASS |
+| 3 | 3fc49d3 | PASS 159 s | **PASS 34 s** | PASS |
+
+On layouts it hadn't seen, Jeeve learned in the first round and reused after. 2A's map had all five orchard trees at the first instruction, from one spot (the far look and face-ray visibility).
+
 ## Gaps found, and the harness fix for each
 1. **Crafting corrupted the inventory** (round 1). `bot.craft` resolves before the server's slot updates arrive, so back-to-back crafts laid out grids from stale slots: buttons instead of sticks, and 20 s hangs. Reproduced against the server in isolation. **Fix:** every item-moving action waits for the inventory to settle (`settle()`, `src/behaviors.ts`).
 2. **Every run relearned everything** (round 1). **Fix:** the shared library (learning across episodes). The workshop went 238 s (fail) → 173 s → 69 s.
@@ -44,6 +52,9 @@ From round 7 the scenes are randomized per run (seeded: 3–5 trees of oak or bi
 8. **Target flip-flop** (round 4). With two zombies close, Jev switched attack targets every 0.5 s for 7 s, so no swing landed, and Jeeve died. 2A's guidance ("keep the current target") didn't hold. **Fix:** a behavior just started can't be swapped for the same behavior on another target within 1.5 s (`LIMITS.switchDwellMs`), unless it ended: hysteresis in the control loop, not a strategy rule.
 9. **Bench hygiene** (round 4). A bench port's world persists between rounds, and with it the players' health and hunger: Jeeve started guard at 10 HP. **Fix:** every run heals and feeds both players first.
 10. **2A didn't need `survey` on the fixed orchard** (rounds 5–6: 0 calls). The first instruction needs only the nearest tree, and by the second the far look had found the rest. It stays a tool 2A picks when a goal is out of view.
+
+11. **Half of 2A's calls changed nothing** (random rounds 1–2: 13 of 25 and 7 of 15). Nearly all were Jev's doubts (`low_confidence`, `jev_escalate`) that 2A answered "carry on". **Fix, learning from 2A's own answers:** an escalation 2A answered with no change backs off for that goal, doubling from 30 s to 4 min. Acting on one resets it. A fast health drop still bypasses.
+12. **Search beyond sight:** a fourth scene, forage ("get me 16 logs", every tree 28–45 blocks out, beyond the far look). It tests whether 2A explores with what it has (step places, `survey`, the seen map).
 
 ## Open
 - **Trials still consume materials** ([[orchestrator-and-builder]] → Open questions). Workshop round 1 burned its wood on failed trials.
