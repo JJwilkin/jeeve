@@ -28,6 +28,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[perception-tools]] (done → [[perception]]): System 2 asks for detail (scan, reachable) instead of guessing from buckets; owns the block view; exact counts and heights in the summary
 - [[full-player-action-api]] (done → [[behaviors-and-guards]]): give code System 2 writes every action a player has (craft, containers, attack, use, eat, chat…), keeping no raw bot, guards and channels
 - [[system-2a-2b]] (done → [[orchestrator-and-builder]]): split System 2 into an orchestrator (2A, custom loop) and a builder (2B, Vercel AI SDK; Luna later) that talk through capability requests and trial windows
+- [[brain-monitor-and-clips]] (todo): live monitor + Remotion clips showing System 1, System 2 and the builder side by side with the game; fills five trace gaps
 
 ### Architecture
 - [[overview]]: what we build vs. what the agent discovers, the discovery loop, fast and slow thinking, goals and time as one hierarchy, open questions
