@@ -41,6 +41,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[behaviors-and-guards]]: the deterministic layer: the behavior contract, layered behaviors, safety guards, behaviors System 2 writes at runtime (sandbox, live trials, library), and the player action API: every Mineflayer action, menus on hands, events, item targets, chat policy
 - [[perception]]: perception as tools: `scan` and `reachable` for System 2 (traced as `perceive` spans), one read-only query layer (`src/world.ts`) shared with modules and authored behaviors, exact counts and heights in the summary, x-ray vs. line of sight
 - [[brain-monitor]]: the one visual of the three systems (caption, game, System 2 / builder / System 1 with message arrows and the running code): the timeline core, the live monitor on `GET /events`, Remotion clips with speed-ups and captions, `npm run clip <scenario>`
+- [[bench-hill-climb]]: three scenes scored by Josh (orchard, workshop, guard), unattended `npm run bench`, a skill library shared across runs, `gaps.ts` (ground truth vs what Jeeve believed), and the round-by-round log of gaps and harness fixes
 - [[learning]]: decision: context only, no training. Live and cross-episode loops, per-minute traces linked by lineage, agentic search over past traces
 
 ### Research

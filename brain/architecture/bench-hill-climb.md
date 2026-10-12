@@ -1,0 +1,41 @@
+---
+date: 2026-10-12
+tags: [architecture, benchmarks, evaluation, search, learning]
+status: active
+---
+# Bench and the overnight hill-climb
+
+Three scored scenes, run unattended, and what each round changed. Started with Joshua, 2026-10-12. The rule he set: **don't tune to the scenes.** Each failure points to a gap in Jeeve's **search** (finding out what the world holds that matters for the goal) or **learning** (keeping what worked as skills). The fix goes in the harness, per the [[bitter-lesson]].
+
+## The bench
+- `npm run bench -- <rounds> [scenarios] [--fresh]` (`scripts/bench.ts`). Each scenario in `scripts/clip.ts` runs with `--bench`: no OBS, no client, no render. Runs go in parallel on ports 25571+, each with its own world. One row per run goes to `bench/results.jsonl`: pass, time, 2A calls and seconds, builds and trials, the library it started with, plan steps, look-arounds, deaths, commit.
+- **Scored by Josh, not by Jeeve.** The scripted player sees every block, so verification is ground truth:
+  - **orchard:** four canopy trees, "break the tree closest to you", then "the other three the same way". Pass: no logs or leaves left in the row.
+  - **workshop:** two small trees and a chest, "make a wooden pickaxe and put it in the chest". Pass: a pickaxe in the chest (Josh opens it).
+  - **guard:** at night, "follow me and keep me safe", while Josh moves between four spots and four zombie waves come. Pass: no zombies left, and Josh and Jeeve both alive.
+- **Learning across runs.** Every run starts from `bench/library.json`: the skills and checks learned so far, across all scenes. After each round, `bench` merges what each run learned back in. `--fresh` starts empty.
+- **The camera without a client.** Josh records the world (`<dir>/world.jsonl`: the view box's blocks, each change, entities at 10 Hz). Clips draw it with three.js (`viz/src/WorldScene.tsx`) when there's no OBS footage ([[brain-monitor]]).
+- **The all-seeing eye.** `node scripts/gaps.ts <dir>` (run after every bench run, written to `<dir>/gaps.md`):
+  - at each 2A call, 2A's `seen_map` vs the truth: trees unseen, stale blocks, counts off;
+  - goals whose check said a spot was clear but it wasn't;
+  - time: body idle, per behavior, 2A thinking, building; behavior endings.
+
+## Rounds
+| Round | Commit | orchard | workshop | guard | What changed before it |
+|---|---|---|---|---|---|
+| 1 | 6825298 | PASS 422 s (built `clear_tree_pillar`, 3 trials, 246 s) | FAIL 238 s: crafts turned planks into buttons and hung 20 s; trials used up the wood | PASS 125 s | Baseline: plans, seen memory, look-to-confirm, empty library |
+| 2 | 27be657 | PASS 246 s (reused the skill) | PASS 173 s (built craft and deposit skills) | PASS 125 s | Crafting settles the inventory; shared library seeded from round 1 |
+| 3 | 4c91e84 | PASS 313 s, body idle 145 s, 3 of 4 trees unseen when planning | **PASS 69 s** (both skills reused) | PASS 125 s, Jeeve 10 HP | Face-ray visibility, far look, ground by shape |
+
+## Gaps found, and the harness fix for each
+1. **Crafting corrupted the inventory** (round 1). `bot.craft` resolves before the server's slot updates arrive, so back-to-back crafts laid out grids from stale slots: buttons instead of sticks, and 20 s hangs. Reproduced against the server in isolation. **Fix:** every item-moving action waits for the inventory to settle (`settle()`, `src/behaviors.ts`).
+2. **Every run relearned everything** (round 1). **Fix:** the shared library (learning across episodes). The workshop went 238 s (fail) → 173 s → 69 s.
+3. **Half-blind visibility** (found with `gaps.ts`). Mineflayer's `canSeeBlock` casts one ray at the block's centre with a range measured to its corner, so blocks below eye level or half hidden read as unseen: 3 of a tree's 27 leaves. **Fix:** `visible()`, a block is seen if a ray reaches one of its exposed faces that point at the eyes. `scan` and the seen memory both use it.
+4. **Jeeve only saw 8 blocks out.** **Fix:** a far look every 2 s (24 out, 16 up, ~50 ms), skipping types that are everywhere there (ground, air).
+5. **2A's map merged the ground into the trees.** The partly seen grass floor came under the 512-block terrain cutoff and swallowed every tree touching it. **Fix:** ground is told by shape (most of a type on one height level, over a wide area), not by count.
+6. **Option thrash** (round 2). An option's count is part of its key (`clear_tree_pillar:oak_log(5)`). When the count dropped, Jev saw a "new" option and restarted the running skill: 18 restarts on one tree. **Fix:** the running option under any count stays `keep_current`.
+7. **Occluded search** (round 3). From the start spot, the first tree hides the other three, so 2A planned for one tree. Seeing farther can't fix that; moving can. **Fix:** a `survey` tool for 2A: Jeeve walks a loop 6 blocks around where it stands, looking, and 2A gets the updated map. Search is 2A's choice, like `scan`.
+
+## Open
+- **Trials still consume materials** ([[orchestrator-and-builder]] → Open questions). Workshop round 1 burned its wood on failed trials.
+- **Idle time** is still large while the builder works or 2A thinks. Jev could do the parts of a plan it can already do meanwhile.
