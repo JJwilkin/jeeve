@@ -194,6 +194,7 @@ const scenario = SCENARIOS[name]
 if (!scenario) throw new Error(`usage: npm run clip <${Object.keys(SCENARIOS).join('|')}> [-- --no-record | --bench]`)
 // --bench: an unattended scored run (scripts/bench.ts): no OBS, no client, no render; one results row.
 const bench = args.includes('--bench')
+const commit = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim() // the code this run started on
 const record = !bench && !args.includes('--no-record')
 const CAMERA = bench ? undefined : process.env.JEEVE_CAMERA
 const API = 7790 + PORT - 25565
@@ -318,7 +319,7 @@ const result = {
   plan_steps: rows.filter(r => r.kind === 'goal' && r.attrs?.['jeeve.goal.plan_step']).length,
   confirms: rows.filter(r => r.kind === 'event' && r.name === 'confirm').length,
   deaths: rows.filter(r => r.kind === 'event' && r.name === 'death').length,
-  commit: spawnSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim(),
+  commit,
   session: basename(traceFile, '.jsonl'), dir
 }
 mkdirSync('bench', { recursive: true })
