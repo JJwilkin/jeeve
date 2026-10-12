@@ -8,7 +8,7 @@ import collectblock from 'mineflayer-collectblock'
 import { Judgeval } from 'judgeval'
 import { authoredSpec, BEHAVIORS, CHANNELS, Channels, type Spec, type WorldReads } from './behaviors.ts'
 import { coalescing, makeDecider, type Ask } from './decide.ts'
-import { inventoryCounts, newHandles, rawSnapshot, type Directive } from './encoder.ts'
+import { attacking, describeEntity, handleFor, inventoryCounts, newHandles, rawSnapshot, type Attackers, type Directive } from './encoder.ts'
 import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal } from './goals.ts'
 import { guardedMovements, installGuards } from './guards.ts'
 import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type BehaviorTrial, type ModuleSource, type Snapshot } from './modules.ts'
@@ -57,6 +57,11 @@ export async function startAgent (opts: AgentOptions) {
   let directive: Directive | null = null
   let lastView: unknown = null
   const handles = newHandles()
+  const attackers: Attackers = new Map()
+  // Health over the last 5 s, so a fast drop can bypass the no-repeat window (see escalate()).
+  const healthLog: Array<{ t: number, hp: number }> = []
+  // ponytail: 4 HP in 5 s is a guess (run jeeve-2026-10-11T16-36-51-167Z lost 2 HP every 0.5 s); tune from traces.
+  const fallingFast = () => healthLog.some(h => Date.now() - h.t <= 5000 && h.hp - bot.health >= 4)
   let program = DEFAULT_PROGRAM
   let wake = (_reason: string) => {}
   let heartbeat: ReturnType<typeof setInterval> | undefined
@@ -190,7 +195,7 @@ export async function startAgent (opts: AgentOptions) {
 
   function wireDecider () {
     const decide = makeDecider({
-      bot, program, handles, channels, remaining,
+      bot, program, handles, channels, remaining, attackers,
       directive: () => directive && { ...directive, goal: goalLine(), place: goals.place() },
       events: () => recentFor(EVENT_WINDOW_MS),
       record: span => {
@@ -224,7 +229,7 @@ export async function startAgent (opts: AgentOptions) {
     return `${leaf.text}${leaf.done_when ? `: done when ${leaf.done_when.desc}` : ''}${p ? ` (${p.have}/${p.want})` : ''}`
   }
 
-  // ---- System 2: one call in flight, escalations merged, no repeats within 30 s ----
+  // ---- System 2: one call in flight, escalations merged, no repeats within 30 s unless health is falling fast ----
   // Its perception calls are traced as `perceive` spans under the open system2 span.
   let system2Span: ReturnType<Recorder['open']> | undefined
   const perceive: Perceive = async (tool, input) => {
@@ -263,7 +268,10 @@ export async function startAgent (opts: AgentOptions) {
     note(`escalation: ${reason}`)
     recorder.stats.escalations.push(reason)
     const key = `${reason}|${goal.id}|${version(program)}`
-    if (jevDoubtDuringTrial(reason) || (reason !== 'instruction' && reason !== 'behavior_trial' && Date.now() - (lastSent.get(key) ?? 0) < NO_REPEAT_MS)) {
+    // A fast health drop bypasses the window: in run jeeve-2026-10-11T16-36-51-167Z it suppressed every jev_escalate
+    // while slimes took health from 11 to 1.
+    const bypass = reason === 'instruction' || reason === 'behavior_trial' || fallingFast()
+    if (jevDoubtDuringTrial(reason) || (!bypass && Date.now() - (lastSent.get(key) ?? 0) < NO_REPEAT_MS)) {
       recorder.jsonl({ kind: 'escalation_suppressed', reason, goal: goal.id })
       return
     }
@@ -533,7 +541,7 @@ export async function startAgent (opts: AgentOptions) {
     let ticks = 0
     const watching = new Map<string, boolean>()
     bot.on('physicsTick', () => {
-      const near = Object.values(bot.entities).some(e => e.type === 'hostile' && e.position.distanceTo(bot.entity.position) <= program.triggers.hostile_within)
+      const near = Object.values(bot.entities).some(e => (e.type === 'hostile' || attacking(attackers, e.id)) && e.position.distanceTo(bot.entity.position) <= program.triggers.hostile_within)
       if (near && !hostileNear) { note('hostile mob within range'); if (fires('hostile_near')) wake('hostile_near') }
       hostileNear = near
       if (++ticks % 5 !== 0) return
@@ -551,10 +559,18 @@ export async function startAgent (opts: AgentOptions) {
     setInterval(() => { if (recorder.window && Date.now() - recorder.openedAt >= WINDOW_MS) recorder.cut('time') }, 1000)
   })
 
-  bot.on('entityHurt', e => {
+  bot.on('health', () => {
+    healthLog.push({ t: Date.now(), hp: bot.health })
+    while (Date.now() - healthLog[0].t > 5000) healthLog.shift()
+  })
+  // Damage is attributed to its source (Mineflayer reads it from the 1.20+ damage_event), so being hit makes
+  // anything a threat: the encoder marks it as attacking, and hostile_near counts it.
+  bot.on('entityHurt', (e, source?: typeof e) => {
     if (e === bot.entity) {
-      note('took damage')
-      recorder.windowEvent('damage', { health: bot.health })
+      if (source) attackers.set(source.id, Date.now())
+      const from = source ? `${handleFor(handles, source.id)} (${describeEntity(source)})` : undefined
+      note(from ? `took damage from ${from}` : 'took damage')
+      recorder.windowEvent('damage', { health: bot.health, source: from })
       if (fires('damage_taken')) wake('damage_taken')
     } else if (e.type === 'player' && e.username === goals.path()[0]?.from?.player) {
       note(`${e.username} took damage`)

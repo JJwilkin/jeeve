@@ -36,6 +36,8 @@ const agent = await startAgent({ port: PORT, allowed: ['Josh'], apiPort: API, mo
 const josh = mineflayer.createBot({ username: 'Josh', auth: 'offline', host: 'localhost', port: PORT })
 await Promise.all([new Promise<void>(r => agent.bot.once('spawn', () => r())), new Promise<void>(r => josh.once('spawn', () => r()))])
 const whispers: string[] = []
+let deaths = 0 // any death fails the run: a one-shot health read once passed at 10.8 HP, 3 s before he died
+agent.bot.on('death', () => { deaths++; console.log('[jeeve] died') })
 josh.on('whisper', (from, msg) => { console.log(`[josh] ${from} whispers: ${msg}`); whispers.push(msg) })
 
 const jeeveFromJosh = () => Object.values(josh.entities).find(e => e.username === 'Jeeve')
@@ -156,7 +158,21 @@ await sleep(1000)
 const zombieAlive = () => Object.values(josh.entities).some(e => e.name === 'zombie')
 await until('zombie spawned and visible', zombieAlive, 10000)
 await until('"defend me": the zombie is killed', () => !zombieAlive(), 45000)
-check('Jeeve survived', agent.bot.health > 0, `health ${agent.bot.health}`)
+
+// Slimes: Mineflayer types them `mob`, not `hostile`, so only the damage they deal marks them as threats. In run
+// jeeve-2026-10-11T16-36-51-167Z five killed Jeeve while Jev stood still. Medium ones hit; the small ones they split into don't.
+server.command('effect give Jeeve instant_health 1 4') // the same start every run
+for (const [dx, dz] of [[3, 0], [-3, 0], [0, 3], [0, -3]]) server.command(`execute at Jeeve run summon slime ~${dx} ~ ~${dz} {Size:1}`)
+const slimesAt = Date.now()
+await sleep(500) // seen by Josh, before any is killed and splits
+const slimes = Object.values(josh.entities).filter(e => e.name === 'slime').map(e => e.id)
+check('4 medium slimes spawned', slimes.length === 4, `${slimes.length}`)
+await until('"defend me": Jeeve kills the slimes attacking him', () => !slimes.some(id => josh.entities[id]), 60000)
+const hits = traceRecords().filter(r => r.kind === 'event' && r.name === 'damage' && r.t > slimesAt).map(r => r.attrs.source)
+if (hits.length) check('slimes: their hits are attributed to them', hits.every(h => /slime/.test(h)), hits.join('; '))
+else console.log('INFO slimes: no hit landed, so attribution went unchecked')
+check('Jeeve survived the slimes', deaths === 0, `health ${agent.bot.health}`)
+server.command('kill @e[type=slime]')
 
 // The local API: an instruction from the operator replaces the root goal; /status shows it.
 const post = await fetch(`http://127.0.0.1:${API}/instructions`, { method: 'POST', body: JSON.stringify({ from: 'operator', text: 'stand still and wait' }) })
@@ -272,6 +288,7 @@ if (agent.recorder.exporting) {
   }
 } else console.log('SKIP Judgment checks: export is off (no credentials or project)')
 
+check('Jeeve never died during the episode', deaths === 0, `${deaths} deaths`)
 const failed = results.filter(([, ok]) => !ok).map(([w]) => w)
 console.log(failed.length ? `\nE2E FAIL: ${failed.join('; ')}` : '\nE2E PASS')
 process.exit(failed.length ? 1 : 0)

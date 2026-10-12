@@ -1,7 +1,7 @@
 // decide(): calls Jev with at most one call in flight; the latest state wins (brain/architecture/system-1.md).
 import type { Bot } from 'mineflayer'
 import type { Channels, Channel } from './behaviors.ts'
-import { rawSnapshot, type Directive, type Handles } from './encoder.ts'
+import { rawSnapshot, type Attackers, type Directive, type Handles } from './encoder.ts'
 import { ENCODERS, LIMITS, optionsFor, shuffled, version, type Choice, type Option, type Program } from './program.ts'
 
 const MODEL = 'jev-1.13.0' // pinned: thresholds are tuned against a version, aliases move
@@ -49,6 +49,7 @@ export type DecideCtx = {
   channels: Channels
   directive: () => Directive | null
   events: () => string[]
+  attackers?: Attackers
   remaining: (block: string) => number // what's left of the goal's count for a block type
   record: (span: { attrs: Record<string, string | number | boolean | undefined>, input: unknown, output: unknown, llm?: Record<string, unknown> }) => string
   escalate: (reason: string, detail: unknown) => void
@@ -62,7 +63,7 @@ export function makeDecider (ctx: DecideCtx) {
   return async function decideOnce (reasons: string[]) {
     const t0 = Date.now()
     const raw = rawSnapshot(ctx.bot)
-    const enc = encode(ctx.bot, { handles: ctx.handles, directive: ctx.directive(), channels: ctx.channels.describe(), events: ctx.events() })
+    const enc = encode(ctx.bot, { handles: ctx.handles, directive: ctx.directive(), channels: ctx.channels.describe(), events: ctx.events(), attackers: ctx.attackers })
     const encodeMs = Date.now() - t0
     if (encodeMs > LIMITS.encodeMs) console.warn(`[decide] encoder took ${encodeMs} ms (budget ${LIMITS.encodeMs})`)
     const state = { guidance: ctx.program.guidance, ...enc.state }

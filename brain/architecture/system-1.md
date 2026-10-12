@@ -209,6 +209,21 @@ The agent should get better over time and start each run from modules that have 
 
 **Not yet:** an outer-loop step that promotes or retires modules based on outcomes. For now, curation is a person reading the diff.
 
+## Threats (2026-10-11)
+Hostility isn't a list of mobs. Mineflayer's `hostile` type is a hint, and it misses slimes (typed `mob`). What counts is being hit: Mineflayer reads the attacker from the 1.20+ `damage_event`, so the runtime records it and makes it visible.
+- **Damage events carry their source.** `recent_events` says `took damage from E9 (slime)`, and the `damage` window event has `source`.
+- **The encoder marks attackers.** Anything that hurt the bot in the last 10 s is shown as `(attacking you)`, players included.
+- **`hostile_near` counts attackers** as well as `hostile`-typed mobs.
+
+Measured on the slime case: 4–5 medium slimes summoned around Jeeve under "stand still and wait", three runs each, 2026-10-11.
+
+| | Hands on the first hit | Lowest health |
+|---|---|---|
+| Before (type only) | idle 0.28, attack 0.45, attack 0.52 | 5, 18, 8 |
+| After (attributed) | attack 0.89, 0.88, 0.96 | 12, 14, 12 |
+
+He survived every run, so survival alone doesn't separate the two; Jev's response to the first hit does. The e2e checks that every hit is attributed to a slime, that the slimes are killed, and that Jeeve never dies.
+
 ## Open questions
 - **Order bias.** Is reversed-order averaging enough, or do programs need a full shuffle-and-average? It costs nothing in latency, since extra questions are free ([[jev-measurements]]).
 - **Numbers vs. buckets.** Raw coordinates did as well as buckets on an easy near/far case. Harder spatial judgments haven't been tested.
@@ -217,5 +232,5 @@ The agent should get better over time and start each run from modules that have 
 - **One call in flight per bot or per decider.** Per bot until the numbers say aim needs a faster cadence than legs.
 - ~~**Module sandbox.**~~ Decided: `node:vm` (see "Modules System 2 writes"). Behaviors use `node:vm` too, with a string-only async bridge and timed entries ([[behaviors-and-guards]] → "How it's built").
 - **Rate limits.** TypeSafe says its limits "can change without notice". Multi-bot plans need a fallback model ([[decision-models]]).
-- **Hostility comes from Mineflayer's entity type.** The encoder marks `(hostile)` and the `hostile_near` trigger fires only for `type === 'hostile'`. Mineflayer types slimes as `mob`, so in run `jeeve-2026-10-11T16-36-51-167Z` five slimes went unflagged, System 2 wrote guidance that "slimes at medium range are ignored", and Jev kept choosing `keep_current` while being hit. Damage events carry only the new health, not the attacker. **Proposed:** attribute damage to its source, so being hit makes anything a threat, without a hand-written list of hostile mobs ([[bitter-lesson]]).
-- **The e2e's survival check reads health once.** "Jeeve survived" passed at 10.8 health, and he died 3 s later. **Proposed:** fail the e2e on any `death` event during the episode.
+- ~~**Hostility comes from Mineflayer's entity type.**~~ Answered 2026-10-11: damage is attributed to its source (see "Threats" above). Evidence: run `jeeve-2026-10-11T16-36-51-167Z`, five slimes (typed `mob`) went unflagged and Jev kept `keep_current` while being hit to death.
+- ~~**The e2e's survival check reads health once.**~~ Answered 2026-10-11: the e2e counts `death` events and fails on any (it once passed at 10.8 HP, 3 s before he died).
