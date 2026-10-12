@@ -109,7 +109,7 @@ const march = (blockAt: (p: Vec3) => { name: string } | null) => (from: Vec3, di
 }
 
 // One decision end to end with a fake bot and a fake Jev.
-async function decideWith (answers: Record<string, any>, place: [number, number, number] | null = null, cooling?: (option: string) => boolean) {
+async function decideWith (answers: Record<string, any>, place: [number, number, number] | null = null, cooling?: (option: string) => boolean, hands: unknown = null) {
   const me = { id: 1, position: new Vec3(0, 0, 0), velocity: new Vec3(0, 0, 0), yaw: 0, type: 'player', username: 'Jeeve' }
   const josh = { id: 2, position: new Vec3(0, 0, -5), velocity: new Vec3(0, 0, 0), type: 'player', username: 'Josh', height: 1.8 }
   const bot: any = {
@@ -122,7 +122,7 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   const started: string[] = []
   const targets: unknown[] = []
   const channels: any = {
-    slots: { legs: null, aim: null, hands: null },
+    slots: { legs: null, aim: null, hands },
     describe: () => ({ legs: 'idle', aim: 'idle', hands: 'idle' }),
     set: (key: string, _b: string, t: unknown, by: string) => { started.push(`${key}@${by}`); targets.push(t) },
     stop: () => {}
@@ -166,6 +166,10 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   // An option whose last run on that target failed (none_found, stuck) sits out: collect isn't offered on oak_log.
   const cool = await decideWith({ body: { choice: 'keep_current', confidence: 0.9 }, escalate: { noul: 0.1 } }, null, o => o === 'collect:oak_log')
   assert.deepEqual(keys(cool.seen.questions.body.criteria), ['keep_current'])
+  // Dwell: the hands just started attacking one target; switching to another so soon is held off.
+  const fighting = { key: 'attack_when_ready:E9', behavior: 'attack_when_ready', status: 'running', channels: ['hands'], startedAt: Date.now() }
+  const held = await decideWith({ body: { choice: 'keep_current', confidence: 0.9 }, hands: { choice: 'attack_when_ready:E0', confidence: 0.9 }, escalate: { noul: 0.1 } }, null, undefined, fighting)
+  assert.equal(held.trace.output.applied.hands, 'dwell')
 }
 {
   // A whole-body start wins its channels for this call; per-channel answers are overridden.

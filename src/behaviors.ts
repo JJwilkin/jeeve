@@ -180,7 +180,7 @@ export const STOP_DESC: Record<Channel, string> = {
 }
 
 // pinned: a trial System 2 started; Jev can't replace it.
-type Slot = { key: string, runId: string, behavior: string, version: number, channels: Channel[], run: Running, status: string, emit: Emit, target: unknown, decidedBy?: string, pinned?: boolean }
+type Slot = { key: string, runId: string, behavior: string, version: number, channels: Channel[], run: Running, status: string, emit: Emit, target: unknown, decidedBy?: string, pinned?: boolean, startedAt: number }
 export type ChannelHooks = {
   event: (slot: Slot, event: string) => void // every event, terminal or progress
   start: (slot: Slot) => void
@@ -203,7 +203,7 @@ export class Channels {
   set (key: string, behavior: string, target: Entity | { name: string, count: number } | { place: Xyz }, decidedBy?: string, opts: { spec?: Spec, pinned?: boolean } = {}) {
     const spec = opts.spec ?? BEHAVIORS[behavior]
     this.stop(spec.channels)
-    const slot: Slot = { key, runId: `r-${++this.runs}`, behavior, version: spec.version ?? 1, channels: spec.channels, status: 'running', run: { stop () {} }, emit: () => {}, target, decidedBy, pinned: opts.pinned }
+    const slot: Slot = { key, runId: `r-${++this.runs}`, behavior, version: spec.version ?? 1, channels: spec.channels, status: 'running', run: { stop () {} }, emit: () => {}, target, decidedBy, pinned: opts.pinned, startedAt: Date.now() }
     slot.emit = (event, terminal = true) => {
       if (slot.status !== 'running') return
       if (terminal) slot.status = event

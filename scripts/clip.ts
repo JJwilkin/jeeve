@@ -218,7 +218,8 @@ let joshHp = 20
 josh.on('health', () => { if (josh.health < joshHp) joshLost += joshHp - josh.health; joshHp = josh.health })
 console.log(`[clip] monitor: cd viz && npm run monitor, then open http://localhost:5288/?api=http://127.0.0.1:${API}`)
 await sleep(2000)
-for (const c of ['gamerule spawn_mobs false', 'kill @e[type=!player]', 'time set day', 'gamemode creative Josh', 'clear Jeeve', 'give Jeeve iron_axe']) server.command(c)
+// The same start every run: a bench port's world (and the players' health and hunger in it) persists between rounds.
+for (const c of ['gamerule spawn_mobs false', 'kill @e[type=!player]', 'time set day', 'gamemode creative Josh', 'clear Jeeve', 'give Jeeve iron_axe', 'effect clear @a', 'effect give @a instant_health 1 10 true', 'effect give @a saturation 1 10 true']) server.command(c)
 scenario.setup(server.command)
 
 if (CAMERA) {

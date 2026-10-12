@@ -146,6 +146,8 @@ function plan (ctx: DecideCtx, q: Choice, choice: string, opt: Option | undefine
   if (choice === 'keep_current') return ['kept']
   if (choice === 'stop') return ['stopped', () => ctx.channels.stop(q.claims, 'stopped')]
   if (!opt?.behavior) return ['unknown_option']
+  const holder = ctx.channels.slots[q.claims[0]]
+  if (holder?.status === 'running' && holder.behavior === opt.behavior && optionTarget(holder.key) !== optionTarget(choice) && Date.now() - holder.startedAt < LIMITS.switchDwellMs) return ['dwell']
   if (opt.block) return ['started', by => ctx.channels.set(choice, opt.behavior!, opt.block!, by)]
   if (opt.place) return ['started', by => ctx.channels.set(choice, opt.behavior!, { place: opt.place! }, by)]
   const id = ctx.handles.byHandle.get(opt.handle!)

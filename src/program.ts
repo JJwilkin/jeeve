@@ -17,7 +17,10 @@ export type Program = {
 }
 
 // Fixed bounds System 2 can't change; starting values from brain/research/jev-measurements.md.
-export const LIMITS = { questions: 32, options: 255, inputTokens: 8000, minIntervalMs: 200, deadlineMs: 1000, encodeMs: 20 }
+// switchDwellMs: a running behavior can't be swapped for the same behavior on another target this soon after it
+// started, unless it ended. Jev flipped attack targets between two zombies every 0.5 s, so no swing landed and Jeeve
+// died (guard bench, 2026-10-12). ponytail: one fixed dwell; let the program set it if a context needs faster switching.
+export const LIMITS = { questions: 32, options: 255, inputTokens: 8000, minIntervalMs: 200, deadlineMs: 1000, encodeMs: 20, switchDwellMs: 1500 }
 
 // Registered modules. Built-ins are just modules registered in advance.
 // ponytail: no authoring/sandbox pipeline yet; it lands with System 2 (same pipeline as behaviors).
