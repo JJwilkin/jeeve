@@ -5,6 +5,7 @@
 import { spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { makeWorld, parseWorld, type WorldRow } from './world.ts'
@@ -31,6 +32,8 @@ for (const name of ['zombie', 'husk']) {
   writeFileSync(file, legacy.toBuffer('image/png'))
   SKINS[name] = relative(PUBLIC, file)
 }
+// Jeeve wears the Judgment Labs orange robot (viz/assets/jeeve-skin.png, 64×64 player layout).
+const JEEVE_SKIN = relative(PUBLIC, fileURLToPath(new URL('../assets/jeeve-skin.png', import.meta.url)))
 
 const VERSION = '26.1'
 const FPS = 30
@@ -110,7 +113,7 @@ for (let t = clip.start, n = 0; t <= clip.end; t = clip.start + ++n * frameMs) {
       const kind = registry.entitiesByName[e.name]
       // No username: the viewer's name tag is small black text that reads as a smudge at clip size.
       const skin = SKINS[e.name]
-      viewer.updateEntity({ id: e.id, name: skin ? 'player' : e.name, skin, width: kind?.width ?? 0.6, height: kind?.height ?? 1.8, pos: new Vec3(e.pos[0], e.pos[1], e.pos[2]) })
+      viewer.updateEntity({ id: e.id, name: skin ? 'player' : e.name, skin: skin ?? (e.username === 'Jeeve' ? JEEVE_SKIN : undefined), width: kind?.width ?? 0.6, height: kind?.height ?? 1.8, pos: new Vec3(e.pos[0], e.pos[1], e.pos[2]) })
       if (skin && meshes[e.id]?.walk) meshes[e.id].walk.zombieArms = true
     }
     const mesh = meshes[e.id]

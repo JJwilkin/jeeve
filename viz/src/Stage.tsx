@@ -1,5 +1,5 @@
-// The one visual (brain/architecture/brain-monitor.md): caption on top, the game on the left, System 2 / builder /
-// System 1 on the right with the messages between them. Fixed pixel layouts (1920×1080 and 1080×1920); the
+// The one visual (brain/architecture/brain-monitor.md): the game with its caption on it, the goal and log under it,
+// and System 2 / System 1 / the async tool builder in a column with the messages between them. Fixed pixel layouts (1920×1080 and 1080×1920); the
 // monitor scales the stage to its window, Remotion renders it as is.
 import type { CSSProperties, ReactNode } from 'react'
 import { loadFont as loadDMMono } from '@remotion/google-fonts/DMMono'
@@ -89,7 +89,7 @@ function Builder ({ p, style, codeRows }: { p: Panels, style: CSSProperties, cod
   const b = p.builder
   const busy = b.status === 'thinking' || b.status === 'waiting' || b.status === 'trialling'
   return (
-    <Card title='BUILDER · 2B' active={busy} style={style}
+    <Card title='ASYNC TOOL BUILDER' active={busy} style={style}
       right={<>{b.trial > 0 && <Pill>trial {b.trial} of {b.maxTrials}</Pill>}<Pill color={b.status === 'failed' ? C.bad : b.status === 'registered' ? C.ok : busy ? C.accent : C.dim} pulse={busy ? p.t : undefined}>{STATUS[b.status]}{busy && b.since ? ` ${secs(p.t - b.since)}` : ''}</Pill></>}>
       {b.request ? <Lines n={2} style={{ fontSize: '0.8em' }}><span style={{ fontFamily: MONO, color: C.dim }}>{b.request.id}</span> {b.request.need}</Lines> : <div style={{ color: C.dim, fontSize: '0.8em' }}>no request yet</div>}
       {b.status === 'thinking' && b.step && <Lines n={2} style={{ color: C.dim, fontStyle: 'italic', fontSize: '0.72em' }}>{b.step}</Lines>}
@@ -132,7 +132,7 @@ function System1 ({ p, style, active }: { p: Panels, style: CSSProperties, activ
 }
 
 // Where each system sits in the column (fractions of its height), for the message arrows.
-const ROWS = { s2: [0, 0.22], builder: [0.27, 0.75], s1: [0.8, 1] } as const
+const ROWS = { s2: [0, 0.22], s1: [0.26, 0.46], builder: [0.5, 1] } as const
 
 function Arrows ({ messages, t, h }: { messages: Message[], t: number, h: number }) {
   const mid = (n: Node) => n === 'player' ? null : (ROWS[n][0] + ROWS[n][1]) / 2 * h
@@ -182,7 +182,7 @@ export function Column ({ p, w, h, fontSize, codeRows }: { p: Panels, w: number,
   )
 }
 
-const NAME: Record<Node, string> = { player: 'player', s2: 'System 2', builder: 'builder', s1: 'System 1' }
+const NAME: Record<Node, string> = { player: 'player', s2: 'System 2', builder: 'tool builder', s1: 'System 1' }
 
 function Strip ({ p, fontSize, log }: { p: Panels, fontSize: number, log: number }) {
   const hp = p.self.health ?? 0
@@ -198,9 +198,9 @@ function Strip ({ p, fontSize, log }: { p: Panels, fontSize: number, log: number
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize, padding: '12px 20px' }}>
       <div style={{ display: 'flex', gap: 16, alignItems: 'center', background: C.card, border: `1px solid ${C.line}`, borderLeft: `5px solid ${C.accent}`, borderRadius: 4, padding: '8px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.06), 0 6px 16px rgba(0,0,0,0.06)' }}>
         <span style={{ fontFamily: MONO, color: C.accent, fontSize: '0.7em', letterSpacing: 1, flexShrink: 0 }}>GOAL</span>
-        {parents && <span style={{ ...cut, color: C.dim, flexShrink: 1, minWidth: 0, maxWidth: '35%' }}>{parents}</span>}
+        {parents && <span style={{ ...cut, color: C.dim, flex: '0 100 auto', minWidth: 0, maxWidth: '35%' }}>{parents}</span>}
         {parents && <span style={{ color: C.faint, flexShrink: 0 }}>›</span>}
-        <span style={{ ...cut, fontWeight: 500, flexShrink: 0, maxWidth: parents ? '75%' : '100%' }}>{step ?? '—'}</span>
+        <span style={{ ...cut, fontWeight: 500, flex: '0 1 auto', minWidth: 0 }}>{step ?? '—'}</span>
       </div>
       <div style={{ display: 'flex', gap: 18, alignItems: 'center', fontSize: '0.8em' }}>
         <span style={{ fontFamily: MONO, color: C.dim, fontSize: '0.875em', letterSpacing: 1 }}>HEALTH</span>
@@ -219,38 +219,36 @@ function Strip ({ p, fontSize, log }: { p: Panels, fontSize: number, log: number
   )
 }
 
+// The caption sits on the game itself, top left, with the speed badge top right.
 function Caption ({ text, badge, fontSize }: { text: string, badge?: string, fontSize: number }) {
-  return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24, padding: '0 36px', fontSize, fontWeight: 500, letterSpacing: -0.3, background: C.card, borderBottom: `1px solid ${C.line}` }}>
-      <Lines n={2}>{text}</Lines>
-      {badge && <span style={{ background: C.accent, color: '#FFFFFF', borderRadius: 4, padding: '6px 14px', fontFamily: MONO, fontSize: '0.62em', fontWeight: 500, whiteSpace: 'nowrap' }}>{badge}</span>}
-    </div>
-  )
+  const float: CSSProperties = { position: 'absolute', top: 20, zIndex: 4, borderRadius: 4, boxShadow: '0 1px 2px rgba(0,0,0,0.08), 0 6px 18px rgba(0,0,0,0.10)' }
+  return <>
+    {text && <div style={{ ...float, left: 20, maxWidth: '76%', padding: '10px 18px', fontSize, fontWeight: 500, letterSpacing: -0.3, lineHeight: 1.25, background: 'rgba(255,255,255,0.94)', border: `1px solid ${C.line}` }}><Lines n={2}>{text}</Lines></div>}
+    {badge && <span style={{ ...float, right: 20, background: C.accent, color: '#FFFFFF', padding: '6px 14px', fontFamily: MONO, fontSize: fontSize * 0.62, fontWeight: 500, whiteSpace: 'nowrap' }}>{badge}</span>}
+  </>
 }
 
 // footage: the game view (a video in clips; empty in the live monitor, where OBS layers the game underneath).
 export function Stage ({ p, caption, badge, footage, layout, transparent }: { p: Panels, caption: string, badge?: string, footage?: ReactNode, layout: Layout, transparent?: boolean }) {
   const { w, h } = SIZE[layout]
   const base: CSSProperties = { position: 'relative', width: w, height: h, background: transparent ? 'transparent' : C.bg, color: C.text, fontFamily: SANS, overflow: 'hidden' }
-  const game = (style: CSSProperties) => <div style={{ position: 'absolute', overflow: 'hidden', background: transparent ? 'transparent' : C.panel, ...style }}>{footage}</div>
+  const game = (style: CSSProperties, fontSize: number) => <div style={{ position: 'absolute', overflow: 'hidden', background: transparent ? 'transparent' : C.panel, ...style }}>{footage}<Caption text={caption} badge={badge} fontSize={fontSize} /></div>
   const panel: CSSProperties = { position: 'absolute', background: C.bg }
   const column: CSSProperties = { ...panel, background: C.panel, borderLeft: `1px solid ${C.line}` }
   if (layout === 'wide') {
     return (
       <div style={base}>
-        <div style={{ ...panel, left: 0, top: 0, width: w, height: 110 }}><Caption text={caption} badge={badge} fontSize={36} /></div>
-        {game({ left: 0, top: 110, width: 1280, height: 720 })}
-        <div style={{ ...panel, left: 0, top: 830, width: 1280, height: 250 }}><Strip p={p} fontSize={28} log={4} /></div>
-        <div style={{ ...column, left: 1280, top: 110, width: 640, height: 970, padding: '16px 16px 16px 0' }}><Column p={p} w={624} h={938} fontSize={24} codeRows={13} /></div>
+        {game({ left: 0, top: 0, width: 1280, height: 720 }, 30)}
+        <div style={{ ...panel, left: 0, top: 720, width: 1280, height: 360 }}><Strip p={p} fontSize={28} log={6} /></div>
+        <div style={{ ...column, left: 1280, top: 0, width: 640, height: h, padding: '16px 16px 16px 0' }}><Column p={p} w={624} h={1048} fontSize={24} codeRows={15} /></div>
       </div>
     )
   }
   return (
     <div style={base}>
-      <div style={{ ...panel, left: 0, top: 0, width: w, height: 220 }}><Caption text={caption} badge={badge} fontSize={46} /></div>
-      {game({ left: 0, top: 220, width: 1080, height: 608 })}
-      <div style={{ ...panel, left: 0, top: 828, width: w, height: 120 }}><Strip p={p} fontSize={28} log={0} /></div>
-      <div style={{ ...column, borderLeft: 'none', borderTop: `1px solid ${C.line}`, left: 0, top: 948, width: w, height: 972, padding: '8px 20px 20px 0' }}><Column p={p} w={1060} h={944} fontSize={28} codeRows={11} /></div>
+      {game({ left: 0, top: 0, width: 1080, height: 608 }, 36)}
+      <div style={{ ...panel, left: 0, top: 608, width: w, height: 120 }}><Strip p={p} fontSize={28} log={0} /></div>
+      <div style={{ ...column, borderLeft: 'none', borderTop: `1px solid ${C.line}`, left: 0, top: 728, width: w, height: h - 728, padding: '8px 20px 20px 0' }}><Column p={p} w={1060} h={h - 756} fontSize={28} codeRows={14} /></div>
     </div>
   )
 }

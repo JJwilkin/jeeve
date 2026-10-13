@@ -51,6 +51,10 @@ Everything visual lives in `viz/`, its own package, so the agent's runtime takes
     - the speed badge.
   - The three systems are grey cards told apart by label, with a dot that turns orange while that system is active.
   - Green and red appear only for pass or fail (✓/✗, health, veto).
+  - **Layout (2026-10-13):**
+    - The caption is a white card on the game itself (top left), with the speed badge top right, so the game and the column get the full height.
+    - The column runs System 2, then System 1 directly below it, then the **async tool builder** (formerly "builder · 2B") at the bottom, where its code has the most room.
+    - The message arrows follow `ROWS` in `Stage.tsx`.
   - **The goal** is the one raised box (white, orange left edge, soft shadow): the current step in full, the goal it belongs to greyed and cut short first.
 - **Long authored code:** the code box shows a window of lines that keeps the running line a third of the way down. The line is highlighted with ▶, and lines whose calls returned show ✓ or ✗. The call in flight is printed under the box.
 
@@ -82,6 +86,7 @@ Everything visual lives in `viz/`, its own package, so the agent's runtime takes
 - Both packages are pinned to GitHub commits in `viz/package.json`. Master supports 26.1, while npm's 1.33.0 stops at 1.21.4. `npm install` builds the textures, which takes about 6 min. No Mojang assets are committed.
 - Around the recorded box it adds a plains biome (without it, grass and oak leaves render brown), a grass apron and dirt underneath, plus a sky colour and fog.
 - Name tags are off: the viewer draws them as small black text.
+- **Jeeve wears the Judgment Labs orange robot** (`viz/assets/jeeve-skin.png`, a 64×64 player skin: a TV head with a screen face, side dials, round orange body; Joshua, 2026-10-13). It only shows in these renders: the server is offline-mode, so a real client would show Jeeve with a default skin.
 - The viewer's own zombie and husk models render as a crumpled head, so they're drawn as players wearing the zombie skin with arms out. The skin is cropped to the old 64×32 layout so the viewer mirrors the blank left limbs. Check new mob types on a still before trusting them; slimes are fine.
 - Without `world.mp4`, clips fall back to the flat-colour three.js scene (`viz/src/WorldScene.tsx`).
 - **Why not the real client?** It would look exact, but it ties up Joshua's screen, can't re-render old runs, and is slower and flakier than headless rendering. That makes it a fit for a hand-picked hero clip, not the nightly bench.
