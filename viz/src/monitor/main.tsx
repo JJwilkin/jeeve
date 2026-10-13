@@ -4,7 +4,7 @@
 // (transparent game area, controls hidden: an OBS browser source over the game capture).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Stage, SIZE, type Layout } from '../Stage.tsx'
+import { C, MONO, Stage, SIZE, type Layout } from '../Stage.tsx'
 import { beats, captionAt, parse, slim, stateAt, type Row } from '../timeline.ts'
 
 const q = new URLSearchParams(location.search)
@@ -69,13 +69,13 @@ function App () {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: OBS ? 'transparent' : undefined }}
       onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) void open(f) }}>
       {!OBS && (
-        <div style={{ height: 56, display: 'flex', alignItems: 'center', gap: 16, padding: '0 16px', fontSize: 14, borderBottom: '1px solid #263042' }}>
+        <div style={{ height: 56, display: 'flex', alignItems: 'center', gap: 16, padding: '0 16px', fontSize: 14, background: C.card, color: C.text, borderBottom: `1px solid ${C.line}` }}>
           <strong>Jeeve monitor</strong>
-          <span style={{ color: '#8b93a6' }}>{status}</span>
+          <span style={{ color: C.dim }}>{status}</span>
           {mode === 'replay' && <>
             <button onClick={() => setPlaying(x => !x)}>{playing ? 'pause' : 'play'}</button>
             <input type='range' min={t0} max={t1} step={100} value={t} onChange={e => setT(+e.target.value)} style={{ flex: 1 }} aria-label='time' />
-            <span style={{ fontFamily: 'monospace' }}>{((t - t0) / 1000).toFixed(1)} s</span>
+            <span style={{ fontFamily: MONO }}>{((t - t0) / 1000).toFixed(1)} s</span>
             <button onClick={() => { setMode('live'); setRows([]); setStatus('connecting…') }}>live</button>
           </>}
           <label style={{ marginLeft: mode === 'live' ? 'auto' : 0 }}>open trace <input type='file' accept='.jsonl' onChange={e => { const f = e.target.files?.[0]; if (f) void open(f) }} /></label>
@@ -85,7 +85,7 @@ function App () {
         <div style={{ width: SIZE[LAYOUT].w * scale, height: SIZE[LAYOUT].h * scale }}>
           <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}>
             <Stage p={p} caption={captionAt(bs, t) || (rows.length ? 'Waiting for an instruction.' : 'Waiting for the agent.')} layout={LAYOUT} transparent={OBS}
-              footage={OBS ? null : <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#4b5466', fontSize: 28 }}>game view (OBS layers it here)</div>} />
+              footage={OBS ? null : <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: C.faint, fontSize: 28 }}>game view (OBS layers it here)</div>} />
           </div>
         </div>
       </div>

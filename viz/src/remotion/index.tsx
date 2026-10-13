@@ -4,7 +4,7 @@
 import { useMemo } from 'react'
 import { ThreeCanvas } from '@remotion/three'
 import { AbsoluteFill, Composition, OffthreadVideo, registerRoot, Sequence, staticFile, useCurrentFrame, useVideoConfig, type CalculateMetadataFunction } from 'remotion'
-import { FOOTAGE, SIZE, Stage, type Layout } from '../Stage.tsx'
+import { C, FOOTAGE, SANS, SIZE, Stage, type Layout } from '../Stage.tsx'
 import { makeWorld, parseWorld, type WorldRow } from '../world.ts'
 import { WorldScene } from '../WorldScene.tsx'
 import { activity, captionAt, duration, speedups, stateAt, traceTime, type Beat, type Row, type Segment } from '../timeline.ts'
@@ -36,15 +36,15 @@ function Clip ({ layout, clip, segs }: Props) {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
   const world = useMemo(() => clip?.worldRows ? makeWorld(clip.worldRows) : null, [clip])
-  if (!clip || !segs) return <AbsoluteFill style={{ background: '#0b0e14' }} />
+  if (!clip || !segs) return <AbsoluteFill style={{ background: C.bg }} />
   const { t, rate } = traceTime(segs, frame / fps * 1000)
   // OBS footage if there is some, else the recorded world drawn from the scenario's camera spot.
   const footage = clip.footage && clip.recordStart != null
     ? <Footage clip={clip} segs={segs} />
     : world
       ? <ThreeCanvas width={FOOTAGE[layout].w} height={FOOTAGE[layout].h} camera={{ fov: 60, near: 0.1, far: 200 }}><WorldScene blocks={world.blocksAt(t)} entities={world.entitiesAt(t)} camera={world.camera} /></ThreeCanvas>
-      : <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#4b5466', fontSize: 32 }}>no footage</div>
-  return <Stage p={stateAt(clip.rows, t)} caption={captionAt(clip.captions, t)} badge={rate > 1.05 ? `⏩ ${Math.round(rate)}×` : undefined} layout={layout} footage={footage} />
+      : <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: C.faint, fontSize: 32 }}>no footage</div>
+  return <Stage p={stateAt(clip.rows, t)} caption={captionAt(clip.captions, t)} badge={rate > 1.05 ? `${Math.round(rate)}× speed` : undefined} layout={layout} footage={footage} />
 }
 
 const metadata: CalculateMetadataFunction<Props> = async ({ props }) => {
@@ -63,9 +63,10 @@ function Card ({ title, subtitle, layout }: CardProps) {
   const frame = useCurrentFrame()
   const tall = layout === 'tall'
   return (
-    <AbsoluteFill style={{ background: '#0b0e14', color: '#e6e9ef', fontFamily: "Inter, -apple-system, 'Helvetica Neue', Arial, sans-serif", justifyContent: 'center', alignItems: 'center', padding: tall ? 80 : 160, opacity: Math.min(1, frame / 8) }}>
-      <div style={{ fontSize: tall ? 84 : 76, fontWeight: 800, textAlign: 'center', lineHeight: 1.15 }}>{title}</div>
-      <div style={{ fontSize: tall ? 44 : 38, color: '#8b93a6', marginTop: 36, textAlign: 'center', lineHeight: 1.35, maxWidth: 1400 }}>{subtitle}</div>
+    <AbsoluteFill style={{ background: C.bg, color: C.text, fontFamily: SANS, justifyContent: 'center', alignItems: 'center', padding: tall ? 80 : 160, opacity: Math.min(1, frame / 8) }}>
+      <div style={{ width: 56, height: 4, background: C.accent, borderRadius: 2, marginBottom: 40 }} />
+      <div style={{ fontSize: tall ? 84 : 76, fontWeight: 500, letterSpacing: -1.5, textAlign: 'center', lineHeight: 1.15 }}>{title}</div>
+      <div style={{ fontSize: tall ? 44 : 38, color: C.dim, marginTop: 36, textAlign: 'center', lineHeight: 1.35, maxWidth: 1400 }}>{subtitle}</div>
     </AbsoluteFill>
   )
 }

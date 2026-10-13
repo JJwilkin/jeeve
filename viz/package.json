@@ -12,6 +12,7 @@
   "dependencies": {
     "@react-three/fiber": "^9.1.2",
     "@remotion/cli": "4.0.534",
+    "@remotion/google-fonts": "^4.0.534",
     "@remotion/three": "4.0.534",
     "node-canvas-webgl": "github:PrismarineJS/node-canvas-webgl#c183e0a8e5ad8bdc2f1e4f3c1ba0b2592ad952f0",
     "prismarine-viewer": "github:PrismarineJS/prismarine-viewer#8a3ce60b40f1ff7a26422a8f8904fbedbe808688",

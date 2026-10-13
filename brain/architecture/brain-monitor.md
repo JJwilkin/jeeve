@@ -37,8 +37,21 @@ Everything visual lives in `viz/`, its own package, so the agent's runtime takes
 - **Remotion** for rendering: a personal project, so its license is fine.
 - **Live transport: server-sent events on the agent's local API.** `GET /events` on `JEEVE_API_PORT` replays the session's rows, then streams each new one as the recorder writes it (`Recorder.listeners`). No extra process, and it works for `npm run agent`, the e2e and clips. Each reconnect replays from the first row, so the monitor replaces what it had.
 - **Camera: a scripted wide shot.** Each clip scenario names a vantage point. `npm run clip` puts Joshua's client (`JEEVE_CAMERA`, any name: the server is offline-mode) in spectator mode there with `tp … facing …`. It doesn't move after that. A follow cam would judder at tick-rate teleports.
-- **Speed-ups: squash dull stretches to about 2 s.** A stretch is dull when no visible change happens for at least 6 s (with 1 s margins at 1×), and only if it plays at 2× or faster. A visible change is any trace row except heartbeat `decide` calls that changed nothing while the bot stayed within 0.3 blocks, and bookkeeping rows (window cuts, carry-overs, perceive, suppressed escalations, markers). The badge shows the rate (`⏩ 27×`). Knobs: `SPEEDUP` in the timeline core.
+- **Speed-ups: squash dull stretches to about 2 s.** A stretch is dull when no visible change happens for at least 6 s (with 1 s margins at 1×), and only if it plays at 2× or faster. A visible change is any trace row except heartbeat `decide` calls that changed nothing while the bot stayed within 0.3 blocks, and bookkeeping rows (window cuts, carry-overs, perceive, suppressed escalations, markers). The badge shows the rate (`27× speed`). Knobs: `SPEEDUP` in the timeline core.
 - **Captions: plain, one per beat, editable.** Beats come from the trace: instruction, request, each draft, trial window, trial result, pre-emption, a stuck escalation, the goal closing. Each has a template and the facts it may use. `npm run clip` asks Claude (System 2's model) to rewrite the templates from the facts only: at most 14 words, no jargon. It falls back to the templates if Claude is unavailable. The result is `captions.json` in the clip directory. Edit it and re-render with `npm run clip -- --render <dir>`. Each caption stays up at least 2.5 s (`CAPTION_MIN_MS`), so beats in the same second read in sequence. Jev's own doubts (`low_confidence`, `jev_escalate`) get no caption: they come every few seconds.
+- **The look matches judgmentlabs.ai** (Joshua, 2026-10-13). Tokens are `C` in `viz/src/Stage.tsx`, shared by the monitor, clips and title cards.
+  - Greys: page #FAFAFA, panels #F5F5F5, white cards, hairline borders at 10% black, 4 px radius.
+  - Inter and DM Mono, both loaded through `@remotion/google-fonts`.
+  - **One accent, #FF4B2E, only for what's active right now:**
+    - the message passing;
+    - "thinking";
+    - a busy builder;
+    - the running code line;
+    - a channel choosing something other than `keep_current`;
+    - the speed badge.
+  - The three systems are grey cards told apart by label, with a dot that turns orange while that system is active.
+  - Green and red appear only for pass or fail (✓/✗, health, veto).
+  - **The goal** is the one raised box (white, orange left edge, soft shadow): the current step in full, the goal it belongs to greyed and cut short first.
 - **Long authored code:** the code box shows a window of lines that keeps the running line a third of the way down. The line is highlighted with ▶, and lines whose calls returned show ✓ or ✗. The call in flight is printed under the box.
 
 ## What each panel reads
