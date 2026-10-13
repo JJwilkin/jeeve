@@ -1,5 +1,5 @@
 // The one visual (brain/architecture/brain-monitor.md): the game with its caption on it, the goal and log under it,
-// and System 2 / System 1 / the async tool builder in a column with the messages between them. Fixed pixel layouts (1920×1080 and 1080×1920); the
+// and System 1 / System 2 / the async tool builder in a column with the messages between them. Fixed pixel layouts (1920×1080 and 1080×1920); the
 // monitor scales the stage to its window, Remotion renders it as is.
 import type { CSSProperties, ReactNode } from 'react'
 import { loadFont as loadDMMono } from '@remotion/google-fonts/DMMono'
@@ -132,7 +132,7 @@ function System1 ({ p, style, active }: { p: Panels, style: CSSProperties, activ
 }
 
 // Where each system sits in the column (fractions of its height), for the message arrows.
-const ROWS = { s2: [0, 0.22], s1: [0.26, 0.46], builder: [0.5, 1] } as const
+const ROWS = { s1: [0, 0.2], s2: [0.24, 0.46], builder: [0.5, 1] } as const
 
 function Arrows ({ messages, t, h }: { messages: Message[], t: number, h: number }) {
   const mid = (n: Node) => n === 'player' ? null : (ROWS[n][0] + ROWS[n][1]) / 2 * h

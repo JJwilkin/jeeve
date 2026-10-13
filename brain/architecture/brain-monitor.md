@@ -53,7 +53,7 @@ Everything visual lives in `viz/`, its own package, so the agent's runtime takes
   - Green and red appear only for pass or fail (✓/✗, health, veto).
   - **Layout (2026-10-13):**
     - The caption is a white card on the game itself (top left), with the speed badge top right, so the game and the column get the full height.
-    - The column runs System 2, then System 1 directly below it, then the **async tool builder** (formerly "builder · 2B") at the bottom, where its code has the most room.
+    - The column runs System 1 at the top, then System 2, then the **async tool builder** (formerly "builder · 2B") at the bottom, where its code has the most room.
     - The message arrows follow `ROWS` in `Stage.tsx`.
   - **The goal** is the one raised box (white, orange left edge, soft shadow): the current step in full, the goal it belongs to greyed and cut short first.
 - **Long authored code:** the code box shows a window of lines that keeps the running line a third of the way down. The line is highlighted with ▶, and lines whose calls returned show ✓ or ✗. The call in flight is printed under the box.
