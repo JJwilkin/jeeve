@@ -29,7 +29,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[full-player-action-api]] (done → [[behaviors-and-guards]]): give code System 2 writes every action a player has (craft, containers, attack, use, eat, chat…), keeping no raw bot, guards and channels
 - [[system-2a-2b]] (done → [[orchestrator-and-builder]]): split System 2 into an orchestrator (2A, custom loop) and a builder (2B, Vercel AI SDK; Luna later) that talk through capability requests and trial windows
 - [[brain-monitor-and-clips]] (done → [[brain-monitor]]): live monitor + Remotion clips showing System 1, System 2 and the builder side by side with the game; fills five trace gaps
-- [[tasks/stateful-system-1|stateful-system-1 task]] (doing → [[architecture/stateful-system-1|stateful-system-1]], proposal): System 1 keeps a working memory (commitment, intent, outcomes) and takes on commitments, local recovery and when to escalate; design first, replay experiment next
+- [[tasks/stateful-system-1|stateful-system-1 task]] (doing → [[architecture/stateful-system-1|stateful-system-1]], proposal): System 1 keeps a working memory (commitment, intent, outcomes) and takes on commitments, local recovery and when to escalate; replay done (moot-answer filter + plan/doing memory; persistent doubt rejected), build and bench A/B next
 
 ### Architecture
 - [[overview]]: what we build vs. what the agent discovers, the discovery loop, fast and slow thinking, goals and time as one hierarchy, open questions

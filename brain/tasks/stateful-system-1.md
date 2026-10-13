@@ -30,14 +30,13 @@ The goal: System 1 carries a small working memory, and takes on keeping commitme
 
 ## Plan
 1. ~~**Design**~~: written in [[architecture/stateful-system-1|stateful-system-1]] (2026-10-13). **Waiting for Joshua's review** of its open questions before any code.
-2. **Replay experiment** (`scripts/replay-memory.ts`, offline):
-   - run the persistent-doubt counterfactual over recorded decide spans;
-   - run the memory A/B on ~200 doubtful states, with labels from 2A's next answer;
-   - the go/no-go is in the proposal.
-3. **Build pieces 1 and 2:**
-   - the memory block as an encoder param;
-   - escalation on persistent doubt, with forward and reversed debiasing in one call;
-   - both are program settings, so on vs. off is a program diff.
+2. ~~**Replay experiment**~~: done 2026-10-13 (`scripts/replay-memory.ts`; results in [[architecture/stateful-system-1|stateful-system-1]] → "Replay results"):
+   - persistent doubt is rejected;
+   - the moot-answer filter is the clean win;
+   - memory (`plan` + `doing`) cuts doubt about 13 points, with slightly better agreement.
+3. **Build pieces 0 and 1:**
+   - piece 0: don't escalate doubt about answers that were overridden, pinned, held or in the dwell;
+   - piece 1: the memory block (`plan` + `doing`) as an encoder param, so on vs. off is a program diff.
 4. **Bench A/B:** 3 rounds × orchard, forage, guard and workshop, memory on vs. off. Maybe add an "interrupted orchard" scene.
 5. **Stages** (piece 3), only if traces still show doubt about sub-steps.
 

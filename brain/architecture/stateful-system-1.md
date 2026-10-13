@@ -61,7 +61,11 @@ Jev stays a stateless model. "Stateful" means the **runtime** carries a small me
 | G. Jev reads 2A's partial reasoning | AgileThinker | **Deferred.** 2A's calls are short and event-driven, and its notes reach Jev as guidance anyway |
 
 ## Recommended design
-Three pieces, each measured before the next.
+Three pieces, each measured before the next. *Revised by the replay (see [Replay results](#replay-results-2026-10-13)):* piece 0, ignoring doubt about moot answers, goes first. The memory keeps only `plan` and `doing`. Piece 2 was rejected.
+
+**0. Don't escalate doubt about an answer that couldn't apply** (added by the replay; one line in `decide.ts`).
+- Today `unsure` counts every Choice under the threshold, even one whose answer was `overridden` (a body start won its channels), `pinned` (a confirm look or a trial holds the channel), `held` or `dwell`. In the replay, 27% of doubtful calls were doubtful only about such answers.
+- Count only questions whose answer could have been applied.
 
 **1. The memory block** (encoder plus a small runtime store; no new questions).
 ```yaml
@@ -76,10 +80,10 @@ memory:
 ```
 - The plan line comes from `root.plan` and `goals.status()`, which already exist.
 - `doing` and `interrupted` come from the channel slots (`decidedBy`, `startedAt`) and the check's progress, sampled at each call.
-- `tried` comes from the behavior `end` handler that already feeds `failedAt`.
+- `tried` comes from the behavior `end` handler that already feeds `failedAt`. *Dropped by the replay:* the `tried` lines lowered agreement with 2A's labels, and `plan` + `doing` carried all of the gain.
 - It's an encoder param (`memory: true`), so a program turns it on and off, and A/B is a program diff ([[system-1]] → "How programs are compared").
 
-**2. Escalate on persistent doubt** (a code rule in `decide.ts`).
+**2. ~~Escalate on persistent doubt~~** *Rejected by the replay:* it drops escalations 2A acted on at almost the same rate as ones it ignored, and 28 near damage. Kept below for the record.
 - Today: any Choice under `confidence_below` escalates.
 - Proposed: a question escalates `low_confidence` only when it was doubtful in **k of its last n calls** (start at 3 of 5), *or* when its top pick changed back and forth among those doubtful calls (dithering), *or* when Jev's `escalate` Noul is above threshold.
 - All bypasses stay: `fallingFast`, `owner_hurt`, the 2nd `stuck`/`none_found`, `stalled`, `idle`, `plan_done`.
@@ -154,9 +158,61 @@ Cheap and offline. It uses only recorded traces and Jev calls (~$0.05).
 
 Lives as `scripts/replay-memory.ts`. It reads `traces/*.jsonl` and `bench/results.jsonl`, and writes a short report.
 
+## Replay results (2026-10-13)
+`node --env-file=../judgment/.env.jeeve scripts/replay-memory.ts`, run over the 59 random-layout bench runs (traces in the `jeeve-monitor` worktree). It finishes in about 5 s, for under $0.05 of Jev calls. One run's samples and answers are in `bench/replay-memory-run1.json`. Flags: `--no-jev` (counterfactual only), `--conf`, `--keys` (memory ablation), `--n`, `--out`.
+
+**1. Escalation counterfactual (no Jev calls).**
+- Each rule is replayed over all 12,944 decide spans.
+- A `low_confidence` escalation that was sent counts as kept if the rule fires in that run within 5 s of it, because a rule that waits for persistence raises the same doubt a call or two later.
+- "2A acted" means 2A's answer changed anything.
+- Baseline: 514 sent, 2A acted on 342 (67%). A rule is useful if what it drops is mostly escalations 2A didn't act on.
+
+| Rule | Doubtful calls | Sent kept | Dropped: 2A acted / didn't | Dropped within 10 s of damage or `stalled` |
+|---|---|---|---|---|
+| Today (any question < 0.5) | 2,753 | 514 | — | — |
+| **Ignore moot answers** (overridden, pinned, held, dwell) | 2,009 | 417 | **22 / 70** | 1 |
+| Moot filter + threshold 0.4 | 1,248 | 337 | 73 / 95 | 9 |
+| Moot filter + only doubt whose top pick is a change | 552 | 273 | 119 / 105 | 14 |
+| Persistent: doubtful in 3 of the last 5 calls (p50 delay 1.0 s) | 975 | 212 | 166 / 111 | 28 |
+| Persistent and dithering (p50 delay 1.1 s) | 341 | 140 | 221 / 125 | 38 |
+
+- **The moot filter is the clean win.** What it drops is 76% "carry on" (base rate 33%), and only one drop is near damage.
+- **Persistence doesn't separate useful escalations from the rest.** It drops what 2A acts on at nearly the base rate, and it delays the rest by about a second. Rejected.
+
+**2. Memory A/B (Jev).**
+- **Sample:** 200 doubtful questions from escalations 2A answered, stratified by scene and question. Moot ones were left out.
+- **Arms:** A = the state as recorded. B = the state plus the memory rebuilt from the trace.
+- **Calls:** each arm asked forward and reversed.
+- **Label:** Jev's pick after 2A's answer. **181 of the 200 labels are `keep_current`.**
+
+| | Doubtful (< 0.5) | Agrees with label | Flips under reversal |
+|---|---|---|---|
+| A (run 1 / run 2) | 79% / 78% | 69% / 68% | 21% / 22% |
+| B: full memory (run 1 / run 2) | 66% / 65% | 72.5% / 71% | 18% / 15% |
+| B: `plan` + `doing` only | 66% | 74% | 14% |
+| B: `tried` + `interrupted` + `held` only | 72% | 65% | 22% |
+
+- **Paired bootstrap (95% CI), full memory:**
+  - doubt −13 points (−7 to −19);
+  - confidence +0.05 (+0.03 to +0.08);
+  - agreement +3 points (−0.5 to +7).
+- `plan` + `doing`: doubt −14 points, agreement **+4 (+0.5 to +8)**.
+- `tried` alone: agreement **−4.5 (−1 to −8)**. Listing failures pushes Jev away from carrying on.
+- **By scene:**
+  - guard improved most: agreement 65% → 80%, doubt 73% → 57%;
+  - orchard: doubt 79% → 66% at equal agreement;
+  - with a plan line: doubt 78% → 59%.
+- **Go / no-go: no-go on the 40% bar.** Doubt fell about 16% relative, not 40%. Still, the gain is real, reproducible, free in latency, and comes with better agreement. So memory (`plan` + `doing`) goes in behind the moot filter. It isn't the fix by itself.
+
+**3. What else the replay showed.**
+- **Jev's confidence is informative.** It tracks agreement with 2A's label: 61% below 0.4, 74% at 0.4–0.5, 79% at 0.5–0.6, 85% at 0.6–0.8, 100% above 0.8. So the 0.5 threshold isn't arbitrary. The top probability tracks agreement the same way.
+- **2A's answer to Jev's doubt is almost always "keep going"** (91% of the labels). What's left after the moot filter and the memory is mostly a real close call between carrying on and a near-duplicate option. One example: a running `clear_tall_tree:oak_log` against `clear_tall_tree:oak_leaves` on the same tree, which is the same tree-clearing run. That's the "options must not overlap" rule from [[system-1]], applied across targets. It's a lead for the option generator, not tested here.
+- **Estimated effect of pieces 0 + 1:** doubt-driven escalations sent fall about 19% from the moot filter, then about 16% of the rest from the memory. That's roughly a third overall, not the hoped-for half. The bench A/B would measure the real number.
+
 ## Open questions for Joshua
-1. **Order:** memory → persistent doubt → stages (only if needed), with the replay first. Agree?
+1. ~~**Order:** memory → persistent doubt → stages~~ After the replay: moot filter → memory (`plan` + `doing`) → bench A/B. Persistent doubt is dropped. Stages wait until the bench shows doubt about sub-steps. Agree?
 2. **Should Jev write any state beyond its applied choices in v1?** Proposed: no. The stage pick comes in piece 3, and beliefs later.
 3. **Headline metric:** fewer doubt-driven 2A calls, with pass, deaths and reaction as guardrails? Or is reaction quality the headline?
-4. **How long outcomes live:** per instruction (proposed: a tree that failed in step 1 matters in step 3), or per step?
+4. ~~**How long outcomes live**~~ Moot for now: the `tried` lines hurt in the replay, so outcomes stay in code (cooling, the 2nd-failure escalation) and out of Jev's view.
+6. **Near-duplicate options across targets** (the same whole-body skill on logs vs. leaves of one tree): worth a replay of its own?
 5. **Escalation thresholds** in the program (2A tunes them per goal), or fixed bounds like `switchDwellMs`?
