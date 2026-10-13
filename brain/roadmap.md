@@ -65,6 +65,7 @@ All three instructions pass, and so do a live guard veto and the local API. Syst
 - ~~System 2A (orchestrator) / 2B (builder) split~~ ([[system-2a-2b]], done 2026-10-11 → [[orchestrator-and-builder]]: 2A asks for behaviors with a pass check it writes, 2B builds them on the Vercel AI SDK in trial windows a code gate grants);
 - 2B's between-episode loop: library curation, retiring behaviors, trace mining (designed in [[orchestrator-and-builder]], not built);
 - ~~"defend me" fixes~~: done 2026-10-11. Damage is attributed to its source, a fast health drop bypasses the no-repeat window, and the e2e fails on any death and has a slime scenario ([[system-1]] → "Threats", [[system-2]] → Open questions);
+- a stateful System 1 ([[tasks/stateful-system-1|stateful-system-1 task]] → [[architecture/stateful-system-1|stateful-system-1]], proposal 2026-10-13): a working memory in every Jev call, and escalating on persistent doubt, so 2A stops acting as Jev's memory (57% of its bench calls were Jev's one-off doubts). Waiting for Joshua's review, then a replay experiment;
 - lessons that outlive their goal;
 - judges and the outer loop (stage 4);
 - the PvP arena and benchmarks ([[benchmarks]]).
