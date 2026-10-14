@@ -85,6 +85,7 @@ Everything visual lives in `viz/`, its own package, so the agent's runtime takes
 - It takes about 26 s for a 166 s run.
 - Both packages are pinned to GitHub commits in `viz/package.json`. Master supports 26.1, while npm's 1.33.0 stops at 1.21.4. `npm install` builds the textures, which takes about 6 min. No Mojang assets are committed.
 - Around the recorded box it adds a plains biome (without it, grass and oak leaves render brown), a grass apron and dirt underneath, plus a sky colour and fog.
+- `--close` re-frames a clip for posting: the scenario camera's own angle, 11 blocks from Jeeve instead of about 36. The camera follows him, aimed 2.5 blocks above his head so a canopy he climbs stays in frame, and eases toward him with a 0.7 s lag.
 - Name tags are off: the viewer draws them as small black text.
 - **Jeeve wears the Judgment Labs orange robot** (`viz/assets/jeeve-skin.png`, a 64×64 player skin: a TV head with a screen face, side dials, round orange body; Joshua, 2026-10-13). It only shows in these renders: the server is offline-mode, so a real client would show Jeeve with a default skin.
 - The viewer's own zombie and husk models render as a crumpled head, so they're drawn as players wearing the zombie skin with arms out. The skin is cropped to the old 64×32 layout so the viewer mirrors the blank left limbs. Check new mob types on a still before trusting them; slimes are fine.

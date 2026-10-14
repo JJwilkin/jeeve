@@ -1,7 +1,7 @@
 // The recorded world (world.jsonl) drawn the way a Minecraft client draws it: real block models, textures and mob
 // models via prismarine-viewer, rendered headless to <clip dir>/world.mp4 in trace time. clip.json then points its
 // footage at it, so the clip plays it like OBS footage: cut and sped up by the same segments.
-//   node viz/src/world-video.ts clips/<dir>
+//   node viz/src/world-video.ts clips/<dir> [--close]   --close: the same angle from 11 blocks, following Jeeve
 import { spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -40,7 +40,8 @@ const FPS = 30
 const [W, H] = [1280, 720]
 const APRON = 64 // grass beyond the recorded box, so the world doesn't end at a cliff
 
-const dir = process.argv[2]
+const dir = process.argv.slice(2).find(a => !a.startsWith('--'))!
+const CLOSE = process.argv.includes('--close') ? 11 : 0
 const clip = JSON.parse(readFileSync(join(dir, 'clip.json'), 'utf8'))
 if (clip.footage && clip.footage !== 'world.mp4') throw new Error(`${dir} has real footage (${clip.footage})`)
 const rows: WorldRow[] = parseWorld(readFileSync(join(dir, clip.world ?? 'world.jsonl'), 'utf8'))
@@ -92,6 +93,9 @@ const pixels = new Uint8Array(W * H * 4)
 const meshes = viewer.entities.entities as Record<number, any>
 const frameMs = 1000 / FPS
 let applied = 0
+const span = base.camera.at.map((v, i) => v - base.camera.facing[i]), len = Math.hypot(...span)
+const AWAY = span.map(v => v / len) // from what the scenario camera looks at toward the camera
+let focus: number[] | undefined
 
 for (let t = clip.start, n = 0; t <= clip.end; t = clip.start + ++n * frameMs) {
   let dirty = false
@@ -126,7 +130,12 @@ for (let t = clip.start, n = 0; t <= clip.end; t = clip.start + ++n * frameMs) {
 
   // The scenario's camera spot, or behind and above Jeeve for scenes too wide for one shot (as WorldScene does).
   const jeeve = base.camera.follow ? here.find(e => e.username === 'Jeeve')?.pos : undefined
-  const [at, look] = jeeve ? [[jeeve[0], jeeve[1] + 9, jeeve[2] + 13], [jeeve[0], jeeve[1] + 1, jeeve[2]]] : [base.camera.at, base.camera.facing]
+  // --close: the scenario's own angle, CLOSE blocks from Jeeve, aimed above his head (the canopy he climbs to) and
+  // eased toward him (a 0.7 s lag) so pillar hops don't jolt.
+  const me = CLOSE ? here.find(e => e.username === 'Jeeve')?.pos : undefined
+  if (me) { const k = focus ? 1 - Math.exp(-frameMs / 700) : 1; focus = [0, 1, 2].map(i => (focus?.[i] ?? 0) + (me[i] + (i === 1 ? 2.5 : 0) - (focus?.[i] ?? 0)) * k) }
+  const [at, look] = CLOSE && focus ? [focus.map((v, i) => v + AWAY[i] * CLOSE), focus]
+    : jeeve ? [[jeeve[0], jeeve[1] + 9, jeeve[2] + 13], [jeeve[0], jeeve[1] + 1, jeeve[2]]] : [base.camera.at, base.camera.facing]
   camera.position.set(at[0], at[1], at[2])
   camera.lookAt(look[0], look[1], look[2])
 
