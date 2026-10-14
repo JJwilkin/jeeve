@@ -4,7 +4,7 @@
 //   npm run bench -- 1 orchard workshop     one round of these
 //   npm run bench -- 3 --fresh              start from an empty skill library
 // An A/B runs two benches at once, each on its own ports and library, on the same layouts:
-//   JEEVE_BENCH_PORT=25571 JEEVE_BENCH_LIBRARY=bench/lib-a.json JEEVE_BENCH_SEED=1000 JEEVE_STATEFUL=0 npm run bench -- 3
+//   JEEVE_BENCH_PORT=25571 JEEVE_BENCH_LIBRARY=traces/lib-a.json JEEVE_BENCH_SEED=1000 JEEVE_MEMORY=1 npm run bench -- 3
 // Learning: every run starts from bench/library.json, the skills and checks Jeeve learned in earlier runs, and what
 // a run learns is merged back after its round. One Jeeve that keeps what it learned, across runs and scenarios.
 import { spawn, spawnSync } from 'node:child_process'

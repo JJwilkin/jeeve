@@ -343,7 +343,7 @@ const result = {
   confirms: rows.filter(r => r.kind === 'event' && r.name === 'confirm').length,
   deaths: rows.filter(r => r.kind === 'event' && r.name === 'death').length,
   commit,
-  stateful: process.env.JEEVE_STATEFUL !== '0', // the bench A/B arm (brain/architecture/stateful-system-1.md)
+  memory: process.env.JEEVE_MEMORY === '1', // the memory A/B arm (brain/architecture/stateful-system-1.md)
   seed: SEED, session: basename(traceFile, '.jsonl'), dir
 }
 mkdirSync('bench', { recursive: true })

@@ -61,7 +61,7 @@ Jev stays a stateless model. "Stateful" means the **runtime** carries a small me
 | G. Jev reads 2A's partial reasoning | AgileThinker | **Deferred.** 2A's calls are short and event-driven, and its notes reach Jev as guidance anyway |
 
 ## Recommended design
-Three pieces, each measured before the next. *Revised by the replay (see [Replay results](#replay-results-2026-10-13)):* piece 0, ignoring doubt about moot answers, goes first. The memory keeps only `plan` and `doing`. Piece 2 was rejected.
+*Measured live (see [Bench A/B](#bench-ab-2026-10-14)):* the moot filter ships; the memory didn't move doubt or 2A calls live, so it's opt-in. Three pieces, each measured before the next. *Revised by the replay (see [Replay results](#replay-results-2026-10-13)):* piece 0, ignoring doubt about moot answers, goes first. The memory keeps only `plan` and `doing`. Piece 2 was rejected.
 
 **0. Don't escalate doubt about an answer that couldn't apply** (added by the replay; one line in `decide.ts`).
 - Today `unsure` counts every Choice under the threshold, even one whose answer was `overridden` (a body start won its channels), `pinned` (a confirm look or a trial holds the channel), `held` or `dwell`. In the replay, 27% of doubtful calls were doubtful only about such answers.
@@ -288,6 +288,35 @@ The state grows from ~310 to ~390 tokens.
 - **Compass directions don't help** at this distance.
 
 **Where this leaves the design:** objects in place of the block list, but only together with per-object options for the body question. Distant memory waits for a search-scene test.
+
+## Bench A/B (2026-10-14)
+Pieces 0 and 1 were built (commit `5bac02c`): the moot-answer filter (`escalate_when.ignore_moot`), and the memory (`plan` + `doing`, an encoder param, rendered by `describeMemory`).
+- **Arms:** one switch turned both off.
+- **Layouts:** both arms ran side by side on the same layouts (`JEEVE_BENCH_SEED`), 3 rounds × orchard, workshop, guard and forage.
+- **Library:** each arm started from its own copy of the same library snapshot.
+- **Report:** `node scripts/ab-report.ts 5bac02c`.
+
+| Paired, 12 pairs | Off | On | On better / worse |
+|---|---|---|---|
+| Pass | 12/12 | 12/12 | 0 / 0 |
+| 2A calls set off only by Jev's doubt, per run | 7.2 | 6.8 | 4 / 4 |
+| Jev calls with a doubtful answer | 34.5% | 31.5% | 8 / 4 |
+| Time to pass | 140 s | 146 s | 4 / 5 (workshop −26 s in 3/3; orchard +27, forage +19) |
+| Deaths; reaction from a hit to attacking | 0; ~same | 0; ~same | — |
+
+**What it says:**
+- **The moot filter works as designed.** Low-confidence escalations sent fell 81 → 68, and suppressed ones fell 309 → 155. It costs nothing, and it stays on.
+- **The memory has no measurable live effect.**
+  - Calls with a doubtful answer: 26.2% → 25.2% during plan steps, 22.4% → 19.5% under an instruction with no plan.
+  - The replay's −13 points held on the hard states it sampled (doubtful, escalated, answered by 2A), not across all states.
+  - So the memory is now **opt-in** (`JEEVE_MEMORY=1`). It stays as the substrate for the next memory layer (objects); delete it if that doesn't earn its place either.
+- **A suspect, cleared.** During plan steps, the escalate Noul went over 0.5 in 9.8% of calls with memory, against 2.9% without. Replaying 150 of the "on" arm's own plan-step states with the memory removed gave 8.0% without and 6.0% with (`scripts/replay-noul.ts`). The live gap came from the two arms visiting different states, not from the memory's words.
+- **Why 2A calls barely move: they're capped by the gate, not the doubt rate.** Raised doubt escalations outnumber the ones sent 4–5× (off: 81 + 25 sent, 541 suppressed). The no-repeat window and the backoff let roughly one through per reason, goal and window. Cutting the doubt rate by 10–20% doesn't change that. Fewer 2A calls needs either:
+  - doubt that disappears entirely for a goal, or
+  - a different gate: e.g. escalate low confidence only when the top pick would *change* what's running, or let the backoff learn faster.
+
+  That's the next experiment, and the counterfactual harness (`scripts/replay-memory.ts`) can score a new gate on old traces first.
+- **n = 3 pairs per scene.** The time differences are within run-to-run noise. Pass rate, deaths and reaction are the guardrails, and none moved.
 
 ## Open questions for Joshua
 1. ~~**Order:** memory → persistent doubt → stages~~ After the replay: moot filter → memory (`plan` + `doing`) → bench A/B. Persistent doubt is dropped. Stages wait until the bench shows doubt about sub-steps. Agree?

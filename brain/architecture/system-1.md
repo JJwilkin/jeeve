@@ -224,6 +224,12 @@ Measured on the slime case: 4–5 medium slimes summoned around Jeeve under "sta
 
 He survived every run, so survival alone doesn't separate the two; Jev's response to the first hit does. The e2e checks that every hit is attributed to a slime, that the slimes are killed, and that Jeeve never dies.
 
+## Doubt and memory (2026-10-14)
+From [[architecture/stateful-system-1|stateful-system-1]] → Bench A/B:
+- **Doubt about an answer that couldn't apply doesn't escalate** (`escalate_when.ignore_moot`, on in the default program). That's an answer that was overridden by a body start, pinned by a trial or a look, held by a whole-body run, or blocked by the dwell. Low-confidence escalations sent fell 16%.
+- **Jev's memory** (`describeMemory`: the plan step and what runs on each channel, said as facts) is an encoder param, **opt-in** with `JEEVE_MEMORY=1`. In a paired bench A/B it moved neither doubt nor 2A calls.
+- **2A calls from Jev's doubt are capped by the no-repeat window and the backoff,** not by how often Jev doubts.
+
 ## Needs (2026-10-14)
 System 1's standing objective is the bot's needs, not a distant root goal. Decided with Joshua and replayed before shipping ([[architecture/stateful-system-1|stateful-system-1]] → Needs).
 - **The encoder states needs as facts** in `needs`:

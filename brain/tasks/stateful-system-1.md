@@ -47,7 +47,12 @@ The goal: System 1 carries a small working memory, and takes on keeping commitme
    - an e2e scenario: idle, Jeeve walks or looks around; made hungry with bread, it eats with no 2A call.
    
    Gathering when idle is held back (it breaks blocks unprompted).
-4. **Bench A/B:** 3 rounds × orchard, forage, guard and workshop, memory on vs. off. Maybe add an "interrupted orchard" scene.
+3d. ~~**Build pieces 0 and 1**~~: built 2026-10-14 (commit `5bac02c`; e2e 66/66 with both on).
+4. ~~**Bench A/B**~~: done 2026-10-14, 12 pairs on the same layouts (`scripts/ab-report.ts`):
+   - the moot filter works and stays on;
+   - the memory had no measurable live effect and is opt-in (`JEEVE_MEMORY=1`);
+   - 2A's doubt calls are capped by the escalation gate, not the doubt rate.
+4b. **Next: a gate experiment.** Score new escalation gates on old traces with the counterfactual harness (e.g. escalate only when the top pick would change what runs), then bench the best one.
 5. **Stages** (piece 3), only if traces still show doubt about sub-steps.
 
 ## Done when
