@@ -41,7 +41,12 @@ The goal: System 1 carries a small working memory, and takes on keeping commitme
    - **needs defaults work** once the idle directive and the hands wording stop contradicting them: eat when hungry 100%, escalate when starving with no food 100%, gather when fed;
    - **objects in place of the block list** cut doubt ~9 points and help the single-channel questions, but hurt the body question until its options name objects too;
    - remembered far objects changed nothing on these labels.
-3c. **Build the needs defaults** if Joshua agrees: the needs line, the idle directive, the hands wording, gather when idle, and an `eat` behavior.
+3c. ~~**Build the needs defaults**~~: shipped 2026-10-14 ([[system-1]] → Needs):
+   - the needs line, the idle directive and the hands wording;
+   - `eat` (always offered when hungry), and the idle-only `wander` and `glance`;
+   - an e2e scenario: idle, Jeeve walks or looks around; made hungry with bread, it eats with no 2A call.
+   
+   Gathering when idle is held back (it breaks blocks unprompted).
 4. **Bench A/B:** 3 rounds × orchard, forage, guard and workshop, memory on vs. off. Maybe add an "interrupted orchard" scene.
 5. **Stages** (piece 3), only if traces still show doubt about sub-steps.
 

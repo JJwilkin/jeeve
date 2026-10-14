@@ -23,6 +23,9 @@ if (EXP === 'needs') {
   const GATHER = ' If every need is met and there is no instruction, gather resources in view.'
   const IDLE_DIRECTIVE = 'no instruction: look after your needs'
   const HANDS = 'Which behavior should the hands (attacking, eating) run now?'
+  // Arm E: what shipped in DEFAULT_PROGRAM: D with "walk around and look around" in place of gathering, and the
+  // wander (legs) and glance (aim) behaviors offered.
+  const WALK = ' If every need is met and there is no instruction, walk around nearby and look around.'
   const all = sessions.flatMap(s => s.rows.filter(r => r.kind === 'decide').map(d => ({ scenario: s.scenario, d })))
   const idle = stratified(all.filter(x => typeof x.d.input.state.directive === 'string'), x => x.scenario, N, seeded(11))
   const busy = stratified(all.filter(x => typeof x.d.input.state.directive !== 'string' && /\(running\)/.test(x.d.input.state.channels?.legs ?? '') && x.d.input.questions.hands), x => x.scenario, N, seeded(13))
@@ -48,15 +51,19 @@ if (EXP === 'needs') {
       questions.body = { ...d.input.questions.body, criteria: { ...d.input.questions.body.criteria, ...collect } }
     }
     const D = { ...state, needs: c.needs, guidance: state.guidance + NEEDS_GUIDANCE + GATHER, ...(c.base === idle ? { directive: IDLE_DIRECTIVE } : {}) }
-    return { c, scenario, arms: { A: state, B: { ...state, needs: c.needs }, C: { ...state, needs: c.needs, guidance: state.guidance + NEEDS_GUIDANCE }, D }, questions, questionsD: { ...questions, hands: { ...hands, instructions: HANDS } } }
+    const E = { ...D, guidance: state.guidance + NEEDS_GUIDANCE + WALK }
+    const questionsD = { ...questions, hands: { ...hands, instructions: HANDS } }
+    const add = (q: Row, k: string, desc: string) => q && { ...q, criteria: { ...q.criteria, [k]: desc } }
+    const questionsE = { ...questionsD, legs: add(d.input.questions.legs, 'wander', 'Walk around nearby, a few blocks at a time, pausing between walks'), aim: add(d.input.questions.aim, 'glance', 'Look around at what is nearby, now and then') }
+    return { c, scenario, arms: { A: state, B: { ...state, needs: c.needs }, C: { ...state, needs: c.needs, guidance: state.guidance + NEEDS_GUIDANCE }, D, E }, questions, questionsD, questionsE }
   }))
   console.log(`needs: ${idle.length} idle and ${busy.length} busy base states → ${jobs.length} variants × 3 arms × 2 orders`)
   if (DRY) { console.log(JSON.stringify(jobs[0].arms.C, null, 1).slice(0, 1500), Object.keys(jobs[0].questions)); process.exit(0) }
-  const answers = await pool(jobs, async j => ({ A: await askBoth(j.arms.A, j.questions), B: await askBoth(j.arms.B, j.questions), C: await askBoth(j.arms.C, j.questions), D: await askBoth(j.arms.D, j.questionsD) }))
+  const answers = await pool(jobs, async j => ({ A: await askBoth(j.arms.A, j.questions), B: await askBoth(j.arms.B, j.questions), C: await askBoth(j.arms.C, j.questions), D: await askBoth(j.arms.D, j.questionsD), E: await askBoth(j.arms.E, j.questionsE) }))
   const mean = (xs: number[]) => xs.length ? +(xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(3) : null
   for (const c of CASES) {
     const rows = jobs.map((j, i) => ({ j, a: answers[i] })).filter(x => x.j.c === c)
-    report[c.name] = Object.fromEntries((['A', 'B', 'C', 'D'] as const).map(arm => {
+    report[c.name] = Object.fromEntries((['A', 'B', 'C', 'D', 'E'] as const).map(arm => {
       const both = (f: (a: Row) => number) => mean(rows.flatMap(x => [f(x.a[arm].fwd), f(x.a[arm].rev)]))
       return [arm, {
         want: c.want,
@@ -67,6 +74,8 @@ if (EXP === 'needs') {
         escalate_yes: both(a => a.escalate.noul > 0.5 ? 1 : 0),
         escalate_noul: both(a => a.escalate.noul),
         body_collect: c.base === idle ? both(a => a.body.choice.startsWith('collect:') ? 1 : 0) : undefined,
+        legs_wander: arm === 'E' ? both(a => a.legs?.choice === 'wander' ? 1 : 0) : undefined,
+        aim_glance: arm === 'E' ? both(a => a.aim?.choice === 'glance' ? 1 : 0) : undefined,
         collect_offered: c.base === idle ? mean(rows.map(x => Object.keys(x.j.questions.body.criteria).some(k => k.startsWith('collect:')) ? 1 : 0)) : undefined
       }]
     }))
@@ -93,7 +102,7 @@ if (EXP === 'objects') {
     const yaw = raw.self.yaw
     const map = rows.slice(0, i).findLast(r => r.kind === 'system2' && r.input?.seen_map)
     const clusters: Array<{ names: Record<string, number>, min: number[], max: number[], seen: number }> =
-      (map?.input.seen_map ?? []).map((c: Row) => ({ names: c.names, min: c.min, max: c.max, seen: map.t }))
+      (map?.input.seen_map ?? []).map((c: Row) => ({ names: c.names, min: c.min, max: c.max, seen: map!.t }))
     const inBox = (p: number[], c: { min: number[], max: number[] }) => p.every((v, k) => v >= c.min[k] - 1 && v <= c.max[k] + 1)
     for (const [name, ps] of Object.entries(raw.blocks as Record<string, number[][]>)) {
       if (ps.some(p => clusters.some(c => c.names[name] && inBox(p, c)))) continue

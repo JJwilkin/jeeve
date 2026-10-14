@@ -108,8 +108,8 @@ function memoryAt (rows: Row[], i: number) {
   }
   if (doing.length) memory.doing = doing
   // The last behavior that was replaced by something else lately: what to come back to.
-  const replaced = starts.findLast(s => ends.get(s.run_id)?.reason === 'replaced' && t - ends.get(s.run_id).t < 30_000)
-  if (replaced) memory.interrupted = `${replaced.attrs['jeeve.behavior.params']} was replaced ${ago(t - ends.get(replaced.run_id).t)}`
+  const replaced = starts.findLast(s => ends.get(s.run_id)?.reason === 'replaced' && t - ends.get(s.run_id)!.t < 30_000)
+  if (replaced) memory.interrupted = `${replaced.attrs['jeeve.behavior.params']} was replaced ${ago(t - ends.get(replaced.run_id)!.t)}`
   const tried = new Map<string, { n: number, how: Map<string, number>, last: number }>()
   for (const s of starts) {
     const e = ends.get(s.run_id)

@@ -34,7 +34,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 ### Architecture
 - [[overview]]: what we build vs. what the agent discovers, the discovery loop, fast and slow thinking, goals and time as one hierarchy, open questions
 - [[layers]]: System 2 / Jev / behaviors / guards; the one-right-answer vs. judgment vs. plan rule; concurrent channels; System 2 sets when Jev decides; first milestone: a local client that takes instructions
-- [[system-1]]: System 1 is a program System 2 writes (manifest + modules); the runtime owns channels, `decide()`, bounds, tracing and a pinned fallback; the default program; how programs are compared
+- [[system-1]]: System 1 is a program System 2 writes (manifest + modules); the runtime owns channels, `decide()`, bounds, tracing and a pinned fallback; the default program; how programs are compared; needs as the standing objective (eat, wander, glance)
 - [[seed-behaviors]]: the M1 seed set wrapping mineflayer plugins (behaviors claim channel sets, so M1 asks one joint `body` choice), guards, and the three instructions walked end to end
 - [[trace-schema]]: one session per episode, one trace per window (root ends last), span kinds and `jeeve.*` attributes, judgeval-js ingest (<1 s to queryable), virtual SQL queries System 2 runs, volume
 - [[system-2]]: the goal tree (one writer, program versions stack with goals), instruction intake by whisper and local API, success checks as code modules, escalations, program changes scoped by goal, window summaries written by code

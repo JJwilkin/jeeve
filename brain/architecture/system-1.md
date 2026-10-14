@@ -224,6 +224,36 @@ Measured on the slime case: 4–5 medium slimes summoned around Jeeve under "sta
 
 He survived every run, so survival alone doesn't separate the two; Jev's response to the first hit does. The e2e checks that every hit is attributed to a slime, that the slimes are killed, and that Jeeve never dies.
 
+## Needs (2026-10-14)
+System 1's standing objective is the bot's needs, not a distant root goal. Decided with Joshua and replayed before shipping ([[architecture/stateful-system-1|stateful-system-1]] → Needs).
+- **The encoder states needs as facts** in `needs`:
+  - hunger, and whether there's food to eat;
+  - health;
+  - or "all needs met".
+  
+  Food is the game's own data (`registry.foodsByName`). Jev ignored "food: low" in its self fields (0 of 80 replayed hungry states ate), and acted on the same fact said as a need.
+- **`eat`** (hands) is offered for each food in the inventory while the bot is hungry (food below 8, when the needs line says so). It's offered under **every** program (`NEEDS_BEHAVIORS`), because needs outlast goals. While starving with food in the inventory, a hands answer may override a whole-body behavior, as a threat may.
+- **With no instruction,** the directive says "no instruction: look after your needs", not "stay safe and wait". The default program offers:
+  - `wander` (legs): short walks near where it started, re-anchored after a teleport;
+  - `glance` (aim): looks at what's near, and yields to the legs while they walk.
+
+  Both are **idle-only** (`Spec.idle`): they're offered only with no instruction, and an instruction stops them.
+- **The default guidance** says:
+  - eat when hungry and there's food;
+  - escalate a need the offered behaviors can't meet (starving, no food: that's a plan, so it's 2A's);
+  - during a task, stop to eat only when starving;
+  - with every need met, walk around and look around.
+- **Wording mattered as much as the needs themselves.** The hands question used to say "(attacking)" and the idle directive "stay safe and wait"; both kept Jev from eating. Replayed with the shipped wording:
+  - idle and hungry: eats 100%;
+  - idle and fed: walks and looks around 100%;
+  - starving with no food: escalates 100%;
+  - mid-task: never wanders, and eats 76% when starving.
+- **The first live run found two leaks** (e2e 2026-10-14). The share of Jev calls with a doubtful question went from 26–40% in earlier e2e runs to 58%:
+  - `glance` and `wander` were offered during tasks. The default program is also the one an instruction runs under until 2A sets its own, and 2A's programs inherited them. `glance` drew 0.2–0.5 of the aim question away from `track`. Hence idle-only.
+  - `eat` was offered at any food below full. It was never picked while fed, but it sat on every hands question. Hence only when hungry.
+- **Not shipped: gathering when idle.** It breaks blocks nobody asked for. The e2e and bench build trees and count them before the instruction, and on a shared server it's griefing. That's Joshua's call.
+- **Guard stops testing whether Jeeve learns to eat** (bench gap #17, [[bench-hill-climb]]): the default now tells it.
+
 ## Open questions
 - **Order bias.** Is reversed-order averaging enough, or do programs need a full shuffle-and-average? It costs nothing in latency, since extra questions are free ([[jev-measurements]]).
 - **Numbers vs. buckets.** Raw coordinates did as well as buckets on an easy near/far case. Harder spatial judgments haven't been tested.

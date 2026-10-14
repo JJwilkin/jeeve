@@ -12,7 +12,7 @@ import type { Span } from '@opentelemetry/api'
 import { authoredSpec, BEHAVIORS, CHANNELS, Channels, LOOK_AROUND, type ApiHost, type Spec } from './behaviors.ts'
 import { build, BUILDER_MODEL, type BehaviorDraft, type BuildResult, type CapabilityRequest, type TrialReport, type TrialTarget } from './builder.ts'
 import { coalescing, makeDecider, optionTarget, type Ask } from './decide.ts'
-import { attacking, checkSnapshot, describeEntity, handleFor, inventoryCounts, newHandles, rawSnapshot, type Attackers, type Directive } from './encoder.ts'
+import { attacking, checkSnapshot, describeEntity, foods, handleFor, inventoryCounts, newHandles, rawSnapshot, type Attackers, type Directive } from './encoder.ts'
 import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal, type PlanStep } from './goals.ts'
 import { guardedMovements, installGuards } from './guards.ts'
 import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type ModuleSource, type Snapshot } from './modules.ts'
@@ -357,6 +357,7 @@ export async function startAgent (opts: AgentOptions) {
       escalate: (reason, detail) => { const leaf = goals.leaf(); if (leaf) escalate(reason, detail, leaf) },
       cooling: option => Date.now() - (failedAt.get(option) ?? 0) < FAILED_COOLDOWN_MS,
       threatened: () => threatened(),
+      urgent: () => bot.food < 4 && foods(bot).length > 0,
       ask: opts.ask
     })
     wake = coalescing(decide, LIMITS.minIntervalMs)
@@ -783,6 +784,7 @@ export async function startAgent (opts: AgentOptions) {
     if (confirming) channels.stop(LOOK_AROUND.channels, 'cancelled')
     dropStaleRequests()
     channels.stopStalePlace(null) // other behaviors keep running while System 2 reads the instruction
+    channels.stop(CHANNELS.filter(c => BEHAVIORS[channels.slots[c]?.behavior ?? '']?.idle), 'instruction') // idle pastimes end
     for (const g of abandoned) recorder.record('goal', { attrs: { 'jeeve.goal.id': g.id, 'jeeve.goal.transition': 'abandoned' }, output: { summary: g.summary } })
     recorder.goalPath = goals.pathText()
     recorder.cut('goal_boundary')

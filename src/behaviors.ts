@@ -5,7 +5,7 @@ import type { Bot } from 'mineflayer'
 import type { Entity } from 'prismarine-entity'
 import pf from 'mineflayer-pathfinder'
 import { Vec3 } from 'vec3'
-import { inventoryCounts } from './encoder.ts'
+import { IGNORED_TYPES, inventoryCounts } from './encoder.ts'
 import { glob } from './goals.ts'
 import { BEHAVIOR_ENDINGS, startBehavior, type Module } from './modules.ts'
 import { notePlaced } from './world.ts'
@@ -20,12 +20,13 @@ type Emit = (event: string, terminal?: boolean) => void
 type Running = { stop: () => void, onVeto?: (reason: string) => void, detail?: () => unknown }
 export type Spec = {
   channels: Channel[]
-  targets: 'entity' | 'block' | 'item' // block and item targets are { name, count }
+  targets: 'entity' | 'block' | 'item' | 'food' | 'none' // block, item and food targets are { name, count }; food: what's in the inventory
   describe: (target: string) => string
   describePlace?: (where: string) => string // also takes the goal's place as a target ({ place: [x, y, z] })
   start: (bot: Bot, target: any, emit: Emit, runId: string) => Running
   version?: number // authored behaviors; seed behaviors are version 1
   disabled?: string // an authored behavior that kept failing: no longer offered
+  idle?: true // offered only while there's no instruction, and stopped when one arrives (in a task it only competed)
 }
 
 // Subscribe to bot events for the lifetime of one behavior run.
@@ -45,6 +46,13 @@ function setGoal (bot: Bot, goal: InstanceType<typeof goals.Goal>, dynamic = fal
   bot.pathfinder.setGoal(null)
   bot.pathfinder.setGoal(goal, dynamic)
 }
+
+// Resolves when the pathfinder reaches its goal (true), finds no path or gives up (false), or after ms (false).
+const arrive = (bot: Bot, ms: number) => new Promise<boolean>(resolve => {
+  const timer = setTimeout(() => done(false), ms)
+  const off = listen(bot, { goal_reached: () => done(true), path_update: (r: { status: string }) => { if (r.status === 'noPath' || r.status === 'timeout') done(false) } })
+  function done (ok: boolean) { clearTimeout(timer); off(); resolve(ok) }
+})
 
 const eyes = (e: Entity) => e.position.offset(0, e.height * 0.9, 0)
 const countItem = (bot: Bot, name: string) => bot.inventory.items().filter(i => i.name === name).reduce((n, i) => n + i.count, 0)
@@ -135,6 +143,76 @@ export const BEHAVIORS: Record<string, Spec> = {
       })()
       return { stop: () => { alive = false; bot.stopDigging(); void bot.collectBlock.cancelTask() } }
     }
+  },
+  // Offered for each food in the inventory while the bot can eat (food below full: the game refuses otherwise).
+  eat: {
+    channels: ['hands'],
+    targets: 'food',
+    describe: t => `Eat ${t} from the inventory (about 2 s; uses the hands)`,
+    start (bot, target: { name: string }, emit) {
+      let stopped = false
+      const before = bot.heldItem?.name
+      void (async () => {
+        const item = bot.inventory.items().find(i => i.name === target.name)
+        if (!item) return emit('none_found')
+        await bot.equip(item, 'hand')
+        await bot.consume()
+        const back = before && before !== target.name && bot.inventory.items().find(i => i.name === before)
+        if (back) await bot.equip(back, 'hand') // the tool it held before goes back in hand
+        if (!stopped) emit('done')
+      })().catch(() => { if (!stopped) emit('stuck') })
+      return { stop: () => { stopped = true; bot.deactivateItem() } }
+    }
+  },
+  // Walks to a spot a few blocks from where it started, pauses, and picks another, until replaced. It stays near
+  // where it began, so a bot left idle doesn't drift off. ponytail: random spots; aim them at unexplored ground
+  // (the frontier 2A gets) if idle time should also search.
+  wander: {
+    channels: ['legs'],
+    targets: 'none',
+    idle: true,
+    describe: () => 'Walk around nearby, a few blocks at a time, pausing between walks',
+    start (bot, _target, emit) {
+      let home = bot.entity.position.clone()
+      let stopped = false
+      let fails = 0
+      void (async () => {
+        while (!stopped) {
+          if (bot.entity.position.distanceTo(home) > 12) home = bot.entity.position.clone() // teleported or pushed away
+          const a = Math.random() * 2 * Math.PI
+          const r = 3 + Math.random() * 4
+          setGoal(bot, new goals.GoalNearXZ(home.x + Math.cos(a) * r, home.z + Math.sin(a) * r, 1))
+          const ok = await arrive(bot, 8000)
+          if (stopped) return
+          bot.pathfinder.setGoal(null)
+          fails = ok ? 0 : fails + 1
+          if (fails >= 3) return emit('stuck')
+          await bot.waitForTicks(40 + Math.floor(Math.random() * 40)) // 2–4 s
+        }
+      })().catch(() => { if (!stopped) emit('stuck') })
+      return { stop: () => { stopped = true; bot.pathfinder.setGoal(null) } }
+    }
+  },
+  // Every few seconds, looks at something nearby (an entity) or somewhere around. Yields to the legs while they
+  // walk, as track does: the pathfinder steers by looking.
+  glance: {
+    channels: ['aim'],
+    targets: 'none',
+    idle: true,
+    describe: () => 'Look around at what is nearby, now and then',
+    start (bot) {
+      let next = 0
+      const off = listen(bot, {
+        physicsTick: () => {
+          if (bot.pathfinder.isMoving() || Date.now() < next) return
+          next = Date.now() + 1500 + Math.random() * 2000
+          const near = Object.values(bot.entities).filter(e => e !== bot.entity && !IGNORED_TYPES.has(e.type) && e.position.distanceTo(bot.entity.position) < 16)
+          const e = near.length && Math.random() < 0.5 ? near[Math.floor(Math.random() * near.length)] : null
+          void (e ? bot.lookAt(eyes(e)) : bot.look(bot.entity.yaw + (Math.random() - 0.5) * Math.PI * 1.5, (Math.random() - 0.5) * 0.6))
+        }
+      })
+      return { stop: off }
+    }
   }
 }
 
@@ -153,16 +231,11 @@ export const LOOK_AROUND: Spec = {
     const here = bot.entity.position
     const spots = [[r, 0], [0, r], [-r, 0], [0, -r]].map(([dx, dz]) => [x + dx, z + dz])
       .sort((a, b) => Math.hypot(a[0] - here.x, a[1] - here.z) - Math.hypot(b[0] - here.x, b[1] - here.z))
-    const arrive = () => new Promise<void>(resolve => {
-      const timer = setTimeout(done, 6000)
-      const off = listen(bot, { goal_reached: done, path_update: (r: { status: string }) => { if (r.status === 'noPath' || r.status === 'timeout') done() } })
-      function done () { clearTimeout(timer); off(); resolve() }
-    })
     void (async () => {
       for (const [sx, sz] of spots) {
         if (stopped) return
         setGoal(bot, new goals.GoalNearXZ(sx, sz, 1))
-        await arrive()
+        await arrive(bot, 6000)
         if (stopped) return
         bot.pathfinder.setGoal(null)
         await bot.lookAt(new Vec3(x + 0.5, y + 2, z + 0.5))

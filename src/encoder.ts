@@ -36,7 +36,7 @@ export const motionBucket = (closing: number) =>
 export const healthBucket = (hp: number) =>
   hp >= 20 ? 'full' : hp >= 14 ? 'high' : hp >= 8 ? 'half' : hp >= 4 ? 'low' : 'critical'
 
-const IGNORED_TYPES = new Set(['object', 'orb', 'projectile', 'other', 'global'])
+export const IGNORED_TYPES = new Set(['object', 'orb', 'projectile', 'other', 'global'])
 
 // Mineflayer's `hostile` type misses mobs like slimes (typed `mob`), so damage attributed to its source marks
 // anything as attacking, with no list of hostile mobs (brain/architecture/system-1.md → "Threats").
@@ -60,6 +60,21 @@ export const inventoryCounts = (bot: Bot) => {
   const counts: Record<string, number> = {}
   for (const i of bot.inventory.items()) counts[i.name] = (counts[i.name] ?? 0) + i.count
   return counts
+}
+
+// Food in the inventory while the bot is hungry (the needs line says so). Food is the game's own data. Offered at any
+// food below full, eat was never picked but sat on every hands question (e2e 2026-10-14).
+export const HUNGRY = 8
+export const foods = (bot: Bot) => bot.food >= HUNGRY ? [] : Object.entries(inventoryCounts(bot)).filter(([name]) => bot.registry.foodsByName[name]).map(([name, count]) => ({ name, count }))
+
+// The bot's needs as facts (brain/architecture/stateful-system-1.md → Needs). Jev ignored "food: low" in its self
+// fields (0 of 80 replayed hungry states ate) and acted on the same fact said as a need.
+export function needs (bot: Bot): string {
+  const food = foods(bot).map(f => f.name).slice(0, 2)
+  const out: string[] = []
+  if (bot.food < HUNGRY) out.push(`hunger: you are ${bot.food < 4 ? 'starving (food is critical)' : 'hungry (food is low)'}${food.length ? `. You have ${food.join(', ')}; eating fixes this.` : ' and you have no food to eat.'}`)
+  if (bot.health < 8) out.push(`health: you are hurt (health is ${healthBucket(bot.health)}).`)
+  return out.length ? out.join(' ') : 'all needs met: not hungry, not hurt.'
 }
 
 const countBucket = (n: number) => n === 1 ? 'one' : n <= 5 ? 'a few' : 'many'
@@ -116,13 +131,14 @@ export function makeEgocentric (params: { entity_cap: number, radius: number, bl
       state: {
         directive: ctx.directive
           ? { text: ctx.directive.text, from: `player ${ctx.directive.from}${speaker ? ` (${handleFor(ctx.handles, speaker.id)})` : ' (not in view)'}`, ...(ctx.directive.goal ? { goal: ctx.directive.goal } : {}), ...(at ? { place: `you are ${place ? 'not at the goal\'s place yet' : 'at the goal\'s place'}; it is ${place ? `${bucket}, ` : ''}${where}` } : {}) }
-          : 'none yet: stay safe and wait',
+          : 'no instruction: look after your needs', // "stay safe and wait" held Jev back from eating (replay)
         self: {
           health: healthBucket(bot.health),
           food: healthBucket(bot.food),
           held: bot.heldItem?.name ?? 'empty hand',
           inventory: Object.entries(inventoryCounts(bot)).map(([name, n]) => `${name} (${countBucket(n)})`)
         },
+        needs: needs(bot),
         channels: ctx.channels,
         entities,
         blocks,

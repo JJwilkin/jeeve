@@ -245,6 +245,13 @@ Joshua's direction: the standing objective should be immediate, like a person me
   - it gathers when there's nothing to do;
   - it hands 2A what it can't fix.
 
+**Shipped 2026-10-14** (Joshua: "ship the needs defaults and add an eat behavior", plus a walk-around behavior so an idle bot doesn't just stand there). See [[system-1]] → Needs. Arm E of the replay is the shipped wording, with `wander` and `glance` offered:
+- idle and fed: walks and looks around 100%;
+- idle and hungry: eats 100% and doesn't wander;
+- mid-task: never wanders.
+
+Gathering when idle was held back: it breaks blocks unprompted.
+
 ## Space and time: objects, not voxels or frames (2026-10-14)
 Joshua asked for object permanence (several seconds of what Jev has seen) and how to represent 3D space plus time efficiently.
 
@@ -289,5 +296,5 @@ The state grows from ~310 to ~390 tokens.
 4. ~~**How long outcomes live**~~ Moot for now: the `tried` lines hurt in the replay, so outcomes stay in code (cooling, the 2nd-failure escalation) and out of Jev's view.
 5. **Escalation thresholds** in the program (2A tunes them per goal), or fixed bounds like `switchDwellMs`?
 6. **Near-duplicate options across targets** (the same whole-body skill on logs vs. leaves of one tree): worth a replay of its own?
-7. **Needs:** ship the needs defaults (the needs line, the idle directive, the hands wording, gather when idle) in the default program, accepting that guard stops testing learning to eat? It also needs an `eat` behavior.
+7. ~~**Needs:** ship the needs defaults?~~ Shipped 2026-10-14, except gathering when idle: it breaks blocks unprompted (the e2e's and bench's trees before their instruction; griefing on a shared server). Ship it anyway, behind a per-context setting, or leave it to 2A?
 8. **Objects:** worth the per-object option change (block behaviors target a cluster, not a type)? It's the condition for objects not hurting the body question.
