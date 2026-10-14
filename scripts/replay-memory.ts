@@ -2,41 +2,16 @@
 // 1. Escalation counterfactual (no Jev calls): which low_confidence escalations survive other rules.
 // 2. Memory A/B (Jev calls): ask doubtful questions again with and without a memory block rebuilt from the trace.
 // Usage: node --env-file=../judgment/.env.jeeve scripts/replay-memory.ts [--traces DIR] [--runs 59] [--n 200] [--no-jev]
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
+import { ago, arg, askJev, changedNothing, CHOICES, loadSessions, MOOT, optionTarget, reorder, type Row } from './replay-lib.ts'
 
-// Inlined from src/decide.ts and src/program.ts, so this runs without installing the agent's dependencies.
-const optionTarget = (key: string) => key.replace(/\(\d+\)$/, '')
-async function askJev (state: unknown, questions: Record<string, unknown>) {
-  const res = await fetch('https://api.typesafe.ai/v1/systemone', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.TYPESAFE_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'jev-1.13.0', state, questions }),
-    signal: AbortSignal.timeout(5000)
-  })
-  if (!res.ok) throw new Error(`jev ${res.status}: ${await res.text()}`)
-  return res.json()
-}
-
-const arg = (k: string, d: string) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d }
-const TRACES = arg('traces', '../jeeve-monitor/traces')
-const RUNS = Number(arg('runs', '59'))
 const N = Number(arg('n', '200'))
 const NO_JEV = process.argv.includes('--no-jev')
 const KEYS = arg('keys', '') // only these memory lines, e.g. plan,doing (an ablation)
 const OUT = arg('out', 'bench/replay-memory.json')
 const CONF = Number(arg('conf', '0.5')) // the escalation threshold replayed (the program's confidence_below)
-const MOOT = new Set(['overridden', 'pinned', 'held', 'dwell']) // the answer couldn't change anything this call
-
-type Row = Record<string, any>
-const results = readFileSync('bench/results.jsonl', 'utf8').trim().split('\n').map(l => JSON.parse(l)).slice(-RUNS)
-const sessions = results.filter(r => existsSync(`${TRACES}/${r.session}.jsonl`)).map(r => ({
-  scenario: r.scenario as string,
-  rows: readFileSync(`${TRACES}/${r.session}.jsonl`, 'utf8').split('\n').flatMap(l => { try { return l ? [JSON.parse(l) as Row] : [] } catch { return [] } })
-}))
-
-const CHOICES = ['body', 'legs', 'aim', 'hands']
+const sessions = loadSessions()
 const unsure = (d: Row) => CHOICES.filter(q => d.output?.answers?.[q]?.confidence < CONF)
-const changedNothing = (x: Row) => !x.goal && !x.program && !x.push_child && x.goal_action === 'none' && !x.new_modules?.length && !x.requests?.length && !x.plan?.length && !x.message
 
 // ---------- 1. counterfactual ----------
 type Flag = { sess: number, scenario: string, span: string, t: number, today: boolean, live: boolean, persist: boolean, dither: boolean, change: boolean }
@@ -103,7 +78,6 @@ for (const [name, keep] of Object.entries(rules)) {
 console.log('counterfactual', JSON.stringify(cf, null, 1))
 
 // ---------- 2. memory A/B ----------
-const ago = (ms: number) => ms < 3000 ? 'just now' : ms < 10_000 ? 'a few seconds ago' : ms < 30_000 ? 'under half a minute ago' : 'a while ago'
 const times = (n: number) => n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`
 
 // The memory block of the proposal, rebuilt from what the trace held before the decide at t. Code-written facts only.
@@ -181,12 +155,7 @@ while (sample.length < N && [...groups.values()].some(g => g.length)) for (const
 console.log(`pool ${pool.length} labelled doubtful questions; sampled ${sample.length}`, Object.fromEntries([...groups.keys()].map(k => [k, sample.filter(s => `${s.scenario}/${s.q}` === k).length])))
 if (NO_JEV) { for (const s of sample.filter((_, i) => i % 50 === 3)) console.log(s.scenario, s.q, 'label', s.label, JSON.stringify(s.memory, null, 1)); process.exit(0) }
 
-const reorder = (q: Row, reverse: boolean) => ({ ...q, criteria: Object.fromEntries(reverse ? Object.entries(q.criteria).reverse() : Object.entries(q.criteria)) })
-async function ask (state: Row, q: Row, reverse: boolean) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try { return (await askJev(state, { q: reorder(q, reverse) })).answers.q } catch (err) { if (attempt === 2) throw err; await new Promise(r => setTimeout(r, 500)) }
-  }
-}
+const ask = async (state: Row, q: Row, reverse: boolean) => (await askJev(state, { q: reorder(q, reverse) })).q
 type Cell = { fwd: Row, rev: Row }
 const out: Array<{ s: Sample, A: Cell, B: Cell }> = []
 let next = 0

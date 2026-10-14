@@ -209,10 +209,85 @@ Lives as `scripts/replay-memory.ts`. It reads `traces/*.jsonl` and `bench/result
 - **2A's answer to Jev's doubt is almost always "keep going"** (91% of the labels). What's left after the moot filter and the memory is mostly a real close call between carrying on and a near-duplicate option. One example: a running `clear_tall_tree:oak_log` against `clear_tall_tree:oak_leaves` on the same tree, which is the same tree-clearing run. That's the "options must not overlap" rule from [[system-1]], applied across targets. It's a lead for the option generator, not tested here.
 - **Estimated effect of pieces 0 + 1:** doubt-driven escalations sent fall about 19% from the moot filter, then about 16% of the rest from the memory. That's roughly a third overall, not the hoped-for half. The bench A/B would measure the real number.
 
+## Needs: what System 1 does when 2A hasn't asked for anything (2026-10-14)
+Joshua's direction: the standing objective should be immediate, like a person meeting basic needs, not a distant root goal like "beat the game". Today, when a goal closes, code stops the channels. Jev's state then says "none yet: stay safe and wait", and it stands still (~5% of bench calls).
+
+**Design.**
+- **Code measures the needs** and states them as facts in a `needs` line. Hunger with whether there's food to eat, health, and threats now; night coming and missing tools later. It's measurement, like the other buckets: no strategy.
+- **Jev meets a need when one behavior does it.** Eat what's in the inventory, fight or flee, gather what's in view. With no instruction, the directive says so ("no instruction: look after your needs") instead of "wait".
+- **A need that takes a plan is a typed escalation.** "Starving and no food" needs finding, hunting or farming, which is 2A's job under the dividing rule in [[layers]].
+- **Needs can interrupt a task,** with hysteresis: during a task, only a critical need does.
+- **This is scaffolding** under [[overview]]'s rule. The needs guidance lives in the pinned default program, and it has a baseline to beat (today's idle bot). 2A can rewrite it per goal.
+- **What it changes:** the guard scene stops being a test of learning to eat (bench gap #17, [[bench-hill-climb]]). There's no `eat` behavior yet either; only authored skills eat today.
+
+**Replay** (`scripts/replay-world.ts --exp needs`, 2026-10-14):
+- **States:** 40 idle and 40 mid-task recorded states, edited to be hungry, starving or fed. Bench runs nearly always have food and health "full", so the states had to be edited.
+- **The `eat:bread` option** is offered on the hands question whenever there's bread.
+- **Arms:**
+  - A: today;
+  - B: plus the `needs` line;
+  - C: plus a needs line in the guidance;
+  - D: C, plus the idle directive "no instruction: look after your needs" (not "stay safe and wait"), the hands question worded "(attacking, eating)" (not "(attacking)"), and "with every need met and no instruction, gather resources in view".
+
+| Case (want) | A: today | B: + needs facts | C: + needs guidance | D: + wording fixed, gather |
+|---|---|---|---|---|
+| Idle, hungry, has bread (eat) | eats 0% | 33% (doubt 93%) | 50% (doubt 99%) | **100% (doubt 0%)** |
+| Idle, fed, has bread (don't eat; gather) | no eat; gathers 0% | no eat | no eat | no eat; **gathers in 100% of the states where gathering was offered** |
+| Idle, starving, no food (escalate) | 0% | 28% | **100%** | **100%** |
+| Busy, starving, has bread (eat) | 1% | 40% | 58% | **76%** |
+| Busy, hungry, has bread (open; the guidance says only when starving) | 0% | 3% | 6% | 28% |
+
+- **Today Jev never acts on "food: low" in its self fields.** It has to be told the fact the decision turns on, which matches [[jev-measurements]].
+- **The two wording conflicts mattered as much as the needs themselves.** "Stay safe and wait" and "hands (attacking)" pulled against eating. The default program's wording is part of the design.
+- **With all four pieces, the defaults behave:**
+  - it eats when it should, with no doubt;
+  - it doesn't eat when fed;
+  - it gathers when there's nothing to do;
+  - it hands 2A what it can't fix.
+
+## Space and time: objects, not voxels or frames (2026-10-14)
+Joshua asked for object permanence (several seconds of what Jev has seen) and how to represent 3D space plus time efficiently.
+
+**Design.** Code does the geometry, and Jev gets the conclusions: a short list of **objects** (AlphaStar's entity tokens, [[spatial-models]]), not a voxel grid or stacked frames.
+- **Stable IDs for block clusters,** like entity handles ("T2"). The clusters are 2A's `seen_map` clusters (a tree is one cluster). The same thing keeps its ID across calls, so permanence is built in.
+- **Relations instead of coordinates:** distance bucket, direction, height span, in view or remembered.
+- **Time as change, not frames.** Each object carries:
+  - its age ("last looked a few seconds ago");
+  - its trend ("closing", "going down");
+  - its events (appeared, gone, hit you).
+- **A budget.** About 10–15 objects ranked by goal relevance, threat and novelty, at ~25 tokens each.
+- **Entities already have permanence.** The server sends them through walls, so a mob left Jev's list and came back within 15 s only 3 times in 12,944 calls. If a line-of-sight filter is added for fairness, a "last seen" entry is needed.
+
+**Replay** (`--exp objects`, 2026-10-14, two runs):
+- **Sample:** 200 doubtful orchard, forage and workshop questions 2A answered, with the same labels as the memory replay.
+- **Arms:**
+  - A: today's block list (types within 8 blocks);
+  - B: objects in its place;
+  - C: B with compass directions for anything 16 or more blocks away;
+  - D: today's list, plus only the remembered objects beyond it.
+
+| Arm (Δ vs A, paired, 95% CI) | Doubt | Agreement: body | Agreement: legs, aim, hands |
+|---|---|---|---|
+| B: objects | **−8.5 to −10.5 points** (CI within −3 to −16) | **−7.6 to −8.3** (CI excludes 0) | +3 to **+7** (run 2 CI +2.7 to +11) |
+| C: objects, compass when far | −9 | −8 to −10 | +2 to +5 |
+| D: today's list + remembered far objects | −1 (n.s.) | −2 (n.s.) | +2 (n.s.) |
+
+The state grows from ~310 to ~390 tokens.
+
+- **The object form helps, but distant memory doesn't** (in these labels). Clusters with heights and IDs cut doubt, and they help the single-channel questions. Adding what's remembered beyond 8 blocks changed nothing. The labels are 90% "keep going", which doesn't depend on far things. A search scene (forage before it finds trees) would be the test for that.
+- **The body question gets worse because the options and the state now use different words.** The state names objects (T2), but the body's options still name block types ("clear_tall_tree:birch_log(6)"). [[jev-measurements]] already found Jev needs the options in the state's words.
+  - The fix is options per object ("clear_tall_tree:T2"), which changes block behaviors to take a cluster instead of a type.
+  - That's a design change to the option generator and the behavior targets, so it needs its own replay before building.
+- **Compass directions don't help** at this distance.
+
+**Where this leaves the design:** objects in place of the block list, but only together with per-object options for the body question. Distant memory waits for a search-scene test.
+
 ## Open questions for Joshua
 1. ~~**Order:** memory → persistent doubt → stages~~ After the replay: moot filter → memory (`plan` + `doing`) → bench A/B. Persistent doubt is dropped. Stages wait until the bench shows doubt about sub-steps. Agree?
 2. **Should Jev write any state beyond its applied choices in v1?** Proposed: no. The stage pick comes in piece 3, and beliefs later.
 3. **Headline metric:** fewer doubt-driven 2A calls, with pass, deaths and reaction as guardrails? Or is reaction quality the headline?
 4. ~~**How long outcomes live**~~ Moot for now: the `tried` lines hurt in the replay, so outcomes stay in code (cooling, the 2nd-failure escalation) and out of Jev's view.
-6. **Near-duplicate options across targets** (the same whole-body skill on logs vs. leaves of one tree): worth a replay of its own?
 5. **Escalation thresholds** in the program (2A tunes them per goal), or fixed bounds like `switchDwellMs`?
+6. **Near-duplicate options across targets** (the same whole-body skill on logs vs. leaves of one tree): worth a replay of its own?
+7. **Needs:** ship the needs defaults (the needs line, the idle directive, the hands wording, gather when idle) in the default program, accepting that guard stops testing learning to eat? It also needs an `eat` behavior.
+8. **Objects:** worth the per-object option change (block behaviors target a cluster, not a type)? It's the condition for objects not hurting the body question.

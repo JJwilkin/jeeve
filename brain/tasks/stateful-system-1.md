@@ -37,6 +37,11 @@ The goal: System 1 carries a small working memory, and takes on keeping commitme
 3. **Build pieces 0 and 1:**
    - piece 0: don't escalate doubt about answers that were overridden, pinned, held or in the dwell;
    - piece 1: the memory block (`plan` + `doing`) as an encoder param, so on vs. off is a program diff.
+3b. ~~**Needs and objects replays**~~: done 2026-10-14 (`scripts/replay-world.ts`, shared code in `scripts/replay-lib.ts`):
+   - **needs defaults work** once the idle directive and the hands wording stop contradicting them: eat when hungry 100%, escalate when starving with no food 100%, gather when fed;
+   - **objects in place of the block list** cut doubt ~9 points and help the single-channel questions, but hurt the body question until its options name objects too;
+   - remembered far objects changed nothing on these labels.
+3c. **Build the needs defaults** if Joshua agrees: the needs line, the idle directive, the hands wording, gather when idle, and an `eat` behavior.
 4. **Bench A/B:** 3 rounds × orchard, forage, guard and workshop, memory on vs. off. Maybe add an "interrupted orchard" scene.
 5. **Stages** (piece 3), only if traces still show doubt about sub-steps.
 
