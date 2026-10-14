@@ -81,7 +81,8 @@ const metadata: CalculateMetadataFunction<Props> = async ({ props }) => {
   return { durationInFrames: Math.max(1, Math.ceil(duration(segs) / 1000 * FPS)), props: { ...props, clip, segs } }
 }
 
-// A title card between clips in a progress reel (scripts/reel.ts): what changed, in a line or two.
+// A title card between clips in a progress reel (scripts/reel.ts): what changed, in a line or two. Up to 10 s; the
+// reel renders only the frames it asks for.
 type CardProps = { title: string, subtitle: string, layout: Layout }
 function Card ({ title, subtitle, layout }: CardProps) {
   const frame = useCurrentFrame()
@@ -99,7 +100,7 @@ const Root = () => <>
   {(['wide', 'tall'] as const).map(layout =>
     <Composition key={layout} id={layout} component={Clip} width={SIZE[layout].w} height={SIZE[layout].h} fps={FPS} durationInFrames={1} defaultProps={{ layout }} calculateMetadata={metadata} />)}
   {(['wide', 'tall'] as const).map(layout =>
-    <Composition key={`card-${layout}`} id={`card-${layout}`} component={Card} width={SIZE[layout].w} height={SIZE[layout].h} fps={FPS} durationInFrames={FPS * 3} defaultProps={{ layout, title: '', subtitle: '' }} />)}
+    <Composition key={`card-${layout}`} id={`card-${layout}`} component={Card} width={SIZE[layout].w} height={SIZE[layout].h} fps={FPS} durationInFrames={FPS * 10} defaultProps={{ layout, title: '', subtitle: '' }} />)}
 </>
 
 registerRoot(Root)
