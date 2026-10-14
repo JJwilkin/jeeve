@@ -33,6 +33,21 @@ export function direction (dx: number, dz: number, yaw: number): string {
 export const motionBucket = (closing: number) =>
   closing > 1.5 ? 'closing fast' : closing > 0.3 ? 'closing' : closing < -0.3 ? 'moving away' : 'steady'
 
+export const ago = (ms: number) => ms < 3000 ? 'just now' : ms < 10_000 ? 'a few seconds ago' : ms < 30_000 ? 'under half a minute ago' : 'a while ago'
+
+// Jev's working memory (brain/architecture/stateful-system-1.md): where 2A's plan is and what's running, as facts code
+// writes. Only these two lines won the replay (doubt −13 points, agreement +4); listing past attempts made Jev agree
+// with 2A less, so outcomes stay out.
+export type Memory = { plan?: string, doing?: string[] }
+export type Running = { key: string, channels: string[], startedAt: number, chosenOn?: string }
+export function describeMemory (step: { k: number, n: number, text: string, next?: string } | null, running: Running[], now = Date.now()): Memory {
+  const m: Memory = {}
+  if (step) m.plan = `you are on step ${step.k} of ${step.n}: ${step.text}${step.next ? `; the next step is: ${step.next}` : '; it is the last step'}`
+  const doing = running.map(r => `${r.key} on ${r.channels.join(', ')}, started ${ago(now - r.startedAt)}${r.chosenOn ? ` (you chose it on ${r.chosenOn})` : ''}`)
+  if (doing.length) m.doing = doing
+  return m
+}
+
 export const healthBucket = (hp: number) =>
   hp >= 20 ? 'full' : hp >= 14 ? 'high' : hp >= 8 ? 'half' : hp >= 4 ? 'low' : 'critical'
 
@@ -93,9 +108,9 @@ function describeBlocks (bot: Bot, radius: number, rareMax: number, cap: number)
   }))
 }
 
-export function makeEgocentric (params: { entity_cap: number, radius: number, block_radius: number, block_cap: number, rare_max: number }) {
+export function makeEgocentric (params: { entity_cap: number, radius: number, block_radius: number, block_cap: number, rare_max: number, memory?: boolean }) {
   const lastDistance = new Map<number, { d: number, t: number }>()
-  return function encode (bot: Bot, ctx: { handles: Handles, directive: Directive | null, channels: Record<string, string>, events: string[], attackers?: Attackers, guarding?: { name: string, attackers: Attackers } }): Encoded {
+  return function encode (bot: Bot, ctx: { handles: Handles, directive: Directive | null, channels: Record<string, string>, events: string[], attackers?: Attackers, guarding?: { name: string, attackers: Attackers }, memory?: Memory }): Encoded {
     const me = bot.entity
     const now = Date.now()
     const near = Object.values(bot.entities)
@@ -142,7 +157,8 @@ export function makeEgocentric (params: { entity_cap: number, radius: number, bl
         channels: ctx.channels,
         entities,
         blocks,
-        recent_events: ctx.events
+        recent_events: ctx.events,
+        ...(params.memory && ctx.memory && Object.keys(ctx.memory).length ? { memory: ctx.memory } : {})
       },
       entities: entities.map(e => ({ id: e.id, desc: `${e.what}, ${e.where}` })),
       blocks: blocks.map(b => ({ name: b.name, desc: `${b.count}, nearest ${b.nearest}` })),

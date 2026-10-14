@@ -11,7 +11,9 @@ export type Program = {
   encoder: { module: string, params: Parameters<typeof makeEgocentric>[0] }
   questions: Record<string, Choice | { type: 'noul', instructions: string }>
   triggers: { events: string[], hostile_within: number, heartbeat_ms: number, watch?: string[] } // watch: authored watch modules
-  escalate_when: { confidence_below: number, noul_above: number }
+  // ignore_moot: doubt about an answer that couldn't apply this call (overridden, pinned, held, dwell) doesn't escalate.
+  // In the replay it was 27% of doubtful calls, mostly ones 2A answered "carry on".
+  escalate_when: { confidence_below: number, noul_above: number, ignore_moot?: boolean }
   allowed_behaviors: string[]
   guidance: string
 }
@@ -106,12 +108,16 @@ export function validate (p: Program) {
   if (unasked.length) throw new Error(`allowed but no question offers them: ${unasked.join(', ')}`)
 }
 
+// Stateful System 1 (memory + ignore_moot), on unless JEEVE_STATEFUL=0. ponytail: an env switch for the bench A/B
+// (brain/architecture/stateful-system-1.md); drop it once the A/B has decided.
+const STATEFUL = process.env.JEEVE_STATEFUL !== '0'
+
 // The default program, also the pinned fallback. Scaffolding: the baseline every program has to beat.
 // Whole-body behaviors (collect) get one joint `body` Choice; single-channel ones a Choice per channel.
 export const DEFAULT_PROGRAM: Program = {
   parent: null,
   reason: 'default program (pinned fallback)',
-  encoder: { module: 'egocentric@1', params: { entity_cap: 8, radius: 16, block_radius: 8, block_cap: 6, rare_max: 64 } },
+  encoder: { module: 'egocentric@1', params: { entity_cap: 8, radius: 16, block_radius: 8, block_cap: 6, rare_max: 64, memory: STATEFUL } },
   questions: {
     body: { type: 'choice', claims: ['legs', 'aim', 'hands'], instructions: 'Should the bot start or keep a whole-body task now?' },
     legs: { type: 'choice', claims: ['legs'], instructions: 'Which behavior should the legs (movement) run now?' },
@@ -125,7 +131,7 @@ export const DEFAULT_PROGRAM: Program = {
     hostile_within: 6,
     heartbeat_ms: 1000
   },
-  escalate_when: { confidence_below: 0.5, noul_above: 0.5 },
+  escalate_when: { confidence_below: 0.5, noul_above: 0.5, ignore_moot: STATEFUL },
   allowed_behaviors: ['navigate', 'follow', 'track', 'attack_when_ready', 'collect', 'wander', 'glance'], // eat: always (NEEDS_BEHAVIORS)
   guidance: [
     'You are the fast controller of a Minecraft bot. Carry out the directive from the player who gave it.',

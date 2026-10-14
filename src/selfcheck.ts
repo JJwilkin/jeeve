@@ -15,7 +15,7 @@ import { trace } from '@opentelemetry/api'
 import { MockLanguageModelV4 } from 'ai/test'
 import { build, type CapabilityRequest } from './builder.ts'
 import { coalescing, makeDecider } from './decide.ts'
-import { direction, distanceBucket, foods, makeEgocentric, needs, newHandles, rawSnapshot } from './encoder.ts'
+import { describeMemory, direction, distanceBucket, foods, makeEgocentric, needs, newHandles, rawSnapshot } from './encoder.ts'
 import { blockAt, explored, frontier, notableBlocks, notePlaced, observe, reachable, scan } from './world.ts'
 import { compile, glob, Goals } from './goals.ts'
 import { controlVector, guardedMovements, unsafeAt } from './guards.ts'
@@ -208,6 +208,21 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.deepEqual(r.trace.output.applied, { body: 'started', legs: 'overridden', aim: 'overridden', hands: 'overridden' })
   assert.equal(r.trace.attrs['jeeve.decide.escalate'], false)
   assert.deepEqual(r.escalations, [])
+  // Doubt about an answer that couldn't apply (overridden by the body's start) doesn't escalate (ignore_moot).
+  const moot = await decideWith({ body: { choice: 'collect:oak_log(10)', confidence: 0.9 }, legs: { choice: 'follow:E0', confidence: 0.2 }, escalate: { noul: 0.1 } })
+  assert.equal(moot.trace.output.applied.legs, 'overridden')
+  assert.deepEqual(moot.escalations, [])
+}
+
+// Jev's memory: the plan step and what runs, as facts with ages in words.
+{
+  const now = 100_000
+  assert.deepEqual(describeMemory({ k: 2, n: 4, text: 'clear the birch', next: 'clear the oak' }, [{ key: 'clear_tall_tree:birch_log(5)', channels: ['legs', 'aim', 'hands'], startedAt: now - 5000, chosenOn: 'plan_step' }], now), {
+    plan: 'you are on step 2 of 4: clear the birch; the next step is: clear the oak',
+    doing: ['clear_tall_tree:birch_log(5) on legs, aim, hands, started a few seconds ago (you chose it on plan_step)']
+  })
+  assert.equal(describeMemory({ k: 4, n: 4, text: 'clear the oak' }, [], now).plan, 'you are on step 4 of 4: clear the oak; it is the last step')
+  assert.deepEqual(describeMemory(null, [], now), {})
 }
 
 {

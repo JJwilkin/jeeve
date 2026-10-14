@@ -12,7 +12,7 @@ import type { Span } from '@opentelemetry/api'
 import { authoredSpec, BEHAVIORS, CHANNELS, Channels, LOOK_AROUND, type ApiHost, type Spec } from './behaviors.ts'
 import { build, BUILDER_MODEL, type BehaviorDraft, type BuildResult, type CapabilityRequest, type TrialReport, type TrialTarget } from './builder.ts'
 import { coalescing, makeDecider, optionTarget, type Ask } from './decide.ts'
-import { attacking, checkSnapshot, describeEntity, foods, handleFor, inventoryCounts, newHandles, rawSnapshot, type Attackers, type Directive } from './encoder.ts'
+import { attacking, checkSnapshot, describeEntity, describeMemory, foods, handleFor, inventoryCounts, newHandles, rawSnapshot, type Attackers, type Directive } from './encoder.ts'
 import { compile, glob, Goals, noteDeath, type CheckSpec, type Goal, type PlanStep } from './goals.ts'
 import { guardedMovements, installGuards } from './guards.ts'
 import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type ModuleSource, type Snapshot } from './modules.ts'
@@ -338,6 +338,7 @@ export async function startAgent (opts: AgentOptions) {
       guarding: () => { const p = goals.path()[0]?.from?.player; return p ? { name: p, attackers: ownerAttackers } : undefined },
       directive: () => directive && { ...directive, goal: goalLine(), place: goals.place() },
       events: () => recentFor(EVENT_WINDOW_MS),
+      memory,
       record: span => {
         lastView = (span.input as { state: unknown }).state
         recentStates.push(JSON.parse(span.attrs['jeeve.decide.raw_state'] as string))
@@ -352,7 +353,10 @@ export async function startAgent (opts: AgentOptions) {
           recorder.record('program', { attrs: { 'jeeve.program.version': version(back), 'jeeve.program.activation': 'rolled_back', 'jeeve.program.because': because } })
           queueMicrotask(() => activate(back, because))
         }
-        return recorder.record('decide', { attrs: span.attrs, input: span.input, output: span.output, kind: 'llm', llm: span.llm })
+        const id = recorder.record('decide', { attrs: span.attrs, input: span.input, output: span.output, kind: 'llm', llm: span.llm })
+        chosenOn.set(id, String(span.attrs['jeeve.decide.trigger']).split(',')[0].replace(/^.*:/, ''))
+        if (chosenOn.size > 200) chosenOn.delete(chosenOn.keys().next().value!)
+        return id
       },
       escalate: (reason, detail) => { const leaf = goals.leaf(); if (leaf) escalate(reason, detail, leaf) },
       cooling: option => Date.now() - (failedAt.get(option) ?? 0) < FAILED_COOLDOWN_MS,
@@ -363,6 +367,19 @@ export async function startAgent (opts: AgentOptions) {
     wake = coalescing(decide, LIMITS.minIntervalMs)
     if (heartbeat) clearInterval(heartbeat)
     heartbeat = setInterval(() => wake('heartbeat'), program.triggers.heartbeat_ms)
+  }
+
+  // Jev's memory (brain/architecture/stateful-system-1.md): the plan step it's on, and what runs on each channel.
+  const chosenOn = new Map<string, string>() // decide span → the trigger it answered, for "you chose it on …"
+  const memory = () => {
+    const root = goals.path()[0]
+    const leaf = goals.leaf()
+    const plan = root?.plan
+    const k = plan?.next ?? 0
+    const step = plan && leaf && leaf !== root && leaf.parent === root.id ? { k, n: plan.steps.length, text: leaf.text, next: plan.steps[k]?.text } : null
+    const running = [...new Set(CHANNELS.map(c => channels.slots[c]))].filter(s => s?.status === 'running')
+      .map(s => ({ key: s!.key, channels: s!.channels, startedAt: s!.startedAt, chosenOn: chosenOn.get(s!.decidedBy ?? '') }))
+    return describeMemory(step, running)
   }
 
   const goalLine = () => {

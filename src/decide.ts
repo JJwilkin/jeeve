@@ -2,7 +2,7 @@
 import type { Bot } from 'mineflayer'
 import type { Channels, Channel } from './behaviors.ts'
 import { BEHAVIORS } from './behaviors.ts'
-import { foods, rawSnapshot, type Attackers, type Directive, type Handles } from './encoder.ts'
+import { foods, rawSnapshot, type Attackers, type Directive, type Handles, type Memory } from './encoder.ts'
 import { ENCODERS, LIMITS, optionsFor, optionTarget, shuffled, version, type Choice, type Option, type Program, type Thing } from './program.ts'
 
 const MODEL = 'jev-1.13.0' // pinned: thresholds are tuned against a version, aliases move
@@ -58,6 +58,7 @@ export type DecideCtx = {
   escalate: (reason: string, detail: unknown) => void
   cooling?: (option: string) => boolean // an option that just failed (none_found, stuck) on this target sits out a while
   threatened?: () => boolean // hurt lately or a hostile close: channels may override a whole-body behavior
+  memory?: () => Memory // where the plan is and what's running (rendered only if the encoder's memory param is on)
   urgent?: () => boolean // a need that can't wait (starving, with food): it may override a whole-body behavior too
   ask?: Ask
 }
@@ -71,7 +72,7 @@ export function makeDecider (ctx: DecideCtx) {
   return async function decideOnce (reasons: string[]) {
     const t0 = Date.now()
     const raw = rawSnapshot(ctx.bot)
-    const enc = encode(ctx.bot, { handles: ctx.handles, directive: ctx.directive(), channels: ctx.channels.describe(), events: ctx.events(), attackers: ctx.attackers, guarding: ctx.guarding?.() })
+    const enc = encode(ctx.bot, { handles: ctx.handles, directive: ctx.directive(), channels: ctx.channels.describe(), events: ctx.events(), attackers: ctx.attackers, guarding: ctx.guarding?.(), memory: ctx.memory?.() })
     const encodeMs = Date.now() - t0
     if (encodeMs > LIMITS.encodeMs) console.warn(`[decide] encoder took ${encodeMs} ms (budget ${LIMITS.encodeMs})`)
     const state = { guidance: ctx.program.guidance, ...enc.state }
@@ -103,7 +104,6 @@ export function makeDecider (ctx: DecideCtx) {
     const applied: Record<string, string> = {}
     const actions: Array<(decidedBy: string) => void> = []
     const jevSaysEscalate = Object.keys(ctx.program.questions).some(id => res?.answers?.[id]?.noul > ctx.program.escalate_when.noul_above)
-    const unsure = choices.filter(([id]) => res?.answers?.[id]?.confidence < ctx.program.escalate_when.confidence_below).map(([id]) => id)
     for (const [id, q] of choices) {
       const a = res?.answers?.[id]
       if (!a) continue
@@ -118,6 +118,8 @@ export function makeDecider (ctx: DecideCtx) {
       if (act) actions.push(act)
       if (status === 'started') q.claims.forEach(c => claimed.add(c))
     }
+    const moot = (id: string) => !!ctx.program.escalate_when.ignore_moot && ['overridden', 'pinned', 'held', 'dwell'].includes(applied[id])
+    const unsure = choices.filter(([id]) => res?.answers?.[id]?.confidence < ctx.program.escalate_when.confidence_below && !moot(id)).map(([id]) => id)
     const escalate = jevSaysEscalate || unsure.length > 0
 
     // The span is recorded first, so the behaviors it starts can point back at it (decided_by).
