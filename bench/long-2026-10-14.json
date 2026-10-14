@@ -1,0 +1,12 @@
+{
+  "chapterTitle": "JEEVE · DAY 1",
+  "items": [
+    { "title": "Jeeve, day 1", "subtitle": "A real-time Minecraft agent that plans, reacts, and writes its own skills", "card": 3.5 },
+    { "dir": "clips/orchard-2026-10-12T08-22-01-605Z", "fit": 50, "chapter": { "name": "Learn", "what": "a tree too tall to reach, so it writes a skill" } },
+    { "dir": "clips/orchard-2026-10-14T06-59-55-205Z", "fit": 45, "chapter": { "name": "Reuse", "what": "5 new trees, the same skill" } },
+    { "dir": "clips/workshop-2026-10-12T11-29-48-700Z", "fit": 35, "chapter": { "name": "Craft", "what": "a wooden pickaxe into the chest" } },
+    { "dir": "clips/forage-2026-10-12T11-29-48-692Z", "fit": 45, "chapter": { "name": "Search", "what": "16 logs, every tree out of sight" } },
+    { "dir": "clips/guard-2026-10-12T11-29-48-715Z", "fit": 40, "chapter": { "name": "Protect", "what": "keep Josh safe from zombie waves" } },
+    { "title": "138 unattended runs overnight", "subtitle": "Every failure fixed in the harness, not the scene. 58 of the last 59 passed.", "card": 4 }
+  ]
+}

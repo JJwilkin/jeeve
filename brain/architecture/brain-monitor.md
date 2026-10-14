@@ -96,6 +96,7 @@ Everything visual lives in `viz/`, its own package, so the agent's runtime takes
 **Reels and highlight cuts:** `node scripts/reel.ts <list.json> clips/<name>` renders title cards with Remotion (`card-wide` and `card-tall`) and joins them with clips through one ffmpeg concat filter, writing `-16x9` and `-9x16` versions.
 - Each entry is a card (`title`, `subtitle`, `card` seconds), a clip (`dir`, optionally cut to `seconds` from `from`), or both.
 - The lists live in `bench/`, because `clips/` is gitignored.
+- A list in object form (`{ chapterTitle, items }`) can mark clips as **chapters** (`chapter: { name, what }`, fitted to `fit` seconds). Each chapter is re-rendered under a bar listing every chapter: done ones ticked, the current one in the accent with what it shows. The stage shrinks under the bar, keeping its own layout. `bench/long-2026-10-14.json` is the "day 1" video: Learn, Reuse, Craft, Search, Protect.
 - To choose cuts: tile a clip's frames every 5 s (`ffmpeg -vf "fps=1/5,scale=480:-1,tile=4x4"`) and pick moments from the captions in the top bar.
 
 ## First clips (2026-10-12)
