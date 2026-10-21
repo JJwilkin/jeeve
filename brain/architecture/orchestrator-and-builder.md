@@ -80,18 +80,56 @@ It never gets the goal text, which is the player's raw instruction.
 **What it doesn't protect against:**
 - **Injection through 2A.** 2A reads the raw text, and a steered 2A can write a harmful `need`. The paraphrase is a filter, not a boundary.
 - **What a behavior can do.** That's bounded by the action API, the guards and channel ownership ([[behaviors-and-guards]]), not by who asked. Those stay the real boundary.
-- **Library poisoning.** A registered behavior persists in `modules/library.json`. Curation is still a person reading the git diff.
+- **Library poisoning.** A registered behavior persists in `modules/library.json`. `npm run curate` proposes retirements and merges, but a person still reads the diff before anything changes.
 
-## The between-episode loop (designed, not built)
-Decided with Joshua: design only, build as a follow-up.
-- **Trigger:** `npm run curate` after an episode, or on a schedule. It's a 2B run with no request and no body.
-- **Reads:** `modules/library.json`, plus virtual SQL over recent sessions ([[trace-schema]]): runs per behavior by `end_reason`, trials and their attempts, `module_disabled` events, goals that completed or failed with a behavior allowed.
-- **Does:**
-  - retire behaviors that keep failing or are never picked;
-  - merge near-duplicates into one general version;
-  - mine traces for lessons that outlive their goal ([[roadmap]]).
-- **Output:** a proposed library diff for git review (curation stays git, [[system-1]] → "Module library"), plus a list of lessons with cited trace ids. Lessons need [[system-2]]'s rule for kept lessons: evidence and an expiry. Nothing is applied without review until stage 4 gives an outcome signal to trust.
-- **Rewrites need a body.** A rewrite can't be trialled without a server, so between episodes 2B proposes, and the trial happens in the next episode, or on the eval server with RCON resets ([[system-1]] → "How programs are compared").
+## The between-episode loop (built 2026-10-11)
+Designed with Joshua, then built as a follow-up. `npm run curate` (`-- --days 7 --sessions <globs> --library <file> --out curation`) runs it after an episode. It's a 2B run with no request and no body. Nothing is applied without review until stage 4 gives an outcome signal to trust.
+
+**Decided with Joshua (2026-10-11):**
+- **Offline only.** Curation runs between episodes, and its proposals are reviewed in git. It isn't a background loop during play: how to fold it into the live agent is still open.
+- **No one global library, no one set of lessons.** Different use cases will want different optimizations, e.g. a PvP arena vs. an assistant in someone's world. So:
+  - every proposal and lesson is tagged with the **contexts** its evidence came from;
+  - curate runs over a **chosen subset of sessions** (`--sessions`) and a chosen library file (`--library`).
+
+  That keeps per-use-case libraries possible later. Profiles aren't built now; the door is just left open.
+- **A context is `<label>@<server>`.** The label is `JEEVE_CONTEXT` (or the agent's `context` option; the e2e sets `e2e`). The server is host:port. Both go into the `episode_start` carry-over, so each session says what it was for. Sessions from before this read `unlabelled@unknown server`. A goal type isn't recorded as such; the goals each behavior served are listed with their text.
+
+**Code reads the facts first** (`gather` in `src/curate.ts`), with virtual SQL ([[trace-schema]]). For each library behavior, it looks only at the sessions where *that version* was in use: the session it was born in (its `origin`), plus every session that logged it as `loaded`. The e2e starts each run from an empty scratch library, so `pillar_up_and_clear@1` names different code in different sessions. Scoping by session keeps their runs apart. Per behavior:
+- **picked runs** by `end_reason`, and trial runs (`decided_by builder:*`) counted separately;
+- the start of each failed picked run's `jeeve.behavior.detail`;
+- its **trials and builds**: the request's `need`, status, trials, latency;
+- its **`module_disabled` events**;
+- **goals that completed or failed** while it was allowed (a `program` manifest active in the goal's lifetime listed it) or while it ran.
+
+Each behavior's facts also list its contexts. The model is told not to retire or merge across contexts on the strength of one context alone.
+
+The model gets these facts and the library code, plus `run_sql` to read more. It ends with one `submit_curation`:
+- **keep**, **retire**, or **merge** for every behavior. A merge is a new general version, written in the same call;
+- **lessons** that outlive their goal, each citing trace, span or run ids and carrying an expiry date. This is [[system-2]]'s rule for kept lessons. Each lesson also says where it holds (`applies_to`, the model's words), and code adds the contexts of the sessions its evidence came from.
+
+**What it writes** (`curation/<time>/`; `propose` in `src/curate.ts`):
+- **`library.json`**: the proposed library. Retired and merged-away behaviors are removed; git history keeps them. A merge is added as the next version of its name, with no `trial`, because a rewrite can't be trialled without a body. Its `origin.contexts` lists the contexts of what it replaces and of its evidence. A merge whose code doesn't compile, or that replaces a behavior not in the library, is dropped, and what it would have replaced stays.
+- **`library.diff`**: a unified diff on the library's own path. `git apply` applies it after review.
+- **`review.md`**: one row per behavior with its contexts, its decision, picked runs, goals, the reason and the evidence, plus each merge's code. An evidence id that never appeared in a query result is flagged "not in the queried traces", so an invented id is visible.
+- **`lessons.md`**: the lessons, with their evidence and expiry.
+
+**Traced** as a `curate` root span in a session of its own (`curate-<time>`), with the AI SDK's spans under it, as for `builder`.
+
+**`usage` is kept in the library entry.** The trial draft's `usage` is saved with the behavior (`modules/library.json`), and 2A's module list shows it. So a behavior whose trial finished its goal, and never reached 2A as `capability_result`, still has 2B's guidance proposal when 2A allows it later. The curator also sees it.
+
+### First runs (2026-10-11, jeeve-dev staging)
+- **One e2e's library** (3 behaviors, 1 session each): it kept all three, because one session is thin evidence. Two lessons, each citing run ids:
+  - `api.craft` at a table returned 0 even though the pickaxe was made;
+  - a `*_log` scan misses floating leaves once the trunk is gone.
+
+  About 1 minute, 3 `run_sql` calls, all in one Judgment trace.
+- **Five e2e libraries combined** (10 behaviors: 4 tree-clearing, 3 crafting, 3 chest):
+  - **Retired 3.** Each was mostly `stuck` or `error`, and only ever passed as `goal_closed`. It also noticed that one recognized its own pillar by `oak_log`.
+  - **Merged 5 into 2:** `craft_item@2`, which checks the inventory instead of trusting `craft()`'s return, and a `deposit_in_chest@2` that takes an item glob.
+  - **Kept 2:** the tree behaviors with a real `done` run.
+  - **Every decision cites run or trace ids,** and every cited id was in a query result. The diff applied cleanly to the library.
+- **Scoped to the 10-12 sessions** (`--sessions 'jeeve-2026-10-12*'`): the first try still showed 2B the behaviors no chosen session had used, and it retired two of them with no evidence from that subset. That's the cross-use-case leak the decision above rules out. Now a behavior with no chosen session gets no facts, isn't shown to 2B, can't be retired or merged, and `review.md` lists it as out of scope. The rerun left 4 untouched, retired 2 and kept 4. Every context read `unlabelled@unknown server`, since those sessions predate the label.
+- **One lesson was an artifact of the test:** "check the library before requesting a capability", drawn from the same three goals being rebuilt run after run. That's the e2e starting from an empty library, which the curator couldn't know. Lessons need a reviewer for exactly this.
 
 ## Tracing
 2B's work is a **trace of its own per request**, in the episode's session. Window traces cut every 60 s, and a build takes minutes, so it can't live under one window.
@@ -172,5 +210,8 @@ The e2e's canopy scenario now runs right after "collect 10 logs", so it's the fi
 - **A trial that keeps the body for minutes** (up to its 120 s limit) blocks Jev from the goal meanwhile. Should 2A be able to refuse windows for a goal that's time-critical?
 - **Two capabilities for one goal.** One request per goal is the rule. A goal that needs two would chain them: the second request after the first result.
 - **Model comparison for 2B:** two models over one run each is a small sample. Compare more runs, and other providers (the AI SDK makes that a config change), once the curation loop gives more requests to build.
-- **Results that skip 2A.** When a trial finishes the goal, 2A never sees `capability_result`, so it never writes guidance for the new behavior. That's fine while the goal is done, but the guidance proposal (`usage`) is lost. Keep it in the library entry?
+- ~~**Results that skip 2A.**~~ Resolved: `usage` is kept in the library entry, and 2A's module list shows it (see "The between-episode loop").
 - **The gate's hostile test** uses Mineflayer's entity type. Damage attribution from the defend-me fixes (recent attackers) could replace it.
+- **Merges are untrialled.** A merged version goes into the proposed library with no `trial` and runs live as soon as the library is loaded. The runtime disables a behavior after 3 failed runs in a row, but a trial on the eval server (RCON resets) before it's offered would be safer.
+- **Checks and watches aren't curated.** Coordinate-specific checks like `tree_gone_30_m60_m12` pile up in the library. They aren't harmful (2A reads them by name), but they're noise. Curate them too, by how often a goal used them?
+- **Lessons have no reader yet.** `lessons.md` is for a person. Feeding reviewed lessons back into 2A or 2B's context is the "lessons that outlive their goal" item on the [[roadmap]].

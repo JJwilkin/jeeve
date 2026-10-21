@@ -12,15 +12,18 @@ import vm from 'node:vm'
 
 export type ModuleKind = 'check' | 'watch' | 'behavior'
 // Behaviors also declare the channels they claim, their target type and a time limit.
-export type ModuleSource = { kind: ModuleKind, name: string, description: string, code: string, channels?: string[], targets?: 'block' | 'entity' | 'item', timeout_s?: number }
+// usage: a behavior's guidance for the fast model, as 2B proposed it. Kept because a trial that finishes its goal
+// never reaches 2A as a capability_result, so 2A reads it here when it allows the behavior later.
+export type ModuleSource = { kind: ModuleKind, name: string, description: string, code: string, channels?: string[], targets?: 'block' | 'entity' | 'item', timeout_s?: number, usage?: string }
 export type Snapshot = Record<string, unknown>
 export type Stats = { calls: number, errors: number, totalMs: number, maxMs: number, lastError?: string }
-export type Origin = { session: string, goal: string, created_at: string }
+// contexts: for a curated merge, the use cases its evidence came from (src/curate.ts).
+export type Origin = { session: string, goal: string, created_at: string, contexts?: string[] }
 // run is the predicate; a behavior module never runs as one (it starts through src/behaviors.ts).
 // usedAt: when it last ran (a check evaluated, a behavior started), for curating the library across episodes.
 export type Module = ModuleSource & { version: number, id: string, run: (s: Snapshot) => boolean, stats: Stats, disabled?: string, origin?: Origin, trial?: Trial | BehaviorTrial, usedAt?: number }
 // One library entry: the latest version of a module, as written to the library file.
-type Stored = ModuleSource & { version: number, origin?: Origin, trial?: Trial | BehaviorTrial, disabled?: string, used_at?: string }
+export type Stored = ModuleSource & { version: number, origin?: Origin, trial?: Trial | BehaviorTrial, disabled?: string, used_at?: string }
 export type Trial = { states: number, trues: number, errors: number, maxMs: number, error?: string }
 export type BehaviorTrial = { target: unknown, end: string, ms: number, error?: string }
 
@@ -109,7 +112,7 @@ export class ModuleRegistry {
     if (!this.file) return
     const modules: Stored[] = [...this.modules.values()].sort((a, b) => a.name.localeCompare(b.name)).map(m => ({
       kind: m.kind, name: m.name, description: m.description, code: m.code, version: m.version,
-      ...(m.kind === 'behavior' ? { channels: m.channels, targets: m.targets, timeout_s: m.timeout_s } : {}),
+      ...(m.kind === 'behavior' ? { channels: m.channels, targets: m.targets, timeout_s: m.timeout_s, usage: m.usage } : {}),
       ...(m.origin ? { origin: m.origin } : {}), ...(m.trial ? { trial: m.trial } : {}), ...(m.disabled ? { disabled: m.disabled } : {}),
       ...(m.usedAt ? { used_at: new Date(m.usedAt).toISOString() } : {})
     }))
@@ -159,7 +162,7 @@ export class ModuleRegistry {
   list () {
     return [...this.modules.values()].map(m => ({
       id: m.id, kind: m.kind, description: m.description, disabled: m.disabled ?? null,
-      ...(m.kind === 'behavior' ? { channels: m.channels, targets: m.targets } : {}),
+      ...(m.kind === 'behavior' ? { channels: m.channels, targets: m.targets, usage: m.usage ?? null } : {}),
       calls: m.stats.calls, errors: m.stats.errors, avg_ms: m.stats.calls ? +(m.stats.totalMs / m.stats.calls).toFixed(3) : 0
     }))
   }

@@ -47,7 +47,7 @@ All custom attributes use the `jeeve.*` prefix.
 | Span | Input / output | Attributes | Events |
 |---|---|---|---|
 | `window` | none | `jeeve.window_index`, `jeeve.prev_trace_id`, `jeeve.window.reason` (`time`, `goal_boundary`, `episode_end`), `jeeve.goal.path` (`g-4:collect 10 logs > g-5:…`, at window open) | game events that aren't behavior events: `death`, `damage`, `owner_damage` (the player an open-ended goal protects, [[system-2]]), `chat`, `trial_window` and `trial_preempted` ([[orchestrator-and-builder]]), `confirm` (a look around before a goal closes, [[perception]]). Each carries the program version in effect. |
-| `carry_over` | in: goal path, program version, previous window's summary, open behavior runs | `jeeve.prev_trace_id` | none |
+| `carry_over` | in: goal path, program version, previous window's summary, open behavior runs. The first window's (`reason: episode_start`) also has the server (host:port) and the episode's `context` label (`JEEVE_CONTEXT`), which curation tags its proposals with ([[orchestrator-and-builder]]) | `jeeve.prev_trace_id` | none |
 | `system2` | in: instruction text and sender, or the escalation · out: goal, check, program changes | `jeeve.system2.trigger` (`instruction`, `escalation:<reason>`), plus model and tokens via `recordLLMMetadata` | none |
 | `perceive` | in: the query · out: the full result | `jeeve.perceive.tool` (`scan`, `reachable`), `.query`, `.mode` (`los`; scan only; `xray` before 2026-10-12, [[perception]]), `.latency_ms`, `.result_bytes` | none |
 | `program` | in: manifest diff from the parent · out: full manifest | `jeeve.program.version`, `.parent`, `.reason`, `.cites` (trace and span ids), `.activation` (`ok`, `failed_check`, `rolled_back`) | none |
