@@ -11,7 +11,9 @@ export type Program = {
   encoder: { module: string, params: Parameters<typeof makeEgocentric>[0] }
   questions: Record<string, Choice | { type: 'noul', instructions: string }>
   triggers: { events: string[], hostile_within: number, heartbeat_ms: number, watch?: string[] } // watch: authored watch modules
-  escalate_when: { confidence_below: number, noul_above: number }
+  // ignore_moot: doubt about an answer that couldn't apply this call (overridden, pinned, held, dwell) doesn't escalate.
+  // In the replay it was 27% of doubtful calls, mostly ones 2A answered "carry on".
+  escalate_when: { confidence_below: number, noul_above: number, ignore_moot?: boolean }
   allowed_behaviors: string[]
   guidance: string
 }
@@ -29,25 +31,29 @@ export const ENCODERS: Record<string, typeof makeEgocentric> = { 'egocentric@1':
 export const version = (p: Program) => 'v-' + createHash('sha256').update(JSON.stringify(p)).digest('hex').slice(0, 8)
 
 const sameSet = (a: Channel[], b: Channel[]) => a.length === b.length && a.every(c => b.includes(c))
+// Needs outlast any goal (brain/architecture/stateful-system-1.md → Needs): these are offered under every program.
+export const NEEDS_BEHAVIORS = ['eat']
 // A disabled authored behavior stays allowed (the program still validates) but is no longer offered.
-export const behaviorsFor = (claims: Channel[], allowed: string[]) => allowed.filter(b => BEHAVIORS[b] && !BEHAVIORS[b].disabled && sameSet(BEHAVIORS[b].channels, claims))
+export const behaviorsFor = (claims: Channel[], allowed: string[]) => [...new Set([...allowed, ...NEEDS_BEHAVIORS])].filter(b => BEHAVIORS[b] && !BEHAVIORS[b].disabled && sameSet(BEHAVIORS[b].channels, claims))
 
 // An entity target is a handle, resolved to a live entity when the answer arrives.
 export type Option = { desc: string, behavior?: string, handle?: string, block?: Thing, place?: Pos } // block: a block or item target
 export type Thing = { name: string, count: number }
 
 // Option generator `behaviors_x_targets`: behaviors whose channel set is the question's × encoded
-// targets (entities; block types with what's left of the goal's count; the item the goal still needs), plus
-// `keep_current` and `stop`.
+// targets (entities; block types with what's left of the goal's count; the item the goal still needs; food in the
+// inventory; nothing, for behaviors with no target), plus `keep_current` and `stop`.
 // A behavior that takes places (navigate) also gets the goal's place, so Jev can walk back once it's out of view.
 // No two options may mean the same thing: Jev splits probability between them and confidence collapses.
 // So `stop` is offered only while something runs, and the running option only as `keep_current`.
 // An option's target without its count, so "collect:oak_leaves(9)" and "(8)" are the same option.
 export const optionTarget = (key: string) => key.replace(/\(\d+\)$/, '')
+// Options per behavior for target kinds the encoder doesn't cap (entities and blocks use its caps).
+const TARGET_CAP = { item: 1, food: 3, none: 1 }
 
 export function optionsFor (
   claims: Channel[], allowed: string[], enc: Pick<Encoded, 'entities' | 'blocks' | 'place'>,
-  running: string | null, remaining: (block: string) => number, items: Thing[] = []
+  running: string | null, remaining: (block: string) => number, items: Thing[] = [], food: Thing[] = []
 ): Record<string, Option> {
   const whole = claims.length > 1
   const opts: Record<string, Option> = running
@@ -55,14 +61,17 @@ export function optionsFor (
     : { keep_current: { desc: whole ? 'Start no whole-body task now' : STOP_DESC[claims[0]] } }
   for (const name of behaviorsFor(claims, allowed)) {
     const spec = BEHAVIORS[name]
-    const targets: Array<[string, Option]> = spec.targets === 'entity'
-      ? enc.entities.map(e => [`${name}:${e.id}`, { desc: spec.describe(`${e.id} (${e.desc})`), behavior: name, handle: e.id }])
-      : spec.targets === 'item'
-        ? items.map(i => [`${name}:${i.name}(${i.count})`, { desc: spec.describe(`${i.count} ${i.name}`), behavior: name, block: i }])
-        : enc.blocks.flatMap(b => {
-          const n = remaining(b.name)
-          return n > 0 ? [[`${name}:${b.name}(${n})`, { desc: spec.describe(`${n} ${b.name} (${b.desc})`), behavior: name, block: { name: b.name, count: n } }]] : []
-        })
+    const targets: Array<[string, Option]> = {
+      entity: () => enc.entities.map(e => [`${name}:${e.id}`, { desc: spec.describe(`${e.id} (${e.desc})`), behavior: name, handle: e.id }]),
+      item: () => items.map(i => [`${name}:${i.name}(${i.count})`, { desc: spec.describe(`${i.count} ${i.name}`), behavior: name, block: i }]),
+      // No count in the key: eating one changes it, and a "new" option would restart the run (gap #6).
+      food: () => food.slice(0, TARGET_CAP.food).map(f => [`${name}:${f.name}`, { desc: spec.describe(f.name), behavior: name, block: f }]),
+      none: () => [[name, { desc: spec.describe(''), behavior: name }]],
+      block: () => enc.blocks.flatMap(b => {
+        const n = remaining(b.name)
+        return n > 0 ? [[`${name}:${b.name}(${n})`, { desc: spec.describe(`${n} ${b.name} (${b.desc})`), behavior: name, block: { name: b.name, count: n } }]] : []
+      })
+    }[spec.targets]() as Array<[string, Option]>
     if (spec.describePlace && enc.place) targets.push([`${name}:place`, { desc: spec.describePlace(enc.place.desc), behavior: name, place: enc.place.pos }])
     // The running one is keep_current, whatever its count is now: offered again under its new count, Jev picked it as
     // a fresh option and restarted it (a pillaring skill restarted 18 times on one tree, orchard bench 2026-10-12).
@@ -91,7 +100,7 @@ export function validate (p: Program) {
     if (q.type !== 'choice') continue
     // Worst case options: keep_current + stop + behaviors × target cap (+ the goal's place).
     const max = 2 + behaviorsFor(q.claims, p.allowed_behaviors).reduce((sum, b) =>
-      sum + ({ entity: p.encoder.params.entity_cap, block: p.encoder.params.block_cap, item: 1 }[BEHAVIORS[b].targets]) + (BEHAVIORS[b].describePlace ? 1 : 0), 0)
+      sum + ({ entity: p.encoder.params.entity_cap, block: p.encoder.params.block_cap, ...TARGET_CAP }[BEHAVIORS[b].targets]) + (BEHAVIORS[b].describePlace ? 1 : 0), 0)
     if (max > LIMITS.options) throw new Error(`${q.claims.join('+')}: up to ${max} options (max ${LIMITS.options})`)
     for (const b of behaviorsFor(q.claims, p.allowed_behaviors)) covered.add(b)
   }
@@ -99,17 +108,23 @@ export function validate (p: Program) {
   if (unasked.length) throw new Error(`allowed but no question offers them: ${unasked.join(', ')}`)
 }
 
+// Jev's memory is opt-in (JEEVE_MEMORY=1): in the bench A/B it moved neither doubt nor 2A calls
+// (brain/architecture/stateful-system-1.md → Bench A/B). ponytail: kept for the next memory layer's tests (objects);
+// delete it if that doesn't earn its place either.
+const MEMORY = process.env.JEEVE_MEMORY === '1'
+
 // The default program, also the pinned fallback. Scaffolding: the baseline every program has to beat.
 // Whole-body behaviors (collect) get one joint `body` Choice; single-channel ones a Choice per channel.
 export const DEFAULT_PROGRAM: Program = {
   parent: null,
   reason: 'default program (pinned fallback)',
-  encoder: { module: 'egocentric@1', params: { entity_cap: 8, radius: 16, block_radius: 8, block_cap: 6, rare_max: 64 } },
+  encoder: { module: 'egocentric@1', params: { entity_cap: 8, radius: 16, block_radius: 8, block_cap: 6, rare_max: 64, memory: MEMORY } },
   questions: {
     body: { type: 'choice', claims: ['legs', 'aim', 'hands'], instructions: 'Should the bot start or keep a whole-body task now?' },
     legs: { type: 'choice', claims: ['legs'], instructions: 'Which behavior should the legs (movement) run now?' },
     aim: { type: 'choice', claims: ['aim'], instructions: 'Which behavior should the aim (where the bot looks) run now?' },
-    hands: { type: 'choice', claims: ['hands'], instructions: 'Which behavior should the hands (attacking) run now?' },
+    // "(attacking)" alone kept Jev from eating: 50% → 100% in the needs replay with "(attacking, eating)".
+    hands: { type: 'choice', claims: ['hands'], instructions: 'Which behavior should the hands (attacking, eating) run now?' },
     escalate: { type: 'noul', instructions: 'Is this a situation the directive and the available behaviors cannot handle, so a slower planner should take over?' }
   },
   triggers: {
@@ -117,12 +132,15 @@ export const DEFAULT_PROGRAM: Program = {
     hostile_within: 6,
     heartbeat_ms: 1000
   },
-  escalate_when: { confidence_below: 0.5, noul_above: 0.5 },
-  allowed_behaviors: ['navigate', 'follow', 'track', 'attack_when_ready', 'collect'],
+  escalate_when: { confidence_below: 0.5, noul_above: 0.5, ignore_moot: true },
+  allowed_behaviors: ['navigate', 'follow', 'track', 'attack_when_ready', 'collect', 'wander', 'glance'], // eat: always (NEEDS_BEHAVIORS)
   guidance: [
     'You are the fast controller of a Minecraft bot. Carry out the directive from the player who gave it.',
     '"Come here" means walk to that player. "Follow me" means keep following that player. "Collect" means use the whole-body collect task.',
     'Hostile mobs near the bot or the player it is protecting should be attacked when the directive allows it or when they threaten the bot.',
-    'Prefer keep_current while the current behavior is still the right one; switching too often wastes time.'
+    'Prefer keep_current while the current behavior is still the right one; switching too often wastes time.',
+    // Needs defaults (brain/architecture/stateful-system-1.md → Needs), replayed before shipping.
+    "When there is no instruction, look after the bot's needs: if it is hungry and has food, eat. If a need cannot be met with the behaviors offered, answer yes to escalate. During a task, stop to eat only when starving.",
+    'If every need is met and there is no instruction, walk around nearby and look around.'
   ].join(' ')
 }

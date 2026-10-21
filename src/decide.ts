@@ -1,7 +1,8 @@
 // decide(): calls Jev with at most one call in flight; the latest state wins (brain/architecture/system-1.md).
 import type { Bot } from 'mineflayer'
 import type { Channels, Channel } from './behaviors.ts'
-import { rawSnapshot, type Attackers, type Directive, type Handles } from './encoder.ts'
+import { BEHAVIORS } from './behaviors.ts'
+import { foods, rawSnapshot, type Attackers, type Directive, type Handles, type Memory } from './encoder.ts'
 import { ENCODERS, LIMITS, optionsFor, optionTarget, shuffled, version, type Choice, type Option, type Program, type Thing } from './program.ts'
 
 const MODEL = 'jev-1.13.0' // pinned: thresholds are tuned against a version, aliases move
@@ -57,6 +58,8 @@ export type DecideCtx = {
   escalate: (reason: string, detail: unknown) => void
   cooling?: (option: string) => boolean // an option that just failed (none_found, stuck) on this target sits out a while
   threatened?: () => boolean // hurt lately or a hostile close: channels may override a whole-body behavior
+  memory?: () => Memory // where the plan is and what's running (rendered only if the encoder's memory param is on)
+  urgent?: () => boolean // a need that can't wait (starving, with food): it may override a whole-body behavior too
   ask?: Ask
 }
 
@@ -69,7 +72,7 @@ export function makeDecider (ctx: DecideCtx) {
   return async function decideOnce (reasons: string[]) {
     const t0 = Date.now()
     const raw = rawSnapshot(ctx.bot)
-    const enc = encode(ctx.bot, { handles: ctx.handles, directive: ctx.directive(), channels: ctx.channels.describe(), events: ctx.events(), attackers: ctx.attackers, guarding: ctx.guarding?.() })
+    const enc = encode(ctx.bot, { handles: ctx.handles, directive: ctx.directive(), channels: ctx.channels.describe(), events: ctx.events(), attackers: ctx.attackers, guarding: ctx.guarding?.(), memory: ctx.memory?.() })
     const encodeMs = Date.now() - t0
     if (encodeMs > LIMITS.encodeMs) console.warn(`[decide] encoder took ${encodeMs} ms (budget ${LIMITS.encodeMs})`)
     const state = { guidance: ctx.program.guidance, ...enc.state }
@@ -79,8 +82,9 @@ export function makeDecider (ctx: DecideCtx) {
     const optionOrder: Record<string, string[]> = {}
     for (const [id, q] of Object.entries(ctx.program.questions)) {
       if (q.type === 'noul') { questions[id] = { type: 'noul', instructions: q.instructions }; continue }
-      options[id] = optionsFor(q.claims, ctx.program.allowed_behaviors, enc, running(ctx, q), ctx.remaining, ctx.wanted())
-      for (const k of Object.keys(options[id])) if (ctx.cooling?.(optionTarget(k))) delete options[id][k]
+      options[id] = optionsFor(q.claims, ctx.program.allowed_behaviors, enc, running(ctx, q), ctx.remaining, ctx.wanted(), foods(ctx.bot))
+      const busy = !!ctx.directive()
+      for (const [k, o] of Object.entries(options[id])) if (ctx.cooling?.(optionTarget(k)) || (busy && o.behavior && BEHAVIORS[o.behavior]?.idle)) delete options[id][k]
       // Shuffled per call and traced: Jev leans toward early options on close calls.
       optionOrder[id] = shuffled(Object.keys(options[id])).slice(0, LIMITS.options)
       questions[id] = { type: 'choice', instructions: q.instructions, criteria: Object.fromEntries(optionOrder[id].map(k => [k, options[id][k].desc])) }
@@ -100,7 +104,6 @@ export function makeDecider (ctx: DecideCtx) {
     const applied: Record<string, string> = {}
     const actions: Array<(decidedBy: string) => void> = []
     const jevSaysEscalate = Object.keys(ctx.program.questions).some(id => res?.answers?.[id]?.noul > ctx.program.escalate_when.noul_above)
-    const unsure = choices.filter(([id]) => res?.answers?.[id]?.confidence < ctx.program.escalate_when.confidence_below).map(([id]) => id)
     for (const [id, q] of choices) {
       const a = res?.answers?.[id]
       if (!a) continue
@@ -109,12 +112,14 @@ export function makeDecider (ctx: DecideCtx) {
       // A whole-body behavior that's running is the body question's to change: a channel's own answer (walk the legs
       // to the place) stopped a tree skill 9 times in one orchard run. Not while the bot is under threat: then the
       // hands' "attack it" must win (held, a collect kept going under a zombie until Jeeve died, e2e 2026-10-12).
-      if (a.choice !== 'keep_current' && !ctx.threatened?.() && q.claims.some(c => { const s = ctx.channels.slots[c]; return s?.status === 'running' && s.channels.length > q.claims.length })) { applied[id] = 'held'; continue }
+      if (a.choice !== 'keep_current' && !ctx.threatened?.() && !ctx.urgent?.() && q.claims.some(c => { const s = ctx.channels.slots[c]; return s?.status === 'running' && s.channels.length > q.claims.length })) { applied[id] = 'held'; continue }
       const [status, act] = plan(ctx, q, a.choice, options[id][a.choice])
       applied[id] = status
       if (act) actions.push(act)
       if (status === 'started') q.claims.forEach(c => claimed.add(c))
     }
+    const moot = (id: string) => !!ctx.program.escalate_when.ignore_moot && ['overridden', 'pinned', 'held', 'dwell'].includes(applied[id])
+    const unsure = choices.filter(([id]) => res?.answers?.[id]?.confidence < ctx.program.escalate_when.confidence_below && !moot(id)).map(([id]) => id)
     const escalate = jevSaysEscalate || unsure.length > 0
 
     // The span is recorded first, so the behaviors it starts can point back at it (decided_by).
@@ -156,6 +161,7 @@ function plan (ctx: DecideCtx, q: Choice, choice: string, opt: Option | undefine
   if (holder?.status === 'running' && holder.behavior === opt.behavior && optionTarget(holder.key) !== optionTarget(choice) && Date.now() - holder.startedAt < LIMITS.switchDwellMs) return ['dwell']
   if (opt.block) return ['started', by => ctx.channels.set(choice, opt.behavior!, opt.block!, by)]
   if (opt.place) return ['started', by => ctx.channels.set(choice, opt.behavior!, { place: opt.place! }, by)]
+  if (BEHAVIORS[opt.behavior].targets === 'none') return ['started', by => ctx.channels.set(choice, opt.behavior!, {} as never, by)]
   const id = ctx.handles.byHandle.get(opt.handle!)
   const target = id === undefined ? undefined : ctx.bot.entities[id]
   if (!target) return ['stale_target']

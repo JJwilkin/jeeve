@@ -3,6 +3,8 @@
 //   npm run bench -- 3                      three rounds of every scenario
 //   npm run bench -- 1 orchard workshop     one round of these
 //   npm run bench -- 3 --fresh              start from an empty skill library
+// An A/B runs two benches at once, each on its own ports and library, on the same layouts:
+//   JEEVE_BENCH_PORT=25571 JEEVE_BENCH_LIBRARY=traces/lib-a.json JEEVE_BENCH_SEED=1000 JEEVE_MEMORY=1 npm run bench -- 3
 // Learning: every run starts from bench/library.json, the skills and checks Jeeve learned in earlier runs, and what
 // a run learns is merged back after its round. One Jeeve that keeps what it learned, across runs and scenarios.
 import { spawn, spawnSync } from 'node:child_process'
@@ -12,7 +14,9 @@ const flags = process.argv.slice(2).filter(a => a.startsWith('--'))
 const args = process.argv.slice(2).filter(a => !a.startsWith('--'))
 const rounds = Number(args[0] ?? 1)
 const scenarios = args.slice(1).length ? args.slice(1) : ['orchard', 'workshop', 'guard', 'forage']
-const SHARED = 'bench/library.json'
+const SHARED = process.env.JEEVE_BENCH_LIBRARY ?? 'bench/library.json'
+// Same base seed → the same layout per round and scenario, so two arms of an A/B are paired.
+const seedFor = (round: number, i: number) => process.env.JEEVE_BENCH_SEED ? { JEEVE_SEED: String(Number(process.env.JEEVE_BENCH_SEED) + round * 100 + i) } : {}
 mkdirSync('bench', { recursive: true })
 if (flags.includes('--fresh') && existsSync(SHARED)) rmSync(SHARED)
 const portLibrary = (port: number) => `traces/clip-module-library-${port}.json`
@@ -39,13 +43,13 @@ function merge (files: string[], roundStart: string) {
   writeFileSync(SHARED, JSON.stringify({ modules: [...by.values()] }, null, 2) + '\n')
   return `${by.size} modules${retired.length ? `, retired ${retired.join(', ')}` : ''}`
 }
-const BASE_PORT = 25571 // 25570 is for runs Joshua watches
+const BASE_PORT = Number(process.env.JEEVE_BENCH_PORT ?? 25571) // 25570 is for runs Joshua watches
 mkdirSync('bench/logs', { recursive: true })
 
-const run = (scenario: string, port: number, round: number) => new Promise<void>(resolve => {
+const run = (scenario: string, port: number, round: number, i: number) => new Promise<void>(resolve => {
   const log = createWriteStream(`bench/logs/${scenario}-r${round}-${Date.now()}.log`)
   if (existsSync(SHARED)) copyFileSync(SHARED, portLibrary(port)); else rmSync(portLibrary(port), { force: true })
-  const child = spawn('node', ['--env-file=../judgment/.env.jeeve', 'scripts/clip.ts', scenario, '--bench'], { env: { ...process.env, JEEVE_PORT: String(port), JEEVE_KEEP_LIBRARY: '1' } })
+  const child = spawn('node', ['--env-file=../judgment/.env.jeeve', 'scripts/clip.ts', scenario, '--bench'], { env: { ...process.env, JEEVE_PORT: String(port), JEEVE_KEEP_LIBRARY: '1', ...seedFor(round, i) } })
   child.stdout.pipe(log)
   child.stderr.pipe(log)
   child.stdout.on('data', d => { for (const line of String(d).split('\n')) if (/^\[(bench|clip)\] (verify|"|\{)/.test(line)) console.log(`${scenario}#${round}: ${line.slice(0, 300)}`) })
@@ -64,7 +68,7 @@ const before = readFileSync('bench/results.jsonl', { flag: 'a+' }).toString().sp
 for (let r = 1; r <= rounds; r++) {
   console.log(`[bench] round ${r}/${rounds}: ${scenarios.join(', ')}`)
   const roundStart = new Date().toISOString()
-  await Promise.all(scenarios.map((s, i) => run(s, BASE_PORT + i, r)))
+  await Promise.all(scenarios.map((s, i) => run(s, BASE_PORT + i, r, i)))
   console.log(`[bench] round ${r}: the shared library has ${merge(scenarios.map((_, i) => portLibrary(BASE_PORT + i)), roundStart)}`)
 }
 const rows = readFileSync('bench/results.jsonl', 'utf8').split('\n').filter(Boolean).slice(before).map(l => JSON.parse(l))

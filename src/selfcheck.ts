@@ -15,7 +15,7 @@ import { trace } from '@opentelemetry/api'
 import { MockLanguageModelV4 } from 'ai/test'
 import { build, type CapabilityRequest } from './builder.ts'
 import { coalescing, makeDecider } from './decide.ts'
-import { direction, distanceBucket, makeEgocentric, newHandles, rawSnapshot } from './encoder.ts'
+import { describeMemory, direction, distanceBucket, foods, makeEgocentric, needs, newHandles, rawSnapshot } from './encoder.ts'
 import { blockAt, explored, frontier, notableBlocks, notePlaced, observe, reachable, scan } from './world.ts'
 import { compile, glob, Goals } from './goals.ts'
 import { controlVector, guardedMovements, unsafeAt } from './guards.ts'
@@ -40,8 +40,24 @@ const enc = {
 const allowed = DEFAULT_PROGRAM.allowed_behaviors
 const want = (b: string) => b === 'oak_log' ? 4 : 0 // goal met for dandelions → not offered
 const keys = (o: object) => Object.keys(o)
-assert.deepEqual(keys(optionsFor(['legs'], allowed, enc, null, want)), ['keep_current', 'navigate:E0', 'navigate:E1', 'follow:E0', 'follow:E1'])
-assert.deepEqual(keys(optionsFor(['legs'], allowed, enc, 'follow:E0', want)), ['keep_current', 'stop', 'navigate:E0', 'navigate:E1', 'follow:E1'])
+assert.deepEqual(keys(optionsFor(['legs'], allowed, enc, null, want)), ['keep_current', 'navigate:E0', 'navigate:E1', 'follow:E0', 'follow:E1', 'wander'])
+assert.deepEqual(keys(optionsFor(['legs'], allowed, enc, 'follow:E0', want)), ['keep_current', 'stop', 'navigate:E0', 'navigate:E1', 'follow:E1', 'wander'])
+// A behavior with no target is one option, and while it runs it's only keep_current.
+assert.deepEqual(keys(optionsFor(['legs'], allowed, enc, 'wander', want)), ['keep_current', 'stop', 'navigate:E0', 'navigate:E1', 'follow:E0', 'follow:E1'])
+// Eat is offered for food in the inventory under any program (needs outlast goals), keyed without a count.
+{
+  const bread = [{ name: 'bread', count: 3 }]
+  assert.deepEqual(keys(optionsFor(['hands'], ['attack_when_ready'], enc, null, want, [], bread)), ['keep_current', 'attack_when_ready:E0', 'attack_when_ready:E1', 'eat:bread'])
+  assert.deepEqual(optionsFor(['hands'], [], enc, null, want, [], bread)['eat:bread'], { desc: 'Eat bread from the inventory (about 2 s; uses the hands)', behavior: 'eat', block: { name: 'bread', count: 3 } })
+  // Needs are said as facts; food is the game's data, and none is offered at full food.
+  const stub = (food: number, inv: string[]) => ({ food, health: 20, registry: { foodsByName: { bread: {}, apple: {} } }, inventory: { items: () => inv.map(name => ({ name, count: 2 })) } }) as any
+  assert.match(needs(stub(6, ['bread', 'oak_log'])), /^hunger: you are hungry \(food is low\)\. You have bread; eating fixes this\.$/)
+  assert.match(needs(stub(2, ['oak_log'])), /starving .* no food to eat/)
+  assert.equal(needs(stub(20, ['bread'])), 'all needs met: not hungry, not hurt.')
+  assert.deepEqual(foods(stub(20, ['bread'])), [])
+  assert.deepEqual(foods(stub(12, ['bread'])), []) // not hungry yet
+  assert.deepEqual(foods(stub(6, ['bread', 'oak_log'])), [{ name: 'bread', count: 2 }])
+}
 assert.deepEqual(keys(optionsFor(['hands'], allowed, enc, null, want)), ['keep_current', 'attack_when_ready:E0', 'attack_when_ready:E1'])
 assert.deepEqual(keys(optionsFor(['legs', 'aim', 'hands'], allowed, enc, null, want)), ['keep_current', 'collect:oak_log(4)'])
 assert.deepEqual(optionsFor(['legs', 'aim', 'hands'], allowed, enc, null, want)['collect:oak_log(4)'].block, { name: 'oak_log', count: 4 })
@@ -192,6 +208,21 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.deepEqual(r.trace.output.applied, { body: 'started', legs: 'overridden', aim: 'overridden', hands: 'overridden' })
   assert.equal(r.trace.attrs['jeeve.decide.escalate'], false)
   assert.deepEqual(r.escalations, [])
+  // Doubt about an answer that couldn't apply (overridden by the body's start) doesn't escalate (ignore_moot).
+  const moot = await decideWith({ body: { choice: 'collect:oak_log(10)', confidence: 0.9 }, legs: { choice: 'follow:E0', confidence: 0.2 }, escalate: { noul: 0.1 } })
+  assert.equal(moot.trace.output.applied.legs, 'overridden')
+  assert.deepEqual(moot.escalations, [])
+}
+
+// Jev's memory: the plan step and what runs, as facts with ages in words.
+{
+  const now = 100_000
+  assert.deepEqual(describeMemory({ k: 2, n: 4, text: 'clear the birch', next: 'clear the oak' }, [{ key: 'clear_tall_tree:birch_log(5)', channels: ['legs', 'aim', 'hands'], startedAt: now - 5000, chosenOn: 'plan_step' }], now), {
+    plan: 'you are on step 2 of 4: clear the birch; the next step is: clear the oak',
+    doing: ['clear_tall_tree:birch_log(5) on legs, aim, hands, started a few seconds ago (you chose it on plan_step)']
+  })
+  assert.equal(describeMemory({ k: 4, n: 4, text: 'clear the oak' }, [], now).plan, 'you are on step 4 of 4: clear the oak; it is the last step')
+  assert.deepEqual(describeMemory(null, [], now), {})
 }
 
 {

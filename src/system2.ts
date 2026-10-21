@@ -217,7 +217,7 @@ Keep program changes small and concrete; they last only while the goal is active
 
 // Jeeve's own span vocabulary (brain/architecture/trace-schema.md), so queries don't burn turns on discovery.
 const TRACES = `Your traces (Judgment virtual SQL, project-scoped). One session per episode (session_id), one trace per window.
-Span names: window, carry_over, system2, perceive (your scan/reachable calls, children of the system2 span, or of a builder span), program, decide, goal, module, request (a capability request you made), builder (the builder's work on one request: a trace of its own, jeeve.request.id; its trial spans carry jeeve.behavior.run_id), behavior.<name> (navigate, follow, track, attack_when_ready, collect, and behaviors the builder wrote).
+Span names: window, carry_over, system2, perceive (your scan/reachable calls, children of the system2 span, or of a builder span), program, decide, goal, module, request (a capability request you made), builder (the builder's work on one request: a trace of its own, jeeve.request.id; its trial spans carry jeeve.behavior.run_id), behavior.<name> (navigate, follow, track, attack_when_ready, collect, eat, wander, glance, and behaviors the builder wrote).
 Columns: span_name, session_id, trace_id, started_at, input, output, attributes (Map(String,String)), events_json.
 Keys: jeeve.window_index, jeeve.prev_trace_id, jeeve.goal.path, jeeve.goal.id, jeeve.goal.transition, jeeve.program.version,
 jeeve.program.because, jeeve.decide.trigger, jeeve.decide.changed, jeeve.decide.escalate, jeeve.decide.latency_ms, jeeve.decide.raw_state,

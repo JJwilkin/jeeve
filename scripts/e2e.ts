@@ -166,7 +166,7 @@ const traceRecords = () => readFileSync(agent.traceFile, 'utf8').trim().split('\
   await until('split: 2A gets the result (capability_result), or the trial itself finished the goal', () => finishedByTrial() || since('system2').some(r => String(r.attrs['jeeve.system2.trigger']).includes('capability_result')), 120000)
   await until('"break the tree": every leaf is broken', () => treeLeft('leaves').length === 0, 240000)
   console.log(`left around the tree: leaves [${treeLeft('leaves').join(' ')}], logs [${treeLeft('log').join(' ')}]`)
-  const SEED = new Set(['navigate', 'follow', 'track', 'attack_when_ready', 'collect', 'e2e_step_forward', 'e2e_whisper'])
+  const SEED = new Set(['navigate', 'follow', 'track', 'attack_when_ready', 'collect', 'eat', 'wander', 'glance', 'e2e_step_forward', 'e2e_whisper'])
   const authoredRuns = traceRecords().filter(r => r.kind === 'behavior_start' && r.t > asked && !SEED.has(r.name))
   console.log(`authored runs here: ${authoredRuns.map(r => `${r.attrs['jeeve.behavior.params']} (${String(r.attrs['jeeve.behavior.decided_by']).startsWith('builder:') ? 'trial' : 'Jev'})`).join(', ')}`)
   check('split: authored code did the work (a trial or a run Jev picked)', authoredRuns.length > 0)
@@ -341,6 +341,22 @@ await sleep(1000)
   const inChest = chest.containerItems().filter(i => i.name.endsWith('_log')).reduce((n, i) => n + i.count, 0)
   chest.close()
   check('"put your logs in the chest": the logs are in the chest', inChest === logsHeld, `${inChest} in the chest, Jeeve held ${logsHeld}`)
+}
+
+// Needs (brain/architecture/stateful-system-1.md → Needs): with no instruction, Jeeve walks or looks around rather
+// than standing there, and eats when hungry with food in the inventory. Nothing asks it to.
+{
+  // From when the last goal closed: Jeeve starts walking about a second later, while the chest check above still runs.
+  const idleFrom = traceRecords().filter(r => r.kind === 'goal' && r.attrs['jeeve.goal.transition'] !== 'pushed').at(-1)?.t ?? Date.now()
+  const started = (re: RegExp) => traceRecords().some(r => r.kind === 'behavior_start' && r.t > idleFrom && re.test(r.name))
+  await until('idle: Jeeve walks around or looks around', () => started(/^(wander|glance)$/), 30000)
+  server.command('give Jeeve bread 4')
+  server.command('effect give Jeeve minecraft:hunger 60 40') // drains food in seconds; there's no command to set it
+  await until('needs: Jeeve gets hungry', () => agent.bot.food < 7, 60000)
+  server.command('effect clear Jeeve minecraft:hunger')
+  const hungry = agent.bot.food
+  await until('needs: Jeeve eats bread on its own', () => started(/^eat$/) && agent.bot.food > hungry, 30000)
+  check('needs: no System 2 call asked it to eat', !traceRecords().some(r => r.kind === 'system2' && r.t > idleFrom && /eat/i.test(JSON.stringify(r.output?.decision?.program ?? ''))))
 }
 
 await sleep(12000) // let System 2 answer the last instruction before the episode ends

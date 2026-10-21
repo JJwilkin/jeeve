@@ -33,10 +33,25 @@ export function direction (dx: number, dz: number, yaw: number): string {
 export const motionBucket = (closing: number) =>
   closing > 1.5 ? 'closing fast' : closing > 0.3 ? 'closing' : closing < -0.3 ? 'moving away' : 'steady'
 
+export const ago = (ms: number) => ms < 3000 ? 'just now' : ms < 10_000 ? 'a few seconds ago' : ms < 30_000 ? 'under half a minute ago' : 'a while ago'
+
+// Jev's working memory (brain/architecture/stateful-system-1.md): where 2A's plan is and what's running, as facts code
+// writes. Only these two lines won the replay (doubt −13 points, agreement +4); listing past attempts made Jev agree
+// with 2A less, so outcomes stay out.
+export type Memory = { plan?: string, doing?: string[] }
+export type Running = { key: string, channels: string[], startedAt: number, chosenOn?: string }
+export function describeMemory (step: { k: number, n: number, text: string, next?: string } | null, running: Running[], now = Date.now()): Memory {
+  const m: Memory = {}
+  if (step) m.plan = `you are on step ${step.k} of ${step.n}: ${step.text}${step.next ? `; the next step is: ${step.next}` : '; it is the last step'}`
+  const doing = running.map(r => `${r.key} on ${r.channels.join(', ')}, started ${ago(now - r.startedAt)}${r.chosenOn ? ` (you chose it on ${r.chosenOn})` : ''}`)
+  if (doing.length) m.doing = doing
+  return m
+}
+
 export const healthBucket = (hp: number) =>
   hp >= 20 ? 'full' : hp >= 14 ? 'high' : hp >= 8 ? 'half' : hp >= 4 ? 'low' : 'critical'
 
-const IGNORED_TYPES = new Set(['object', 'orb', 'projectile', 'other', 'global'])
+export const IGNORED_TYPES = new Set(['object', 'orb', 'projectile', 'other', 'global'])
 
 // Mineflayer's `hostile` type misses mobs like slimes (typed `mob`), so damage attributed to its source marks
 // anything as attacking, with no list of hostile mobs (brain/architecture/system-1.md → "Threats").
@@ -62,6 +77,21 @@ export const inventoryCounts = (bot: Bot) => {
   return counts
 }
 
+// Food in the inventory while the bot is hungry (the needs line says so). Food is the game's own data. Offered at any
+// food below full, eat was never picked but sat on every hands question (e2e 2026-10-14).
+export const HUNGRY = 8
+export const foods = (bot: Bot) => bot.food >= HUNGRY ? [] : Object.entries(inventoryCounts(bot)).filter(([name]) => bot.registry.foodsByName[name]).map(([name, count]) => ({ name, count }))
+
+// The bot's needs as facts (brain/architecture/stateful-system-1.md → Needs). Jev ignored "food: low" in its self
+// fields (0 of 80 replayed hungry states ate) and acted on the same fact said as a need.
+export function needs (bot: Bot): string {
+  const food = foods(bot).map(f => f.name).slice(0, 2)
+  const out: string[] = []
+  if (bot.food < HUNGRY) out.push(`hunger: you are ${bot.food < 4 ? 'starving (food is critical)' : 'hungry (food is low)'}${food.length ? `. You have ${food.join(', ')}; eating fixes this.` : ' and you have no food to eat.'}`)
+  if (bot.health < 8) out.push(`health: you are hurt (health is ${healthBucket(bot.health)}).`)
+  return out.length ? out.join(' ') : 'all needs met: not hungry, not hurt.'
+}
+
 const countBucket = (n: number) => n === 1 ? 'one' : n <= 5 ? 'a few' : 'many'
 // Exact where it's small, a bucket where it isn't: Jev is weak with numbers (brain/research/jev-measurements.md).
 const blockCount = (n: number) => n === 1 ? 'one' : n <= 9 ? `${countBucket(n)} (${n})` : 'many'
@@ -78,9 +108,9 @@ function describeBlocks (bot: Bot, radius: number, rareMax: number, cap: number)
   }))
 }
 
-export function makeEgocentric (params: { entity_cap: number, radius: number, block_radius: number, block_cap: number, rare_max: number }) {
+export function makeEgocentric (params: { entity_cap: number, radius: number, block_radius: number, block_cap: number, rare_max: number, memory?: boolean }) {
   const lastDistance = new Map<number, { d: number, t: number }>()
-  return function encode (bot: Bot, ctx: { handles: Handles, directive: Directive | null, channels: Record<string, string>, events: string[], attackers?: Attackers, guarding?: { name: string, attackers: Attackers } }): Encoded {
+  return function encode (bot: Bot, ctx: { handles: Handles, directive: Directive | null, channels: Record<string, string>, events: string[], attackers?: Attackers, guarding?: { name: string, attackers: Attackers }, memory?: Memory }): Encoded {
     const me = bot.entity
     const now = Date.now()
     const near = Object.values(bot.entities)
@@ -116,17 +146,19 @@ export function makeEgocentric (params: { entity_cap: number, radius: number, bl
       state: {
         directive: ctx.directive
           ? { text: ctx.directive.text, from: `player ${ctx.directive.from}${speaker ? ` (${handleFor(ctx.handles, speaker.id)})` : ' (not in view)'}`, ...(ctx.directive.goal ? { goal: ctx.directive.goal } : {}), ...(at ? { place: `you are ${place ? 'not at the goal\'s place yet' : 'at the goal\'s place'}; it is ${place ? `${bucket}, ` : ''}${where}` } : {}) }
-          : 'none yet: stay safe and wait',
+          : 'no instruction: look after your needs', // "stay safe and wait" held Jev back from eating (replay)
         self: {
           health: healthBucket(bot.health),
           food: healthBucket(bot.food),
           held: bot.heldItem?.name ?? 'empty hand',
           inventory: Object.entries(inventoryCounts(bot)).map(([name, n]) => `${name} (${countBucket(n)})`)
         },
+        needs: needs(bot),
         channels: ctx.channels,
         entities,
         blocks,
-        recent_events: ctx.events
+        recent_events: ctx.events,
+        ...(params.memory && ctx.memory && Object.keys(ctx.memory).length ? { memory: ctx.memory } : {})
       },
       entities: entities.map(e => ({ id: e.id, desc: `${e.what}, ${e.where}` })),
       blocks: blocks.map(b => ({ name: b.name, desc: `${b.count}, nearest ${b.nearest}` })),
