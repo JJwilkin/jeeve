@@ -259,12 +259,17 @@ await until('"defend me": the zombie is killed', () => !zombieAlive(), 45000)
 
 // Slimes: Mineflayer types them `mob`, not `hostile`, so only the damage they deal marks them as threats. In run
 // jeeve-2026-10-11T16-36-51-167Z five killed Jeeve while Jev stood still. Medium ones hit; the small ones they split into don't.
+// The four summoned are the first four slime spawns Josh sees: strays are killed first, and a split comes after a kill.
+server.command('kill @e[type=slime]') // strays: slimes have turned up in earlier scenarios despite spawn_mobs false
+await sleep(500)
 server.command('effect give Jeeve instant_health 1 4') // the same start every run
+const slimes: number[] = []
+const onSpawn = (e: { id: number, name?: string }) => { if (e.name === 'slime' && slimes.length < 4) slimes.push(e.id) }
+josh.on('entitySpawn', onSpawn)
 for (const [dx, dz] of [[3, 0], [-3, 0], [0, 3], [0, -3]]) server.command(`execute at Jeeve run summon slime ~${dx} ~ ~${dz} {Size:1}`)
 const slimesAt = Date.now()
-await sleep(500) // seen by Josh, before any is killed and splits
-const slimes = Object.values(josh.entities).filter(e => e.name === 'slime').map(e => e.id)
-check('4 medium slimes spawned', slimes.length === 4, `${slimes.length}`)
+await until('4 medium slimes spawned', () => slimes.length === 4, 5000)
+josh.off('entitySpawn', onSpawn)
 await until('"defend me": Jeeve kills the slimes attacking him', () => !slimes.some(id => josh.entities[id]), 60000)
 const hits = traceRecords().filter(r => r.kind === 'event' && r.name === 'damage' && r.t > slimesAt).map(r => r.attrs.source)
 if (hits.length) check('slimes: their hits are attributed to them', hits.every(h => /slime/.test(h)), hits.join('; '))
