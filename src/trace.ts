@@ -1,7 +1,7 @@
 // Traces into Judgment (brain/architecture/trace-schema.md): one session per episode, one trace per window.
 // Every span is also mirrored to a local JSONL file, which works without Judgment credentials.
 import { appendFileSync, mkdirSync } from 'node:fs'
-import { context, trace, type Attributes, type Link, type Span } from '@opentelemetry/api'
+import { context, trace, type Attributes, type HrTime, type Link, type Span } from '@opentelemetry/api'
 import { Tracer } from 'judgeval'
 
 type Attrs = Record<string, string | number | boolean | undefined>
@@ -23,6 +23,23 @@ export const judgmentOrg = () => process.env.JUDGMENT_ORG_ID ?? process.env.JUDG
 
 const clean = (a: Attrs): Attributes => Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined)) as Attributes
 const json = (v: unknown) => typeof v === 'string' ? v : JSON.stringify(v)
+
+// OTel stamps a span's start from Date.now() and its end from performance.now(); the clocks drift, so a child can
+// look like it ends a millisecond after its parent. Before judgeval exports a span, stretch its end to its latest child's.
+function containChildren (processor: ReturnType<Tracer['getSpanProcessor']>) {
+  const latest = new Map<string, HrTime>() // span id → latest end among its children
+  const later = (a: HrTime, b?: HrTime) => b && (b[0] - a[0] || b[1] - a[1]) > 0 ? b : a
+  const onEnd = processor.onEnd.bind(processor)
+  processor.onEnd = span => {
+    const id = span.spanContext().spanId
+    const end = later(span.endTime, latest.get(id))
+    latest.delete(id)
+    ;(span as { endTime: HrTime }).endTime = end
+    const parent = span.parentSpanContext?.spanId
+    if (parent) latest.set(parent, later(end, latest.get(parent)))
+    onEnd(span)
+  }
+}
 
 export class Recorder {
   session: string
@@ -49,6 +66,7 @@ export class Recorder {
     if (process.env.JUDGMENT_API_KEY) {
       const tracer = await Tracer.init({ projectName: project, environment: process.env.JEEVE_ENVIRONMENT ?? 'dev', organizationId: judgmentOrg() })
       r.exporting = tracer.projectId != null
+      containChildren(tracer.getSpanProcessor())
     }
     return r
   }
