@@ -11,6 +11,7 @@ x-jeeve-env: &jeeve-env
   JEEVE_API_HOST: 0.0.0.0 # the compose network only: no ports are published
   JEEVE_ALLOWED: JoshBGosh321
   JEEVE_PEERS: Jeeve_1,Jeeve_2,Jeeve_3 # each Jeeve skips its own name
+  JEEVE_START_ASLEEP: '1' # no model calls until woken from the page or by whisper
 
 x-jeeve: &jeeve
   build: .
@@ -70,6 +71,22 @@ services:
     restart: unless-stopped
     logging: *logging
 
+  # HTTPS, the spectate page (viz/Dockerfile) and basic auth on POST /api/* (Caddyfile). Both values come from the
+  # shell or this directory's .env; single-quote the hash there, or compose reads its $s as variables.
+  caddy:
+    build: viz
+    image: jeeve-caddy
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+      JEEVE_BASIC_AUTH_HASH: ${JEEVE_BASIC_AUTH_HASH:-}
+    ports: ['80:80', '443:443', '443:443/udp']
+    volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro, caddy_data:/data, caddy_config:/config]
+    depends_on: [web]
+    restart: unless-stopped
+    logging: *logging
+
 volumes:
   world:
   traces:
+  caddy_data: # certificates and the local CA
+  caddy_config:
