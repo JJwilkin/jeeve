@@ -1,0 +1,63 @@
+# Paper + 3 Jeeves, the same on the Mac and the VM. Secrets come from the env file: .env here (/opt/jeeve/.env on
+# the VM), or JEEVE_ENV_FILE=../judgment/.env.jeeve on the Mac.
+#   MINECRAFT_EULA=true docker compose up --build
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: 10m, max-file: '3' }
+
+x-jeeve-env: &jeeve-env
+  JEEVE_HOST: paper
+  JEEVE_API_HOST: 0.0.0.0 # the compose network only: no ports are published
+  JEEVE_ALLOWED: JoshBGosh321
+
+x-jeeve: &jeeve
+  build: .
+  image: jeeve
+  env_file: ${JEEVE_ENV_FILE:-.env}
+  # The checkout's modules/ is the live library: curated commits reach the Jeeves and what they learn shows up in
+  # git diff. On Linux it must be writable by uid 1000 (the image's node user).
+  volumes: [./modules:/app/modules, traces:/app/traces]
+  depends_on: { paper: { condition: service_healthy } }
+  restart: unless-stopped
+  logging: *logging
+
+services:
+  paper:
+    image: itzg/minecraft-server:java25@sha256:f7f2222512810f0f0e85133913622cf639be77a5dd1d4b11f24ab675da6ba742
+    environment:
+      EULA: ${MINECRAFT_EULA:-false} # true accepts https://aka.ms/MinecraftEULA
+      TYPE: PAPER
+      VERSION: 26.1.2
+      PAPER_BUILD: '74'
+      MEMORY: 3G
+      # Offline mode: names can be faked by anyone who reaches 25565, so keeping 25565 off the internet is the lock
+      # (on the VM only Tailscale reaches it). The whitelist is a second layer; its UUIDs are the offline ones
+      # (UUIDv3 of "OfflinePlayer:<name>"), since itzg's WHITELIST looks names up online.
+      ONLINE_MODE: 'FALSE'
+      ENFORCE_SECURE_PROFILE: 'FALSE'
+      WHITELIST_FILE: /whitelist.json
+      ENFORCE_WHITELIST: 'TRUE'
+      SPAWN_PROTECTION: '0'
+      DIFFICULTY: easy
+      VIEW_DISTANCE: '6'
+      SIMULATION_DISTANCE: '6'
+      MOTD: jeeve live
+    ports: ['25565:25565']
+    volumes: [world:/data, ./paper/whitelist.json:/whitelist.json:ro]
+    restart: unless-stopped
+    logging: *logging
+
+  jeeve-1:
+    <<: *jeeve
+    environment: { <<: *jeeve-env, JEEVE_USERNAME: Jeeve_1 }
+  jeeve-2:
+    <<: *jeeve
+    environment: { <<: *jeeve-env, JEEVE_USERNAME: Jeeve_2 }
+  jeeve-3:
+    <<: *jeeve
+    environment: { <<: *jeeve-env, JEEVE_USERNAME: Jeeve_3 }
+
+volumes:
+  world:
+  traces:

@@ -1,0 +1,5 @@
+# Only what the agent runs on: keeps .env, traces and .server out of the build context.
+*
+!package.json
+!package-lock.json
+!src

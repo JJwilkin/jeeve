@@ -47,7 +47,7 @@ export class Recorder {
     mkdirSync(dir, { recursive: true })
     const r = new Recorder(session, `${dir}/${session}.jsonl`)
     if (process.env.JUDGMENT_API_KEY) {
-      const tracer = await Tracer.init({ projectName: project, environment: 'dev', organizationId: judgmentOrg() })
+      const tracer = await Tracer.init({ projectName: project, environment: process.env.JEEVE_ENVIRONMENT ?? 'dev', organizationId: judgmentOrg() })
       r.exporting = tracer.projectId != null
     }
     return r

@@ -50,6 +50,11 @@ npm run curate       # between episodes: 2B proposes library changes and lessons
 ```
 The first server start needs `MINECRAFT_EULA=true` to accept the [Minecraft EULA](https://aka.ms/MinecraftEULA).
 
+**Several Jeeves on one server** (the live setup, the same on the Mac and the VM): `docker-compose.yml` runs Paper 26.1.2 (offline mode, whitelist in `paper/whitelist.json`) and `Jeeve_1..3`, one container each. Secrets come from `JEEVE_ENV_FILE` (default `.env`) at run time, never the image.
+```bash
+MINECRAFT_EULA=true JEEVE_ENV_FILE=../judgment/.env.jeeve docker compose up --build
+```
+
 **Modules System 2 writes** persist in `modules/library.json`. Runs update it and never commit it; review the diff and commit the modules worth keeping. `npm run curate` (`-- --days 7 --sessions '<glob>,…' --library <file>`; label episodes with `JEEVE_CONTEXT`, e.g. `pvp-arena`, to curate per use case) writes a proposal to `curation/<time>/`: `review.md`, `lessons.md` and `library.diff` (apply with `git apply`). It applies nothing.
 
 **Instructions from outside the game** go to the agent's local API, bound to 127.0.0.1:
