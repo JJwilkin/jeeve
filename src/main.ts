@@ -778,10 +778,11 @@ export async function startAgent (opts: AgentOptions) {
     if (claimFails) detail = { ...detail, actions: detail?.actions ?? [], error: `returned done, but pass_when ${t.passWhen} is false on ${JSON.stringify({ self: judged.self, blocks: judged.blocks })}` }
     const passed = (end === 'done' && !claimFails) || (end === 'goal_closed' && t.goal?.status === 'completed')
     const result = { target: t.target, end, ms: Date.now() - t.t0, ...(detail?.error ? { error: detail.error } : {}) }
-    const id = `${t.src.name}@${t.version}`
+    let id = `${t.src.name}@${t.version}`
     if (passed) {
-      modules.addBehavior(t.src, t.version, result, { session, goal: t.goal ? `${t.goal.id}: ${t.goal.text}` : 'operator', created_at: new Date().toISOString() })
-      BEHAVIORS[t.src.name] = t.spec
+      const m = modules.addBehavior(t.src, result, { session, goal: t.goal ? `${t.goal.id}: ${t.goal.text}` : 'operator', created_at: new Date().toISOString() })
+      id = m.id
+      BEHAVIORS[t.src.name] = { ...t.spec, version: m.version }
       authoredFailures.delete(t.src.name)
     }
     recorder.record('module', {

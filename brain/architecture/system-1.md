@@ -204,6 +204,7 @@ The agent should get better over time and start each run from modules that have 
 - **At startup** the agent loads the library and records a `module` span (`activation: loaded`) for each module. Modules are compiled again but not re-trialled; the runtime disables any that fail. Disabled modules stay off.
 - **System 2 sees the loaded modules** in its context and reuses them by name.
 - **The agent rewrites the file** whenever a module is registered or disabled.
+- **Several Jeeves can share one file** (jeeve-live). A save merges into what's on disk instead of overwriting it. For each name, the higher version wins, and a disable a sibling recorded is kept. New versions are numbered past a sibling's, so one `name@version` never names two different pieces of code. A sibling's new module reaches a running Jeeve only when it restarts.
 - **Curation is git.** Runs never commit. Review the diff and commit the modules worth keeping, so the committed file is the hillclimbed starting set and its history shows how it got there.
 - **The e2e uses a scratch library** (`traces/e2e-module-library.json`), so test runs don't rewrite the real one. It checks that a fresh registry reloads the check System 2 wrote during the run.
 - **Override the path** with `JEEVE_MODULE_LIBRARY` or `moduleLibrary`.
