@@ -15,7 +15,9 @@ x-jeeve: &jeeve
   build: .
   image: jeeve
   env_file: ${JEEVE_ENV_FILE:-.env}
-  volumes: [modules:/app/modules, traces:/app/traces]
+  # The checkout's modules/ is the live library: curated commits reach the Jeeves and what they learn shows up in
+  # git diff. On Linux it must be writable by uid 1000 (the image's node user).
+  volumes: [./modules:/app/modules, traces:/app/traces]
   depends_on: { paper: { condition: service_healthy } }
   restart: unless-stopped
   logging: *logging
@@ -58,5 +60,4 @@ services:
 
 volumes:
   world:
-  modules: # one library.json shared by every Jeeve
   traces:

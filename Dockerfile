@@ -4,8 +4,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY src src
-# modules/ and traces/ are volumes; owning them here lets a fresh named volume start out writable by node.
-COPY --chown=node:node modules modules
+# traces/ is a named volume; owning it here lets a fresh volume start out writable by node.
+# modules/ is bind-mounted from the checkout (docker-compose.yml), so it isn't baked in.
 RUN mkdir traces && chown node:node traces
 USER node
 CMD ["node", "src/main.ts"]
