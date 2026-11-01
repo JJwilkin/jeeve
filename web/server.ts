@@ -67,7 +67,7 @@ function follow (url: string, up: (open: boolean) => void, data: (line: string) 
 
 // A Jeeve's upstream reconnects with everything from the start (the trace's rows, the world's columns), so the cache
 // starts over and its viewers are closed: their EventSource reconnects and gets the fresh cache.
-function restart (cache: () => void, ...viewers: Viewers[]) {
+function startOver (cache: () => void, ...viewers: Viewers[]) {
   cache()
   for (const vs of viewers) {
     for (const v of vs) v.end()
@@ -101,16 +101,17 @@ function worldLines (worlds: World[]): Buffer[] {
 for (const j of jeeves.values()) {
   follow(`${j.api}/events`, open => {
     j.up.events = open
-    if (open) restart(() => { j.rows = [] }, j.viewers.events)
+    if (open) startOver(() => { j.rows = [] }, j.viewers.events)
   }, data => {
     let line
     try { line = frame(JSON.stringify(publicRow(JSON.parse(data)))) } catch { return } // a half-written last row
+    // ponytail: the whole filtered session is held and replayed per viewer; replay from the last window_open if sessions get long.
     j.rows.push(line)
     for (const v of j.viewers.events) send(v, line)
   })
   follow(`${j.api}/world`, open => {
     j.up.world = open
-    if (open) restart(() => { j.world.columns.clear(); j.world.entities.clear() }, j.viewers.world, god)
+    if (open) startOver(() => { j.world.columns.clear(); j.world.entities.clear() }, j.viewers.world, god)
   }, data => {
     const m = JSON.parse(data) as FeedMessage
     const line = frame(data)
@@ -127,7 +128,7 @@ function stream (res: ServerResponse, viewers: Viewers, lines: Buffer[]) {
   res.on('close', () => viewers.delete(res))
 }
 
-function status (j: Jeeve) {
+function cachedStatus (j: Jeeve) {
   if (!j.status || Date.now() - j.status.at > STATUS_MS) {
     const reply = fetch(`${j.api}/status`, { signal: AbortSignal.timeout(5000) })
       .then(async r => ({ code: r.status, body: await r.text() }))
@@ -151,7 +152,7 @@ const server = createServer((req, res) => {
   if (!j) return reply(404, JSON.stringify({ error: `no Jeeve named ${name}` }))
   if (req.method === 'GET' && what === 'events') return stream(res, j.viewers.events, j.rows)
   if (req.method === 'GET' && what === 'world') return stream(res, j.viewers.world, worldLines([j.world]))
-  if (req.method === 'GET' && what === 'status') return void status(j).then(s => reply(s.code, s.body))
+  if (req.method === 'GET' && what === 'status') return void cachedStatus(j).then(s => reply(s.code, s.body))
   if (req.method === 'POST' && ['instructions', 'wake', 'sleep'].includes(what)) {
     let body = ''
     req.setEncoding('utf8')

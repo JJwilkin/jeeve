@@ -1,8 +1,11 @@
 // What a public viewer gets of a trace row (the spectate page, via web/server.ts). Rows keep their shape, so the
 // page runs them through viz's slim() and stateAt() as the monitor does. Players' names stay (Joshua: "Show them").
+import { MODULE_LIMITS } from '../src/modules.ts'
+
 export type Row = { t: number, kind: string, [k: string]: any }
 
-export const MAX_STRING = 4000
+// The longest behavior code a Jeeve accepts, so the Stage code panel shows it whole.
+export const MAX_STRING = MODULE_LIMITS.behaviorCodeChars
 
 const json = (s: unknown) => { try { return typeof s === 'string' ? JSON.parse(s) : undefined } catch { return undefined } }
 
