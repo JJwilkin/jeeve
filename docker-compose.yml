@@ -59,6 +59,17 @@ services:
     <<: *jeeve
     environment: { <<: *jeeve-env, JEEVE_USERNAME: Jeeve_3 }
 
+  # The spectate relay (web/server.ts). No published port: Caddy fronts it and puts basic auth on the POSTs.
+  web:
+    build: .
+    image: jeeve
+    command: [node, web/server.ts]
+    environment:
+      JEEVES: Jeeve_1=http://jeeve-1:7777,Jeeve_2=http://jeeve-2:7777,Jeeve_3=http://jeeve-3:7777
+      WEB_HOST: 0.0.0.0
+    restart: unless-stopped
+    logging: *logging
+
 volumes:
   world:
   traces:
