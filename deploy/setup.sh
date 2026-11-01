@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Sets up or updates the jeeve VM (Debian 12); safe to re-run. README.md has the whole deploy.
+#   sudo [TS_AUTHKEY=tskey-…] bash setup.sh
+set -euo pipefail
+
+# One function, so bash reads the whole script before running any of it: piped in over ssh, apt and curl | sh
+# can't swallow the rest of stdin, and the git pull can't change the file under it.
+main() {
+  DIR=/opt/jeeve
+
+  command -v git >/dev/null || { apt-get update -q && apt-get install -yq git cron; }
+  command -v docker >/dev/null || curl -fsSL https://get.docker.com | sh # Docker's apt repo + the compose plugin
+
+  # Only with a key: until then the VM serves the page and nothing outside the VPC reaches 25565.
+  if [ -n "${TS_AUTHKEY:-}" ]; then
+    command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh
+    tailscale status >/dev/null 2>&1 || tailscale up --authkey "$TS_AUTHKEY" --hostname jeeve
+  fi
+
+  [ -d "$DIR/.git" ] || git clone -q https://github.com/JJwilkin/jeeve.git "$DIR"
+  git -C "$DIR" pull -q --ff-only
+
+  if [ "$(stat -c %a "$DIR/.env" 2>/dev/null)" != 600 ]; then
+    echo "Put the secrets in $DIR/.env with mode 600 first (deploy/README.md)." >&2
+    exit 1
+  fi
+
+  chown -R 1000:1000 "$DIR/modules" # the image's node user writes what the Jeeves learn
+  echo '17 4 * * * root find /var/lib/docker/volumes/jeeve_traces/_data -type f -mtime +7 -delete' > /etc/cron.d/jeeve-traces
+  cd "$DIR" && docker compose up -d --build
+}
+main
