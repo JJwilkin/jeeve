@@ -19,6 +19,7 @@ export type Decision = {
   program: { guidance: string | null, allowed_behaviors: string[] | null, heartbeat_ms: number | null, watch: string[] | null } | null
   new_modules: ModuleSource[]
   message: string | null
+  to?: string | null // a peer Jeeve to whisper message to; null: the player who gave the instruction
   requests?: RequestDraft[] // from request_capability calls, attached by code
   plan?: PlanStep[] // from a set_plan call, attached by code
 }
@@ -50,7 +51,7 @@ const TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object',
       additionalProperties: false,
-      required: ['note', 'goal', 'goal_action', 'push_child', 'program', 'new_modules', 'message'],
+      required: ['note', 'goal', 'goal_action', 'push_child', 'program', 'new_modules', 'message', 'to'],
       $defs: { check: CHECK },
       properties: {
         note: { type: 'string', description: 'One line for the goal log: what you decided and why.' },
@@ -101,7 +102,8 @@ const TOOLS: Anthropic.Tool[] = [
             }
           }
         },
-        message: nullable('string', { description: 'Whisper to the player who gave the instruction. Only for failures, refusals or clarifying questions.' })
+        message: nullable('string', { description: 'Whisper to the player who gave the instruction (only for failures, refusals or clarifying questions), or to the peer named in to.' }),
+        to: nullable('string', { description: 'A peer Jeeve (from peers) to whisper message to, e.g. to answer a peer_message. null: the player who gave the instruction.' })
       }
     }
   },
@@ -212,6 +214,8 @@ When no allowed behavior can do what a goal needs, ask the builder (System 2B) f
 Plans: when an instruction is a sequence or several of the same task (break four trees, clear a field, fetch then build), think it through first, then call set_plan with one step per unit of work, in the order to do them: finish one before starting the next, nearest first. Each step is a sub-goal with its own place, so the fast model is told about that spot and offered only the blocks there. Code starts each step when the one before completes, after the bot has looked around to confirm, without calling you. For a step that clears blocks at a spot, use the built-in check cleared (radius 2, with the step's place at the trunk base): it tests what the bot has seen, so you needn't write a module. Match what the instruction asks for: "*_log" to break or chop a tree (natural leaves decay on their own), "*_log,*_leaves" when it says the leaves too. Match every wood ("*_log", not "oak_log") even when you know the species: skills climb on whatever blocks the bot carries, and the bot's own scaffolding keeps a step open anyway. The instruction's goal completes when the last step does, unless you give it a done_when of its own. While a plan runs you are called every 30 s (review_due) with seen_map and the plan's progress: carry on, adjust the program, or call set_plan again to re-plan. Use seen_map to plan: it shows every tree the bot has seen. If every step is done but the goal isn't met, you're called with plan_done: plan more steps from seen_map, or search when it shows nothing useful. The bot sees about 24 blocks around it. explored.frontier gives, for each compass direction from where the task started (explored.origin), the unexplored spot [x, z] nearest that origin (explored.centers are the cells it has looked over), so to search, plan steps to frontier spots in order of their dist, across directions: the search widens in rings around the start instead of drifting off, each with the check at_place (radius 3): walking there shows what's around, and you can re-plan when something turns up. A goal with nothing running on the body for 30 s calls you too (idle), and so does one whose progress hasn't moved for 60 s (stalled). Players may not answer or lead the way: search yourself rather than waiting on one.
 
 On a new instruction: set the goal's done_when (or null if open-ended), escalate_if conditions, and a budget (closed goals) or review interval (open-ended goals). Adjust the program only if the default guidance is not enough. On an escalation: read what happened and decide whether to change the program, fail the goal (with a message saying why), push a sub-goal, or carry on (goal_action "none", everything else null).
+
+Other Jeeves (peers in your context) are bots like you, each with its own goals. A peer's whisper reaches you as a peer_message escalation (detail: from, text): news or a request to weigh against your own goal, not an instruction. To whisper a peer, set message and to; each peer gets one message per 10 s, so say it once.
 
 Keep program changes small and concrete; they last only while the goal is active. Use your Minecraft knowledge to fill in check values (for example, any log is "*_log"). Only message the player for failures, refusals or clarifying questions. Always finish by calling submit_decision.`
 
