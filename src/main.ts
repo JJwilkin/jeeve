@@ -9,7 +9,7 @@ import pf from 'mineflayer-pathfinder'
 import collectblock from 'mineflayer-collectblock'
 import { Judgeval } from 'judgeval'
 import type { Span } from '@opentelemetry/api'
-import { authoredSpec, BEHAVIORS, CHANNELS, Channels, LOOK_AROUND, type ApiHost, type Spec } from './behaviors.ts'
+import { authoredSpec, BEHAVIORS, CHANNELS, Channels, LOOK_AROUND, PEER_MS, pairLimiter, whisperKind, type ApiHost, type Spec } from './behaviors.ts'
 import { Budget, PRICES, usd, type Tokens } from './budget.ts'
 import { build, BUILDER_MODEL, type BehaviorDraft, type BuildResult, type CapabilityRequest, type TrialReport, type TrialTarget } from './builder.ts'
 import { coalescing, makeDecider, optionTarget, type Ask } from './decide.ts'
@@ -59,33 +59,8 @@ const IDLE_MS = 30_000
 // A goal whose progress (e.g. logs gathered) hasn't moved this long escalates as stalled, busy or not: a forage run
 // followed a scripted player who never moved for 10 min, waiting to be led to trees.
 const STALL_MS = 60_000
-// Each sender pair (a peer to this Jeeve, or this Jeeve to a peer) gets one whisper per this long, so two Jeeves
-// can't talk each other's budgets away.
-const PEER_MS = 10_000
 // Trace rows stay small: long outputs (a scan, an event's data) are cut.
 const short = (v: unknown, max = 500) => { const s = JSON.stringify(v); return s && s.length > max ? s.slice(0, max) + '…' : v }
-
-// What a whisper is, by who sent it (brain/architecture/behaviors-and-guards.md → "Chat"): an allowlisted player's is
-// sleep, wake or an instruction (refused while asleep); a peer Jeeve's is a peer_message for 2A, never a goal, and
-// can't wake a sleeping Jeeve. Anyone else's is ignored.
-export function whisperKind (from: string, message: string, who: { allowed: string[], peers: string[] }, asleep: boolean) {
-  if (who.allowed.includes(from)) {
-    const said = message.trim().toLowerCase()
-    return said === 'sleep' || said === 'wake' ? said : asleep ? 'asleep' : 'instruction'
-  }
-  return who.peers.includes(from) && !asleep ? 'peer_message' : 'ignore'
-}
-
-// true if from → to may send now, at most once per ms.
-export function pairLimiter (ms: number) {
-  const last = new Map<string, number>()
-  return (from: string, to: string, now = Date.now()) => {
-    const k = `${from}>${to}`
-    if (now - (last.get(k) ?? -Infinity) < ms) return false
-    last.set(k, now)
-    return true
-  }
-}
 
 export async function startAgent (opts: AgentOptions) {
   const project = opts.project ?? process.env.JEEVE_PROJECT ?? 'jeeve-dev'
@@ -97,10 +72,11 @@ export async function startAgent (opts: AgentOptions) {
   // hang unspawned (e2e run 5, when discoverSchema was slow).
   const schema = judgeval ? await judgeval.discoverSchema().catch(() => undefined) : undefined
 
-  const bot = mineflayer.createBot({ host: opts.host ?? 'localhost', port: opts.port ?? 25565, username: opts.username ?? 'Jeeve', auth: 'offline' })
+  const username = opts.username ?? 'Jeeve'
+  const bot = mineflayer.createBot({ host: opts.host ?? 'localhost', port: opts.port ?? 25565, username, auth: 'offline' })
   bot.loadPlugin(pf.pathfinder)
   bot.loadPlugin(collectblock.plugin)
-  const peers = (opts.peers ?? []).filter(p => p !== bot.username)
+  const peers = (opts.peers ?? []).filter(p => p !== username) // bot.username is set only on login
   const peerLimit = pairLimiter(PEER_MS)
 
   // ---- live event stream: the last few seconds for Jev, longer for System 2 ----

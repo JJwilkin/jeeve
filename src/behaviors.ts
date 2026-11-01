@@ -323,6 +323,33 @@ export class Channels {
   }
 }
 
+// ---- chat between Jeeves ----
+// Each sender pair (a peer to this Jeeve, or this Jeeve to a peer) gets one whisper per this long, so two Jeeves
+// can't talk each other's budgets away.
+export const PEER_MS = 10_000
+
+// What a whisper is, by who sent it (brain/architecture/behaviors-and-guards.md → "Chat"): an allowlisted player's is
+// sleep, wake or an instruction (refused while asleep); a peer Jeeve's is a peer_message for 2A, never a goal, and
+// can't wake a sleeping Jeeve. Anyone else's is ignored.
+export function whisperKind (from: string, message: string, who: { allowed: string[], peers: string[] }, asleep: boolean) {
+  if (who.allowed.includes(from)) {
+    const said = message.trim().toLowerCase()
+    return said === 'sleep' || said === 'wake' ? said : asleep ? 'asleep' : 'instruction'
+  }
+  return who.peers.includes(from) && !asleep ? 'peer_message' : 'ignore'
+}
+
+// true if from → to may send now, at most once per ms.
+export function pairLimiter (ms: number) {
+  const last = new Map<string, number>()
+  return (from: string, to: string, now = Date.now()) => {
+    const k = `${from}>${to}`
+    if (now - (last.get(k) ?? -Infinity) < ms) return false
+    last.set(k, now)
+    return true
+  }
+}
+
 // ---- behaviors System 2 writes (brain/architecture/behaviors-and-guards.md → "The player action API") ----
 // Authored code never holds `bot`. It gets every player action Mineflayer has, one entry each in READS and
 // ACTIONS below: plain data in (positions, entity ids, item globs, slots), plain data out. Block queries come
