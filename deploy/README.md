@@ -2,22 +2,11 @@
 
 `jeeve` (e2-standard-4, us-west1-b, Debian 12) runs `docker-compose.yml` from `/opt/jeeve`. The spectate page is
 public at `https://35.197.6.238.sslip.io`; every POST needs basic auth. 25565 has no firewall rule and is reachable
-only over Tailscale. SSH goes through IAP. Every command here uses the `jeeve` gcloud configuration:
+only over Tailscale. SSH goes through IAP. Run everything from the Mac's jeeve checkout, with the `jeeve` gcloud
+configuration:
 
 ```bash
 g() { gcloud --configuration jeeve --quiet "$@"; }
-```
-
-## Secrets
-
-`/opt/jeeve/.env` (mode 600) is both the Jeeves' `env_file` and compose's variables. Pipe it from the Mac so no copy
-lands on disk anywhere else:
-
-```bash
-{ grep -E '^(ANTHROPIC_API_KEY|TYPESAFE_API_KEY|JUDGMENT_API_KEY|JUDGMENT_ORG_ID|JUDGMENT_API_URL|JEEVE_PROJECT)=' ../judgment/.env.jeeve
-  grep '^JEEVE_BASIC_AUTH_HASH=' .env
-  printf 'JEEVE_ENVIRONMENT=production\nMINECRAFT_EULA=true\nSITE_ADDRESS=35.197.6.238.sslip.io\n'
-} | g compute ssh jeeve --tunnel-through-iap --command 'sudo sh -c "umask 077; cat > /opt/jeeve/.env"'
 ```
 
 ## Deploy and update
@@ -26,17 +15,66 @@ lands on disk anywhere else:
 g compute ssh jeeve --tunnel-through-iap --command 'sudo bash -s' < deploy/setup.sh
 ```
 
-The first run clones the repo, then stops until `.env` exists. Re-running pulls `main` and rebuilds. To join the
-tailnet, pass a one-off key for that run only: `--command 'sudo TS_AUTHKEY=tskey-… bash -s'`, then connect to
-`jeeve.<tailnet>.ts.net:25565`.
+The first run clones the repo to `/opt/jeeve`, then stops until the secrets are there (next section); run it again
+after. Each later run pulls `main` and rebuilds.
 
-The Jeeves write what they learn to `/opt/jeeve/modules`, so the pull refuses to overwrite those files. Commit or
-`git stash` them on the VM first.
+To join the tailnet, send a one-off key down stdin ahead of the script, so it never lands in a command line, shell
+history or log; then connect to `jeeve.<tailnet>.ts.net:25565`:
+
+```bash
+{ read -rs 'k?tskey: '; printf 'TS_AUTHKEY=%s\n' "$k"; cat deploy/setup.sh; } | g compute ssh jeeve --tunnel-through-iap --command 'sudo bash -s'
+```
+
+## Secrets
+
+`/opt/jeeve/.env` (mode 600) is both the Jeeves' `env_file` and compose's variables. Collect it in shell memory and
+send it only when all 10 lines are there, so a missing file can't replace a good `.env` with a partial one:
+
+```bash
+env=$({ grep -E '^(ANTHROPIC_API_KEY|TYPESAFE_API_KEY|JUDGMENT_API_KEY|JUDGMENT_ORG_ID|JUDGMENT_API_URL|JEEVE_PROJECT)=' ../judgment/.env.jeeve
+  grep '^JEEVE_BASIC_AUTH_HASH=' .env
+  printf 'JEEVE_ENVIRONMENT=production\nMINECRAFT_EULA=true\nSITE_ADDRESS=35.197.6.238.sslip.io\n'
+}) && [ "$(printf '%s\n' "$env" | wc -l)" -eq 10 ] &&
+  printf '%s\n' "$env" | g compute ssh jeeve --tunnel-through-iap --command 'sudo sh -c "umask 077; cat > /opt/jeeve/.env"'
+```
+
+## What the Jeeves learn
+
+They write it to `modules/library.json` on the VM, so a deploy whose pull touches that file stops before rebuilding.
+Bring the changes back to curate, then set them aside around the deploy:
+
+```bash
+g compute ssh jeeve --tunnel-through-iap --command 'sudo git -C /opt/jeeve diff modules' > learned.diff
+g compute ssh jeeve --tunnel-through-iap --command 'sudo git -C /opt/jeeve stash'
+g compute ssh jeeve --tunnel-through-iap --command 'sudo bash -s' < deploy/setup.sh
+g compute ssh jeeve --tunnel-through-iap --command 'sudo git -C /opt/jeeve stash pop'
+```
 
 ## Rollback
 
 `sudo git -C /opt/jeeve checkout <sha> && cd /opt/jeeve && sudo docker compose up -d --build`, or restore a
-`jeeve-daily` snapshot (one a day, kept 7 days).
+`jeeve-daily` snapshot (one a day, kept 7 days). Run `sudo git -C /opt/jeeve checkout main` before the next deploy;
+the pull fails on a detached HEAD.
+
+## Rebuild from nothing
+
+```bash
+g services enable compute.googleapis.com iap.googleapis.com
+g compute addresses create jeeve-ip --region us-west1
+g compute instances create jeeve --zone us-west1-b --machine-type e2-standard-4 \
+  --image-family debian-12 --image-project debian-cloud \
+  --boot-disk-size 50GB --boot-disk-type pd-balanced --address jeeve-ip --tags jeeve
+g compute firewall-rules delete default-allow-ssh default-allow-rdp
+g compute firewall-rules create jeeve-web --network default --direction INGRESS \
+  --allow tcp:80,tcp:443 --source-ranges 0.0.0.0/0 --target-tags jeeve
+g compute firewall-rules create jeeve-iap-ssh --network default --direction INGRESS \
+  --allow tcp:22 --source-ranges 35.235.240.0/20 --target-tags jeeve
+g compute resource-policies create snapshot-schedule jeeve-daily --region us-west1 \
+  --daily-schedule --start-time 08:00 --max-retention-days 7
+g compute disks add-resource-policies jeeve --zone us-west1-b --resource-policies jeeve-daily
+```
+
+A new static IP changes `SITE_ADDRESS` and the spectate URL.
 
 ## Teardown
 

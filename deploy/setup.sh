@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sets up or updates the jeeve VM (Debian 12); safe to re-run. README.md has the whole deploy.
-#   sudo [TS_AUTHKEY=tskey-…] bash setup.sh
+#   sudo bash setup.sh   (to join the tailnet, send TS_AUTHKEY=… down stdin first: deploy/README.md)
 set -euo pipefail
 
 # One function, so bash reads the whole script before running any of it: piped in over ssh, apt and curl | sh
@@ -8,7 +8,9 @@ set -euo pipefail
 main() {
   DIR=/opt/jeeve
 
-  command -v git >/dev/null || { apt-get update -q && apt-get install -yq git cron; }
+  if ! command -v git >/dev/null || ! command -v cron >/dev/null; then
+    apt-get update -q && apt-get install -yq git cron
+  fi
   command -v docker >/dev/null || curl -fsSL https://get.docker.com | sh # Docker's apt repo + the compose plugin
 
   # Only with a key: until then the VM serves the page and nothing outside the VPC reaches 25565.
