@@ -365,6 +365,16 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   const loaded = second.load()
   assert.deepEqual([loaded.loaded, loaded.skipped.length, second.get('is_night')?.origin, second.get('is_night')?.run(snap({ world: { is_day: false } }))],
     [['is_night@1'], 1, origin, true]) // disabled modules stay off across runs
+
+  // Several Jeeves share one library: two registries on one file keep both modules, versions don't collide,
+  // and an older copy never overwrites a sibling's newer version.
+  const shared = join(mkdtempSync(join(tmpdir(), 'jeeve-')), 'library.json')
+  const [a, b] = [new ModuleRegistry(() => {}, shared), new ModuleRegistry(() => {}, shared)]
+  a.register(night, [snap()])
+  b.register({ ...night, name: 'is_day', code: '(s) => s.world.is_day' }, [snap()])
+  b.register(night, [snap()])
+  a.save()
+  assert.deepEqual(new ModuleRegistry(() => {}, shared).load().loaded, ['is_day@1', 'is_night@2'])
 }
 
 // World queries: scan groups matches into clusters with exact counts and heights; the summary and the raw

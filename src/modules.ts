@@ -79,6 +79,13 @@ export function compileModule (src: ModuleSource, version: number, onDisable: (m
   return m
 }
 
+const toStored = (m: Module): Stored => ({
+  kind: m.kind, name: m.name, description: m.description, code: m.code, version: m.version,
+  ...(m.kind === 'behavior' ? { channels: m.channels, targets: m.targets, timeout_s: m.timeout_s, usage: m.usage } : {}),
+  ...(m.origin ? { origin: m.origin } : {}), ...(m.trial ? { trial: m.trial } : {}), ...(m.disabled ? { disabled: m.disabled } : {}),
+  ...(m.usedAt ? { used_at: new Date(m.usedAt).toISOString() } : {})
+})
+
 // The library persists across runs: a JSON file holding the latest version of each module. Commit the
 // ones worth keeping; git history is the record of how the set was hillclimbed.
 export class ModuleRegistry {
@@ -95,8 +102,7 @@ export class ModuleRegistry {
   load (): { loaded: string[], skipped: string[] } {
     const loaded: string[] = []
     const skipped: string[] = []
-    if (!this.file || !existsSync(this.file)) return { loaded, skipped }
-    for (const s of JSON.parse(readFileSync(this.file, 'utf8')).modules as Stored[]) {
+    for (const s of this.stored()) {
       if (s.disabled) { skipped.push(`${s.name}@${s.version}: disabled (${s.disabled})`); continue }
       try {
         const m = s.kind === 'behavior' ? behaviorModule(s, s.version) : compileModule(s, s.version, this.onDisable)
@@ -108,20 +114,35 @@ export class ModuleRegistry {
     return { loaded, skipped }
   }
 
+  // The library as the file holds it now.
+  stored (): Stored[] {
+    return this.file && existsSync(this.file) ? JSON.parse(readFileSync(this.file, 'utf8')).modules : []
+  }
+
+  // Several Jeeves share one library file, so a save merges into what's there: per name the higher version wins,
+  // ours on a tie (keeping a disable a sibling recorded). Modules only a sibling has stay in the file; this process
+  // picks them up on its next start.
+  // ponytail: read-merge-write isn't locked, so two saves in the same few ms can still drop one. Saves are minutes
+  // apart; add a lock file if that changes.
   save () {
     if (!this.file) return
-    const modules: Stored[] = [...this.modules.values()].sort((a, b) => a.name.localeCompare(b.name)).map(m => ({
-      kind: m.kind, name: m.name, description: m.description, code: m.code, version: m.version,
-      ...(m.kind === 'behavior' ? { channels: m.channels, targets: m.targets, timeout_s: m.timeout_s, usage: m.usage } : {}),
-      ...(m.origin ? { origin: m.origin } : {}), ...(m.trial ? { trial: m.trial } : {}), ...(m.disabled ? { disabled: m.disabled } : {}),
-      ...(m.usedAt ? { used_at: new Date(m.usedAt).toISOString() } : {})
-    }))
-    writeFileSync(`${this.file}.tmp`, JSON.stringify({ modules }, null, 2) + '\n')
-    renameSync(`${this.file}.tmp`, this.file)
+    const merged = new Map(this.stored().map(s => [s.name, s]))
+    for (const m of this.modules.values()) {
+      const theirs = merged.get(m.name)
+      if (theirs && theirs.version > m.version) continue
+      const ours = toStored(m)
+      if (theirs?.version === m.version) ours.disabled ??= theirs.disabled
+      merged.set(m.name, ours)
+    }
+    const modules = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name))
+    const tmp = `${this.file}.${process.pid}.tmp`
+    writeFileSync(tmp, JSON.stringify({ modules }, null, 2) + '\n')
+    renameSync(tmp, this.file)
   }
 
   get (name: string) { return this.modules.get(name) }
-  nextVersion (name: string) { return (this.modules.get(name)?.version ?? 0) + 1 }
+  // Past a sibling's version too, so two Jeeves never write different code under one name@version.
+  nextVersion (name: string) { return Math.max(this.modules.get(name)?.version ?? 0, ...this.stored().filter(s => s.name === name).map(s => s.version)) + 1 }
 
   // Behaviors are trialled live by the runtime (src/main.ts); only one that passed is added here.
   addBehavior (src: ModuleSource, version: number, trial: BehaviorTrial, origin?: Origin): Module {
@@ -140,7 +161,7 @@ export class ModuleRegistry {
   // Compile, then trial on recent real states: it must return a boolean every time, within budget.
   // Only a module that passes is registered (as the next version of its name).
   register (src: ModuleSource, trialStates: Snapshot[], origin?: Origin): { module?: Module, trial: Trial } {
-    const version = (this.modules.get(src.name)?.version ?? 0) + 1
+    const version = this.nextVersion(src.name)
     let m: Module
     try { m = compileModule(src, version, this.onDisable) } catch (err) {
       return { trial: { states: 0, trues: 0, errors: 1, maxMs: 0, error: `compile: ${String(err)}` } }
