@@ -158,7 +158,7 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
     wanted: () => [],
     cooling,
     threatened: () => threatened,
-    ask: async (state, questions) => { seen = { state, questions }; return { model: 'fake', answers } }
+    ask: async (state, questions) => { seen = { state, questions }; return { model: 'fake', answers, usage: { input_tokens: 1000, output_tokens: 150 } } }
   })
   await decide(['test'])
   return { started, targets, trace: traces[0], seen, escalations }
@@ -183,6 +183,7 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.equal(r.trace.attrs['jeeve.decide.trigger'], 'test')
   assert.ok(JSON.parse(r.trace.attrs['jeeve.decide.raw_state']).entities.length === 1)
   assert.deepEqual(r.escalations, ['low_confidence'])
+  assert.equal(r.trace.llm.total_cost_usd, 0.000042) // Jev bills input tokens only
   // An option whose last run on that target failed (none_found, stuck) sits out: collect isn't offered on oak_log.
   const cool = await decideWith({ body: { choice: 'keep_current', confidence: 0.9 }, escalate: { noul: 0.1 } }, null, o => o === 'collect:oak_log')
   assert.deepEqual(keys(cool.seen.questions.body.criteria), ['keep_current'])

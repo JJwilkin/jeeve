@@ -3,6 +3,7 @@ import type { Bot } from 'mineflayer'
 import type { Channels, Channel } from './behaviors.ts'
 import { BEHAVIORS } from './behaviors.ts'
 import { foods, rawSnapshot, type Attackers, type Directive, type Handles, type Memory } from './encoder.ts'
+import { PRICES, usd } from './budget.ts'
 import { ENCODERS, LIMITS, optionsFor, optionTarget, shuffled, version, type Choice, type Option, type Program, type Thing } from './program.ts'
 
 const MODEL = 'jev-1.13.0' // pinned: thresholds are tuned against a version, aliases move
@@ -122,6 +123,7 @@ export function makeDecider (ctx: DecideCtx) {
     const unsure = choices.filter(([id]) => res?.answers?.[id]?.confidence < ctx.program.escalate_when.confidence_below && !moot(id)).map(([id]) => id)
     const escalate = jevSaysEscalate || unsure.length > 0
 
+    const tokens = res?.usage && { non_cached_input_tokens: res.usage.input_tokens, output_tokens: res.usage.output_tokens }
     // The span is recorded first, so the behaviors it starts can point back at it (decided_by).
     const spanId = ctx.record({
       attrs: {
@@ -137,7 +139,7 @@ export function makeDecider (ctx: DecideCtx) {
       },
       input: { state, questions }, // criteria are in the order shown
       output: { answers: res?.answers, applied, error },
-      llm: res?.usage ? { model: res.model, provider: 'typesafe', non_cached_input_tokens: res.usage.input_tokens, output_tokens: res.usage.output_tokens } : undefined
+      llm: tokens ? { model: res.model, provider: 'typesafe', ...tokens, total_cost_usd: usd(PRICES.typesafe, tokens) } : undefined
     })
     for (const act of actions) act(spanId)
     if (escalate) ctx.escalate(jevSaysEscalate ? 'jev_escalate' : 'low_confidence', { questions: unsure, answers: res?.answers, decide_span: spanId })

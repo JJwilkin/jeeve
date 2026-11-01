@@ -156,6 +156,10 @@ Built in `src/trace.ts`, exporting to staging project `jeeve-dev` via judgeval-j
 - **`perceive` spans** are children of the `system2` span, which now opens when the call starts rather than being recorded after it.
 - **The raw snapshot carries notable blocks** with positions instead of a block cube.
 
+**Since 2026-11-01 (Judgment trace health):**
+- **`decide` spans carry `judgment.usage.total_cost_usd`:** `usd(PRICES.typesafe, …)` from `src/budget.ts`, the same price the spend caps use ($0.042 per million input tokens, output free, [[jev-measurements]]).
+- **A parent never ends before its children.** OTel stamps a span's start from `Date.now()` and its end from `performance.now()`; the clocks drift, so a child could look 1–2 ms late. Before judgeval exports a span, `Recorder.init` stretches its end to its latest child's. This covers spans Jeeve doesn't make, like the AI SDK's under `builder`.
+
 **Since 2026-10-12 ([[brain-monitor]]): JSONL-only rows for the monitor and clips.** These go to `traces/<session>.jsonl` only, not to Judgment, to keep span volume down. Every row has `t` (ms since the epoch) and `kind`.
 
 | `kind` | Written when | Fields |
