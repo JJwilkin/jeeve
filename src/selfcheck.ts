@@ -15,6 +15,7 @@ import { trace } from '@opentelemetry/api'
 import { MockLanguageModelV4 } from 'ai/test'
 import { build, type CapabilityRequest } from './builder.ts'
 import { curate, gather, newEvidence, propose, type Sql } from './curate.ts'
+import { Budget, PRICES, usd } from './budget.ts'
 import { coalescing, makeDecider } from './decide.ts'
 import { describeMemory, direction, distanceBucket, foods, makeEgocentric, needs, newHandles, rawSnapshot } from './encoder.ts'
 import { blockAt, explored, frontier, notableBlocks, notePlaced, observe, reachable, scan } from './world.ts'
@@ -701,6 +702,48 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   feed.flush()
   assert.equal(got.length, 3) // nothing after disconnecting
   feed.close()
+}
+
+// Asleep → no model calls: a tier's entry point behind budget.gate never runs while asleep (heartbeats included),
+// runs once woken, and stops again once its own spend trips the hourly cap.
+{
+  const slept: string[] = []
+  const budget = new Budget({ hour: 10, day: 50 }, 'start', reason => slept.push(reason))
+  let calls = 0
+  const wake = coalescing(budget.gate(async () => { calls++; budget.spend(6) }), 0)
+  const settle = () => new Promise(r => setTimeout(r, 10))
+  for (let i = 0; i < 20; i++) wake('heartbeat')
+  await settle()
+  assert.equal(calls, 0)
+  assert.equal(budget.wake(), null)
+  wake('awake'); await settle()
+  wake('heartbeat'); await settle()
+  assert.equal(calls, 2) // $12 spent: over $10/h
+  assert.equal(budget.asleep, 'budget')
+  assert.deepEqual(slept, ['budget'])
+  wake('heartbeat'); await settle()
+  assert.equal(calls, 2)
+  assert.match(budget.wake()!, /over the hour cap: \$12\.00 of \$10/)
+}
+
+// The rolling budget: each cap sums its own window; old spend falls out and it can wake again.
+{
+  const budget = new Budget({ hour: 10, day: 50 }, null, () => {})
+  const H = 3_600_000
+  budget.spend(6, 0)
+  budget.spend(3, 30 * 60_000)
+  assert.equal(budget.over(30 * 60_000), null) // $9 in the hour
+  budget.spend(2, 59 * 60_000)
+  assert.equal(budget.asleep, 'budget') // $11 in the hour
+  assert.equal(budget.spent('hour', 61 * 60_000), 5) // the first $6 is over an hour old
+  assert.equal(budget.wake(61 * 60_000), null)
+  for (let h = 2; h <= 12; h++) budget.spend(4, h * H) // $4/h: under the hourly cap, $55 across the day
+  assert.equal(budget.asleep, 'budget')
+  assert.equal(budget.over(12 * H), 'day')
+  assert.equal(budget.spent('day', 26.5 * H), 40) // the spend at 2 h and before is over a day old
+  assert.equal(budget.wake(26.5 * H), null)
+  // Prices: 2A's tokens as traced (1M uncached in, 100k out, 1M cache reads) → $4 + $2 + $0.20.
+  assert.equal(usd(PRICES.anthropic, { non_cached_input_tokens: 1e6, output_tokens: 1e5, cache_read_input_tokens: 1e6 }).toFixed(2), '6.20')
 }
 
 console.log('selfcheck ok')

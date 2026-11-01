@@ -10,6 +10,7 @@ import collectblock from 'mineflayer-collectblock'
 import { Judgeval } from 'judgeval'
 import type { Span } from '@opentelemetry/api'
 import { authoredSpec, BEHAVIORS, CHANNELS, Channels, LOOK_AROUND, type ApiHost, type Spec } from './behaviors.ts'
+import { Budget, PRICES, usd, type Tokens } from './budget.ts'
 import { build, BUILDER_MODEL, type BehaviorDraft, type BuildResult, type CapabilityRequest, type TrialReport, type TrialTarget } from './builder.ts'
 import { coalescing, makeDecider, optionTarget, type Ask } from './decide.ts'
 import { attacking, checkSnapshot, describeEntity, describeMemory, foods, handleFor, inventoryCounts, newHandles, rawSnapshot, type Attackers, type Directive } from './encoder.ts'
@@ -99,6 +100,11 @@ export async function startAgent (opts: AgentOptions) {
   let heartbeat: ReturnType<typeof setInterval> | undefined
   let watchdog = { decides: 0, errors: 0, previous: null as Program | null }
   const fires = (event: string) => program.triggers.events.includes(event.split(' ')[0])
+  // Asleep: no Jev, 2A or 2B calls until an allowed whisper or the API wakes it (see fallAsleep).
+  const budget = new Budget(
+    { hour: Number(process.env.JEEVE_BUDGET_USD_HOUR ?? 10), day: Number(process.env.JEEVE_BUDGET_USD_DAY ?? 50) },
+    process.env.JEEVE_START_ASLEEP === '1' ? 'start' : null,
+    reason => fallAsleep(reason))
   const failures = new Map<string, number>() // per goal: stuck / none_found count
   const failedAt = new Map<string, number>() // option target → when a run on it last ended none_found or stuck
 
@@ -355,6 +361,7 @@ export async function startAgent (opts: AgentOptions) {
           recorder.record('program', { attrs: { 'jeeve.program.version': version(back), 'jeeve.program.activation': 'rolled_back', 'jeeve.program.because': because } })
           queueMicrotask(() => activate(back, because))
         }
+        if (span.llm) budget.spend(usd(PRICES.typesafe, span.llm as Tokens))
         const id = recorder.record('decide', { attrs: span.attrs, input: span.input, output: span.output, kind: 'llm', llm: span.llm })
         chosenOn.set(id, String(span.attrs['jeeve.decide.trigger']).split(',')[0].replace(/^.*:/, ''))
         if (chosenOn.size > 200) chosenOn.delete(chosenOn.keys().next().value!)
@@ -366,7 +373,8 @@ export async function startAgent (opts: AgentOptions) {
       urgent: () => bot.food < 4 && foods(bot).length > 0,
       ask: opts.ask
     })
-    wake = coalescing(decide, LIMITS.minIntervalMs)
+    // A call in flight when it fell asleep may still start behaviors: stop them.
+    wake = coalescing(budget.gate(async reasons => { await decide(reasons); if (budget.asleep) channels.stop(CHANNELS, 'asleep') }), LIMITS.minIntervalMs)
     if (heartbeat) clearInterval(heartbeat)
     heartbeat = setInterval(() => wake('heartbeat'), program.triggers.heartbeat_ms)
   }
@@ -445,6 +453,7 @@ export async function startAgent (opts: AgentOptions) {
   const jevDoubtDuringTrial = (reason: string) => !!trial && (reason === 'low_confidence' || reason === 'jev_escalate')
 
   function escalate (reason: string, detail: unknown, goal: Goal) {
+    if (budget.asleep) return
     note(`escalation: ${reason}`)
     recorder.stats.escalations.push(reason)
     const key = `${reason}|${goal.id}|${version(program)}`
@@ -497,12 +506,14 @@ export async function startAgent (opts: AgentOptions) {
     } finally { system2Span = undefined }
     const d = result.decision
     const u = result.usage
+    const llm = u ? { model: result.model, provider: 'anthropic', non_cached_input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_read_input_tokens: u.cache_read_input_tokens ?? 0, cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0 } : undefined
+    if (llm) budget.spend(usd(PRICES.anthropic, llm))
     const spanId = recorder.finish(span, 'system2', {
       attrs: { 'jeeve.system2.trigger': trigger, 'jeeve.system2.latency_ms': Date.now() - t0, 'jeeve.system2.turns': result.turns, 'jeeve.system2.refusal': result.refusal },
       input: context, output: { decision: d, sql: result.sql }, kind: 'llm',
-      llm: u ? { model: result.model, provider: 'anthropic', non_cached_input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_read_input_tokens: u.cache_read_input_tokens ?? 0, cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0 } : undefined
+      llm
     })
-    if (stopped) return
+    if (stopped || budget.asleep) return // fell asleep while 2A thought: its decision would start work
     recorder.stats.system2.push(`${trigger} → ${d ? d.note : result.refusal ? 'refused' : 'no decision'}`)
     console.log(`[system2] ${trigger} (${Date.now() - t0} ms): ${d?.note ?? 'no decision'}`)
     if (d) { learnFrom(d, triggers); applyDecision(d, goal, spanId) }
@@ -641,7 +652,7 @@ export async function startAgent (opts: AgentOptions) {
 
   function pumpRequests () {
     const req = requests.find(r => r.status === 'queued')
-    if (stopped || !req || requests.some(r => r.status === 'building')) return
+    if (stopped || budget.asleep || !req || requests.some(r => r.status === 'building')) return
     req.status = 'building'
     const t0 = Date.now()
     const span = recorder.openTrace('builder', {
@@ -661,7 +672,9 @@ export async function startAgent (opts: AgentOptions) {
       trial_target: req.targets === 'block' && req.trial.block ? scan(bot, { match: req.trial.block }) : undefined
     }
     console.log(`[builder] ${req.id} started: ${req.need}`)
-    build(req, brief, { trial: (d, _r, signal) => trialPort(d, req, signal, span), perceive: (tool, input) => perceive(tool, input, span), log: row => recorder.jsonl({ request: req.id, ...row }) }, req.abort.signal, span, session)
+    build(req, brief, { trial: (d, _r, signal) => trialPort(d, req, signal, span), perceive: (tool, input) => perceive(tool, input, span), log: row => recorder.jsonl({ request: req.id, ...row }),
+      usage: u => budget.spend(usd(PRICES.anthropic, { non_cached_input_tokens: u.inputTokenDetails.noCacheTokens, output_tokens: u.outputTokens, cache_read_input_tokens: u.inputTokenDetails.cacheReadTokens, cache_creation_input_tokens: u.inputTokenDetails.cacheWriteTokens }))
+    }, req.abort.signal, span, session)
       .catch((err): BuildResult => ({ request: req.id, status: 'failed', reason: req.abort.signal.aborted ? `cancelled: ${req.abort.signal.reason}` : String(err), attempts: [] }))
       .then(result => {
         const cancelled = req.abort.signal.aborted
@@ -818,7 +831,39 @@ export async function startAgent (opts: AgentOptions) {
     return root
   }
 
-  bot.on('whisper', (from, message) => { if (opts.allowed.includes(from)) instruct(message, { player: from, via: 'whisper' }) })
+  // ---- sleep: the goal tree is dropped, the body stops and 2B's build is cancelled; it wakes with no goal ----
+  function fallAsleep (reason: string) {
+    pending = []
+    const root = goals.path()[0]
+    for (const g of goals.path().reverse()) {
+      goals.close(g, 'abandoned', `asleep: ${reason}`)
+      recorder.record('goal', { attrs: { 'jeeve.goal.id': g.id, 'jeeve.goal.transition': 'abandoned' }, output: { summary: g.summary } })
+    }
+    if (root) afterGoalChange(root) // stops the channels, cancels its requests, cuts the window
+    channels.stop(CHANNELS, 'asleep')
+    recorder.windowEvent('asleep', { reason, spent_hour: budget.spent('hour'), spent_day: budget.spent('day') })
+    console.log(`[jeeve] asleep: ${reason}`)
+    if (root?.from?.via === 'whisper') bot.whisper(root.from.player, `going to sleep (${reason}): ${root.text} dropped`)
+  }
+  // What the caller is told: why it's still asleep, or that it woke.
+  function wakeUp () {
+    const refused = budget.wake()
+    if (refused) return refused
+    recorder.windowEvent('awake')
+    console.log('[jeeve] awake')
+    wake('awake')
+    return 'awake'
+  }
+
+  // Allowed players' whispers: "sleep" and "wake" toggle sleep; anything else is an instruction, refused while asleep.
+  bot.on('whisper', (from, message) => {
+    if (!opts.allowed.includes(from)) return
+    const said = message.trim().toLowerCase()
+    if (said === 'sleep') { budget.sleep('operator'); return bot.whisper(from, 'asleep') }
+    if (said === 'wake') return bot.whisper(from, wakeUp())
+    if (budget.asleep) return bot.whisper(from, `asleep (${budget.asleep}): whisper "wake" first`)
+    instruct(message, { player: from, via: 'whisper' })
+  })
 
   let api: Server | null = null
   const feed = worldFeed(bot)
@@ -826,7 +871,9 @@ export async function startAgent (opts: AgentOptions) {
     api = createServer((req, res) => {
       const reply = (code: number, body: unknown) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
       if (req.method === 'GET' && req.url === '/status') {
-        return reply(200, { goals: goals.status(bot), program: version(program), channels: channels.describe(), modules: modules.list(), session, trace_window: recorder.index })
+        return reply(200, {
+          asleep: budget.asleep, spent_usd: { hour: budget.spent('hour'), day: budget.spent('day') }, caps_usd: budget.caps,
+          goals: goals.status(bot), program: version(program), channels: channels.describe(), modules: modules.list(), session, trace_window: recorder.index })
       }
       // The trace as server-sent events: the session's rows so far, then each new one (the monitor, viz/).
       if (req.method === 'GET' && req.url === '/events') {
@@ -852,15 +899,21 @@ export async function startAgent (opts: AgentOptions) {
       if (req.method === 'POST' && req.url === '/instructions') {
         return body(({ from, text }) => {
           if (typeof text !== 'string' || !text.trim()) return reply(400, { error: 'text is required' })
+          if (budget.asleep) return reply(409, { error: 'asleep: POST /wake first', asleep: budget.asleep })
           const root = instruct(text.trim(), { player: typeof from === 'string' ? from : 'operator', via: 'api' })
           reply(202, { goal: root.id })
         })
+      }
+      if (req.method === 'POST' && req.url === '/sleep') { budget.sleep('operator'); return reply(200, { asleep: budget.asleep }) }
+      if (req.method === 'POST' && req.url === '/wake') {
+        const said = wakeUp()
+        return reply(said === 'awake' ? 200 : 409, { asleep: budget.asleep, ...(said === 'awake' ? {} : { error: said }) })
       }
       // A clock-sync row, e.g. when a recording starts (scripts/clip.ts), so footage lines up with the trace.
       if (req.method === 'POST' && req.url === '/marker') {
         return body(b => { recorder.jsonl({ ...b, kind: 'marker' }); reply(202, {}) })
       }
-      reply(404, { error: 'POST /instructions, POST /marker, GET /status, GET /events or GET /world' })
+      reply(404, { error: 'POST /instructions, POST /sleep, POST /wake, POST /marker, GET /status, GET /events or GET /world' })
     })
     // Bound to localhost only: anyone who can reach it is the operator.
     api.listen(opts.apiPort ?? 7777, '127.0.0.1')

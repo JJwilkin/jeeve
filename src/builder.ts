@@ -5,7 +5,7 @@
 // arguments and result, so moving it to Luna (durable runs, a waiting state for trial windows) swaps this file.
 import { anthropic } from '@ai-sdk/anthropic'
 import { OpenTelemetry } from '@ai-sdk/otel'
-import { generateText, jsonSchema, stepCountIs, tool, type LanguageModel } from 'ai'
+import { generateText, jsonSchema, stepCountIs, tool, type LanguageModel, type LanguageModelUsage } from 'ai'
 import { trace, type Span } from '@opentelemetry/api'
 import { JudgmentTracerProvider, Tracer } from 'judgeval'
 import { API_DOC } from './behaviors.ts'
@@ -32,6 +32,7 @@ export type BuilderPorts = {
   trial: (draft: BehaviorDraft, req: CapabilityRequest, signal: AbortSignal) => Promise<TrialReport>
   perceive: (tool: string, input: Record<string, unknown>) => Promise<unknown>
   log?: (row: Record<string, unknown>) => void // 2B's steps and tool calls as trace rows (the AI SDK spans reach Judgment only)
+  usage?: (usage: LanguageModelUsage) => void // each step's tokens, for the spend caps
 }
 
 const WRITE_BEHAVIOR = {
@@ -108,7 +109,10 @@ export async function build (req: CapabilityRequest, brief: Record<string, unkno
     tools,
     stopWhen: [stepCountIs(BUILDER_LIMITS.steps), () => !!passed || attempts.length >= BUILDER_LIMITS.trials],
     abortSignal: signal,
-    onStepFinish: step => ports.log?.({ kind: 'builder_step', text: step.text, reasoning: step.reasoningText, tools: step.toolCalls.map(c => c.toolName), finish: step.finishReason, usage: step.usage }),
+    onStepFinish: step => {
+      ports.usage?.(step.usage)
+      ports.log?.({ kind: 'builder_step', text: step.text, reasoning: step.reasoningText, tools: step.toolCalls.map(c => c.toolName), finish: step.finishReason, usage: step.usage })
+    },
     providerOptions: { anthropic: { effort: BUILDER_EFFORT } },
     telemetry: {
       functionId: 'builder',
