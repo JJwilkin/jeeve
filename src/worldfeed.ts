@@ -13,13 +13,14 @@ export type FeedMessage =
   | { type: 'blockUpdate', pos: XYZ, stateId: number }
   | EntityMessage
 
+const FLUSH_MS = 100 // ~10 Hz
 const spawned = (e: Entity): EntityMessage => ({ type: 'entity', id: e.id, name: e.name, username: e.username, pos: e.position, yaw: e.yaw, pitch: e.pitch, width: e.width, height: e.height })
 const moved = (e: Entity): EntityMessage => ({ type: 'entity', id: e.id, pos: e.position, yaw: e.yaw, pitch: e.pitch })
 
-// Moves (the bot's own included, so a camera can follow it) are kept to the latest per entity and sent `hz` times a
+// Moves (the bot's own included, so a camera can follow it) are kept to the latest per entity and sent 10 times a
 // second; everything else goes out in order at the same flush. Nothing is built while no one is connected.
 // ponytail: no dimension change, entity metadata (dropped item names, armour) or skins; add when the page shows them.
-export function worldFeed (bot: Bot, hz = 10) {
+export function worldFeed (bot: Bot) {
   const clients = new Set<(m: FeedMessage) => void>()
   const queue: FeedMessage[] = []
   const moves = new Map<number, EntityMessage>()
@@ -39,7 +40,7 @@ export function worldFeed (bot: Bot, hz = 10) {
     moves.clear()
     for (const m of out) for (const send of clients) send(m)
   }
-  const timer = setInterval(flush, 1000 / hz)
+  const timer = setInterval(flush, FLUSH_MS)
   timer.unref()
 
   return {

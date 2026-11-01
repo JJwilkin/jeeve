@@ -671,8 +671,10 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   const feed = worldFeed(bot)
   const got: FeedMessage[] = []
   const off = feed.connect(m => got.push(m))
-  assert.deepEqual(got.map(m => m.type === 'loadChunk' ? [m.type, m.x, m.z] : [m.type, (m as any).id, (m as any).name]), [['loadChunk', 16, -32], ['entity', 7, 'zombie']])
   assert.equal(typeof (got[0] as any).chunk, 'string')
+  assert.deepEqual(JSON.parse(JSON.stringify(got.map(({ chunk, ...m }: any) => m))), [
+    { type: 'loadChunk', x: 16, z: -32 },
+    { type: 'entity', id: 7, name: 'zombie', pos: { x: 20, y: 0, z: -30 }, yaw: 0, pitch: 0, width: 0.6, height: 1.95 }])
   got.length = 0
   bot.emit('blockUpdate', { position: new Vec3(17, 0, -31) }, { position: new Vec3(17, 0, -31), stateId: 0 })
   bot.emit('entityMoved', { ...zombie, position: new Vec3(21, 0, -30) })
