@@ -1,0 +1,27 @@
+# The public front (docker-compose.yml): HTTPS, the spectate page, and /api/* proxied to the web relay. Anyone can
+# watch; every POST (goal box, wake, sleep) needs basic auth.
+# SITE_ADDRESS: localhost on the Mac (Caddy's own local CA), <ip>.sslip.io on the VM (Let's Encrypt, with Caddy's
+# default fallback to ZeroSSL if Let's Encrypt fails or rate-limits).
+{$SITE_ADDRESS:localhost} {
+	# A world snapshot is ~22 MB of chunk JSON per viewer; it compresses well.
+	encode zstd gzip
+
+	@steer {
+		method POST
+		path /api/*
+	}
+	basic_auth @steer {
+		joshua {$JEEVE_BASIC_AUTH_HASH}
+	}
+
+	handle /api/* {
+		reverse_proxy web:8080 {
+			flush_interval -1 # SSE: pass each event on as it arrives
+		}
+	}
+	handle {
+		rewrite / /spectate.html
+		root * /srv
+		file_server
+	}
+}

@@ -55,6 +55,14 @@ The first server start needs `MINECRAFT_EULA=true` to accept the [Minecraft EULA
 MINECRAFT_EULA=true JEEVE_ENV_FILE=../judgment/.env.jeeve docker compose up --build
 ```
 
+**The spectate page** comes up with the same command: `caddy` serves the built `viz/` on 80 and 443 and proxies `/api/*` to the `web` relay. Anyone can watch; every POST (goal box, wake, sleep) needs basic auth as user `joshua`. Two variables, from the shell or a `.env` next to `docker-compose.yml`:
+- `JEEVE_BASIC_AUTH_HASH`: a bcrypt hash of the password. Without it Caddy refuses to start. In a `.env` file, single-quote it, or compose reads its `$`s as variables.
+- `SITE_ADDRESS`: `localhost` (the default) or `<ip>.sslip.io` on the VM.
+```bash
+read -rs PW && export JEEVE_BASIC_AUTH_HASH="$(printf '%s\n' "$PW" | docker run --rm -i caddy:2.11.7-alpine caddy hash-password)" && unset PW
+```
+Then open `https://localhost`. The Jeeves start asleep; wake one from the page (the browser asks for the password), and put it back to sleep when done. The first build of the page takes about 15 minutes on Apple Silicon (an emulated amd64 `npm ci`); later builds reuse it. On `localhost` Caddy signs with its own local CA, which it can't add to the Mac's trust store from inside a container, so the browser warns once. To trust it instead: `docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt .` and add that to Keychain Access.
+
 **Modules System 2 writes** persist in `modules/library.json`. Runs update it and never commit it; review the diff and commit the modules worth keeping. `npm run curate` (`-- --days 7 --sessions '<glob>,…' --library <file>`; label episodes with `JEEVE_CONTEXT`, e.g. `pvp-arena`, to curate per use case) writes a proposal to `curation/<time>/`: `review.md`, `lessons.md` and `library.diff` (apply with `git apply`). It applies nothing.
 
 **Instructions from outside the game** go to the agent's local API, bound to 127.0.0.1:
