@@ -24,6 +24,7 @@ import { controlVector, guardedMovements, unsafeAt } from './guards.ts'
 import { compileBehavior, compileModule, ModuleRegistry, startBehavior, type BehaviorHost } from './modules.ts'
 import { DEFAULT_PROGRAM, optionsFor, validate, version } from './program.ts'
 import { worldFeed, type FeedMessage } from './worldfeed.ts'
+import { MAX_STRING, publicRow } from '../web/public-row.ts'
 
 // Direction is egocentric: yaw 0 faces north (-z), positive turns left.
 assert.equal(direction(0, -5, 0), 'ahead')
@@ -759,6 +760,20 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.equal(ok('Jeeve_2', 'Jeeve_1', 9_999), false)
   assert.equal(ok('Jeeve_1', 'Jeeve_2', 9_999), true) // the other direction is its own pair
   assert.equal(ok('Jeeve_2', 'Jeeve_1', 10_000), true)
+}
+
+// publicRow (the web relay): a decide keeps only `self` of its raw snapshot and loses Jev's input; a system2 row loses
+// 2A's input and SQL but keeps its decision; players' names stay; behavior code stays whole; longer strings are capped.
+{
+  const raw = JSON.stringify({ self: { health: 20, pos: [1, 2, 3] }, inventory: { dirt: 3 }, entities: [{ username: 'JoshBGosh321' }] })
+  assert.deepEqual(publicRow({ t: 1, kind: 'decide', attrs: { 'jeeve.decide.raw_state': raw }, input: { state: 'x' }, output: { answers: {} } }),
+    { t: 1, kind: 'decide', attrs: { 'jeeve.decide.raw_state': JSON.stringify({ self: { health: 20, pos: [1, 2, 3] } }) }, output: { answers: {} } })
+  assert.deepEqual(publicRow({ t: 2, kind: 'system2', input: 'context', output: { decision: { note: 'n', message: 'hi JoshBGosh321' }, sql: ['select 1'] } }),
+    { t: 2, kind: 'system2', output: { decision: { note: 'n', message: 'hi JoshBGosh321' }, error: undefined } })
+  const code = 'x'.repeat(MAX_STRING)
+  assert.deepEqual(publicRow({ t: 3, kind: 'module', input: { name: 'b', code } }), { t: 3, kind: 'module', input: { name: 'b', code } })
+  assert.deepEqual(publicRow({ t: 4, kind: 'goal', input: { text: code + 'y', from: { player: 'JoshBGosh321' } } }),
+    { t: 4, kind: 'goal', input: { text: 'x'.repeat(MAX_STRING - 1) + '…', from: { player: 'JoshBGosh321' } } })
 }
 
 console.log('selfcheck ok')
