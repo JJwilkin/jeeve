@@ -28,7 +28,8 @@ export type AgentOptions = {
   port?: number
   username?: string
   allowed: string[] // players whose whispers are instructions
-  apiPort?: number | null // local instruction API on 127.0.0.1; null turns it off
+  apiPort?: number | null // local instruction API; null turns it off
+  apiHost?: string // where the API binds; default 127.0.0.1 (compose: 0.0.0.0, reachable on the compose network only)
   project?: string // Judgment project for traces
   system2?: boolean // default: on when ANTHROPIC_API_KEY is set
   moduleLibrary?: string // where modules System 2 writes persist across runs
@@ -62,7 +63,8 @@ const short = (v: unknown, max = 500) => { const s = JSON.stringify(v); return s
 
 export async function startAgent (opts: AgentOptions) {
   const project = opts.project ?? process.env.JEEVE_PROJECT ?? 'jeeve-dev'
-  const session = `jeeve-${new Date().toISOString().replace(/[:.]/g, '-')}`
+  // The username suffix keeps Jeeves that start in the same millisecond (compose) out of each other's session.
+  const session = `jeeve-${new Date().toISOString().replace(/[:.]/g, '-')}${opts.username ? `-${opts.username}` : ''}`
   const recorder = await Recorder.init(project, session)
   const judgeval = recorder.exporting ? await Judgeval.create({ projectName: project, organizationId: judgmentOrg() }).catch(() => null) : null
   // Every await happens before the bot exists: a spawn during an await would miss its handlers, and the agent would
@@ -917,8 +919,8 @@ export async function startAgent (opts: AgentOptions) {
       }
       reply(404, { error: 'POST /instructions, POST /sleep, POST /wake, POST /marker, GET /status, GET /events or GET /world' })
     })
-    // Bound to localhost only: anyone who can reach it is the operator.
-    api.listen(opts.apiPort ?? 7777, '127.0.0.1')
+    // Bound to localhost by default: anyone who can reach it is the operator.
+    api.listen(opts.apiPort ?? 7777, opts.apiHost ?? '127.0.0.1')
   }
 
   // ---- game events ----
@@ -1038,6 +1040,11 @@ export async function startAgent (opts: AgentOptions) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const allowed = (process.env.JEEVE_ALLOWED ?? '').split(',').filter(Boolean)
   if (!allowed.length) console.warn('[jeeve] JEEVE_ALLOWED is empty: only the local API can give instructions')
-  const agent = await startAgent({ host: process.env.JEEVE_HOST, port: Number(process.env.JEEVE_PORT ?? 25565), allowed, apiPort: Number(process.env.JEEVE_API_PORT ?? 7777) })
-  process.on('SIGINT', () => { void agent.stop().then(() => process.exit(0)) })
+  const agent = await startAgent({ host: process.env.JEEVE_HOST, port: Number(process.env.JEEVE_PORT ?? 25565), username: process.env.JEEVE_USERNAME, allowed, apiPort: Number(process.env.JEEVE_API_PORT ?? 7777), apiHost: process.env.JEEVE_API_HOST })
+  let exiting = false
+  const exit = (code: number) => { if (!exiting) { exiting = true; void agent.stop().then(() => process.exit(code)) } }
+  process.on('SIGINT', () => exit(0))
+  process.on('SIGTERM', () => exit(0)) // docker stop
+  // Disconnected (server restart, kick): exit, so a container's restart policy reconnects instead of idling botless.
+  agent.bot.once('end', () => exit(1))
 }
