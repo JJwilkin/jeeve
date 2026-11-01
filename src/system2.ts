@@ -256,7 +256,14 @@ export function makeSystem2 (opts: { sql?: (q: string) => Promise<unknown>, sche
         tools: [...(turn < MAX_TURNS ? tools : TOOLS.slice(0, 1)), REQUEST_CAPABILITY, SET_PLAN],
         messages
       } as Anthropic.Beta.MessageCreateParamsNonStreaming)
-      usage = res.usage
+      // Summed over turns: every turn is billed (the trace and the spend caps read this).
+      usage = !usage ? res.usage : {
+        ...res.usage,
+        input_tokens: usage.input_tokens + res.usage.input_tokens,
+        output_tokens: usage.output_tokens + res.usage.output_tokens,
+        cache_read_input_tokens: (usage.cache_read_input_tokens ?? 0) + (res.usage.cache_read_input_tokens ?? 0),
+        cache_creation_input_tokens: (usage.cache_creation_input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0)
+      }
       model = res.model
       if (res.stop_reason === 'refusal') return { decision: null, model, usage, turns: turn, sql: sqls, refusal: true }
       const calls = res.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use')

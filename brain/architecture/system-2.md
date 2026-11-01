@@ -74,6 +74,12 @@ Two channels, handled the same way:
 - **For failures, refusals and clarifying questions,** System 2 writes the message.
 - **Jev never speaks.**
 
+## Sleep and spend caps (2026-11-01)
+A live Jeeve costs about $8–15 an hour in model calls, so one not in use sleeps (`src/budget.ts`).
+- **Asleep means no model calls at any tier:** Jev's wakes (heartbeats included), 2A's escalations and 2B's builds are all skipped. Falling asleep abandons the goal tree, stops the body and cancels a build in flight; it wakes with no goal.
+- **Only the operator toggles it:** an allowlisted whisper of `sleep` / `wake`, or `POST /sleep` / `POST /wake`. Instructions are refused while asleep. `JEEVE_START_ASLEEP=1` starts it asleep (the live server does).
+- **Spend caps per Jeeve** (`JEEVE_BUDGET_USD_HOUR`/`DAY`, default $10 and $50) over rolling windows, costed from each call's tokens at list prices. Tripping one sleeps it with reason `budget`; it can't wake until spend falls back under. `GET /status` shows `asleep`, the spend and the caps. The Anthropic workspace limit is the hard cap: spend is in memory, so a restart forgets it (and starts asleep).
+
 ## Plans (2026-10-12)
 Decided with Joshua after the orchard clip ([[brain-monitor]]): 2A steered "break the other three trees" reactively, one escalation at a time, and Jev hopped between trees' logs. A heuristic design would break one tree and repeat. So 2A plans once, and code walks the plan.
 - **Plan at the instruction.** Instruction calls run at `high` effort (escalations stay `low`). 2A calls a `set_plan` tool (its own tool, like `request_capability`, so the strict `submit_decision` grammar doesn't grow): ordered steps, each `{ text, place, done_when, budget_s }`, e.g. one per tree, nearest first.
