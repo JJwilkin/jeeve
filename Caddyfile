@@ -15,6 +15,14 @@
 	}
 
 	handle /api/* {
+		# The browser attaches the cached password to any POST to this origin, including another site's form. The
+		# page always sends JSON, which a cross-site form can't, and a cross-site fetch can't without a preflight
+		# that fails. (Inside handle: Caddy runs a top-level respond only after handle.)
+		@foreign {
+			method POST
+			not header Content-Type application/json*
+		}
+		respond @foreign 403
 		reverse_proxy web:8080 {
 			flush_interval -1 # SSE: pass each event on as it arrives
 		}
@@ -22,6 +30,8 @@
 	handle {
 		rewrite / /spectate.html
 		root * /srv
-		file_server
+		file_server {
+			precompressed gzip # the big files, gzipped at build (viz/Dockerfile)
+		}
 	}
 }

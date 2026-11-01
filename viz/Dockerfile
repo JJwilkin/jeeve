@@ -11,6 +11,8 @@ COPY package.json package-lock.json ./
 RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci
 COPY . .
 RUN npm run build
+# The 158 MB mesher worker and 13 MB of block states, compressed once here rather than per viewer by Caddy.
+RUN find dist \( -name '*.js' -o -name '*.json' \) -size +1M -exec gzip -k9 {} +
 
 FROM caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
 COPY --from=build /viz/dist /srv
