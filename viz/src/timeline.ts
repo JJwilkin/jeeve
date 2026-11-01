@@ -170,6 +170,19 @@ export function stateAt (all: Row[], t: number): Panels {
   return p
 }
 
+// Root goals a player gave (instructions), newest first, with how each ended ('open' while it runs).
+export type RecentGoal = { t: number, id: string, text: string, from: string, outcome: string }
+export function recentGoals (rows: Row[], n = 5): RecentGoal[] {
+  const goals = new Map<string, RecentGoal>()
+  for (const r of rows) {
+    if (r.kind !== 'goal') continue
+    const id = r.attrs?.['jeeve.goal.id'], tr = r.attrs?.['jeeve.goal.transition']
+    if (tr === 'pushed' && r.input?.from) goals.set(id, { t: r.t, id, text: goalText(r) ?? '', from: r.input.from.player, outcome: 'open' })
+    else if (tr !== 'pushed' && goals.has(id)) goals.get(id)!.outcome = tr
+  }
+  return [...goals.values()].slice(-n).reverse()
+}
+
 // ---- beats: the moments a caption is written for, with the facts a caption may use ----
 export type Beat = { t: number, kind: string, facts: Record<string, unknown>, text: string }
 
