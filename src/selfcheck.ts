@@ -577,7 +577,7 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
 
   // The library keeps behaviors with their channels and target type, and reloads them.
   const file = join(mkdtempSync(join(tmpdir(), 'jeeve-')), 'library.json')
-  new ModuleRegistry(() => {}, file).addBehavior(shape, 1, { target: { block: 'oak_leaves', count: 2, entity: null }, end: 'done', ms: 1200 })
+  new ModuleRegistry(() => {}, file).addBehavior(shape, { target: { block: 'oak_leaves', count: 2, entity: null }, end: 'done', ms: 1200 })
   const again = new ModuleRegistry(() => {}, file)
   assert.deepEqual(again.load().loaded, ['pillar@1'])
   assert.deepEqual([again.get('pillar')?.channels, again.get('pillar')?.targets, again.nextVersion('pillar')], [['legs', 'aim', 'hands'], 'block', 2])

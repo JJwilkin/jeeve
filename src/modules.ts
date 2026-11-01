@@ -7,6 +7,7 @@
 // Sandbox: node:vm, a fresh realm per module with no require/process/network, string eval disabled, and a
 // hard per-call timeout. ponytail: not a security boundary; fine while the only author is our own System 2
 // on a local machine. Revisit (worker thread or SES compartment) before running anywhere else.
+import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import vm from 'node:vm'
 
@@ -102,7 +103,7 @@ export class ModuleRegistry {
   load (): { loaded: string[], skipped: string[] } {
     const loaded: string[] = []
     const skipped: string[] = []
-    for (const s of this.stored()) {
+    for (const s of this.readLibrary()) {
       if (s.disabled) { skipped.push(`${s.name}@${s.version}: disabled (${s.disabled})`); continue }
       try {
         const m = s.kind === 'behavior' ? behaviorModule(s, s.version) : compileModule(s, s.version, this.onDisable)
@@ -114,8 +115,7 @@ export class ModuleRegistry {
     return { loaded, skipped }
   }
 
-  // The library as the file holds it now.
-  stored (): Stored[] {
+  readLibrary (): Stored[] {
     return this.file && existsSync(this.file) ? JSON.parse(readFileSync(this.file, 'utf8')).modules : []
   }
 
@@ -126,7 +126,7 @@ export class ModuleRegistry {
   // apart; add a lock file if that changes.
   save () {
     if (!this.file) return
-    const merged = new Map(this.stored().map(s => [s.name, s]))
+    const merged = new Map(this.readLibrary().map(s => [s.name, s]))
     for (const m of this.modules.values()) {
       const theirs = merged.get(m.name)
       if (theirs && theirs.version > m.version) continue
@@ -135,18 +135,19 @@ export class ModuleRegistry {
       merged.set(m.name, ours)
     }
     const modules = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name))
-    const tmp = `${this.file}.${process.pid}.tmp`
+    const tmp = `${this.file}.${randomUUID()}.tmp` // unique per save: pids repeat across containers
     writeFileSync(tmp, JSON.stringify({ modules }, null, 2) + '\n')
     renameSync(tmp, this.file)
   }
 
   get (name: string) { return this.modules.get(name) }
   // Past a sibling's version too, so two Jeeves never write different code under one name@version.
-  nextVersion (name: string) { return Math.max(this.modules.get(name)?.version ?? 0, ...this.stored().filter(s => s.name === name).map(s => s.version)) + 1 }
+  nextVersion (name: string) { return Math.max(this.modules.get(name)?.version ?? 0, this.readLibrary().find(s => s.name === name)?.version ?? 0) + 1 }
 
-  // Behaviors are trialled live by the runtime (src/main.ts); only one that passed is added here.
-  addBehavior (src: ModuleSource, version: number, trial: BehaviorTrial, origin?: Origin): Module {
-    const m = behaviorModule(src, version)
+  // Behaviors are trialled live by the runtime (src/main.ts); only one that passed is added here. It's numbered
+  // now, not when its trial started, in case a sibling took that version meanwhile.
+  addBehavior (src: ModuleSource, trial: BehaviorTrial, origin?: Origin): Module {
+    const m = behaviorModule(src, this.nextVersion(src.name))
     Object.assign(m, { origin, trial })
     this.modules.set(src.name, m)
     this.save()
