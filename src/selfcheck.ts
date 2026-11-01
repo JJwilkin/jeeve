@@ -20,6 +20,7 @@ import { coalescing, makeDecider } from './decide.ts'
 import { describeMemory, direction, distanceBucket, foods, makeEgocentric, needs, newHandles, rawSnapshot } from './encoder.ts'
 import { blockAt, explored, frontier, notableBlocks, notePlaced, observe, reachable, scan } from './world.ts'
 import { compile, glob, Goals } from './goals.ts'
+import { pairLimiter, whisperKind } from './main.ts'
 import { controlVector, guardedMovements, unsafeAt } from './guards.ts'
 import { compileBehavior, compileModule, ModuleRegistry, startBehavior, type BehaviorHost } from './modules.ts'
 import { DEFAULT_PROGRAM, optionsFor, validate, version } from './program.ts'
@@ -743,6 +744,22 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.equal(budget.wake(26.5 * H), null)
   // Prices: 2A's tokens as traced (1M uncached in, 100k out, 1M cache reads) → $4 + $2 + $0.20.
   assert.equal(usd(PRICES.anthropic, { non_cached_input_tokens: 1e6, output_tokens: 1e5, cache_read_input_tokens: 1e6 }).toFixed(2), '6.20')
+}
+
+// A peer's whisper is a peer_message for 2A, never an instruction (a root goal), even when it reads like one or says
+// "wake"; asleep, it's ignored. Each sender pair gets one message per 10 s.
+{
+  const who = { allowed: ['Josh'], peers: ['Jeeve_2'] }
+  assert.equal(whisperKind('Josh', 'collect 10 logs', who, false), 'instruction')
+  assert.equal(whisperKind('Jeeve_2', 'collect 10 logs', who, false), 'peer_message')
+  assert.equal(whisperKind('Jeeve_2', 'wake', who, true), 'ignore')
+  assert.equal(whisperKind('Josh', 'wake', who, true), 'wake')
+  assert.equal(whisperKind('Stranger', 'collect 10 logs', who, false), 'ignore')
+  const ok = pairLimiter(10_000)
+  assert.equal(ok('Jeeve_2', 'Jeeve_1', 0), true)
+  assert.equal(ok('Jeeve_2', 'Jeeve_1', 9_999), false)
+  assert.equal(ok('Jeeve_1', 'Jeeve_2', 9_999), true) // the other direction is its own pair
+  assert.equal(ok('Jeeve_2', 'Jeeve_1', 10_000), true)
 }
 
 console.log('selfcheck ok')

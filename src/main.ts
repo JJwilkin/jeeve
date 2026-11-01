@@ -28,6 +28,7 @@ export type AgentOptions = {
   port?: number
   username?: string
   allowed: string[] // players whose whispers are instructions
+  peers?: string[] // the other Jeeves: their whispers reach 2A as peer_message escalations, never as instructions
   apiPort?: number | null // local instruction API; null turns it off
   apiHost?: string // where the API binds; default 127.0.0.1 (compose: 0.0.0.0, reachable on the compose network only)
   project?: string // Judgment project for traces
@@ -58,8 +59,33 @@ const IDLE_MS = 30_000
 // A goal whose progress (e.g. logs gathered) hasn't moved this long escalates as stalled, busy or not: a forage run
 // followed a scripted player who never moved for 10 min, waiting to be led to trees.
 const STALL_MS = 60_000
+// Each sender pair (a peer to this Jeeve, or this Jeeve to a peer) gets one whisper per this long, so two Jeeves
+// can't talk each other's budgets away.
+const PEER_MS = 10_000
 // Trace rows stay small: long outputs (a scan, an event's data) are cut.
 const short = (v: unknown, max = 500) => { const s = JSON.stringify(v); return s && s.length > max ? s.slice(0, max) + '…' : v }
+
+// What a whisper is, by who sent it (brain/architecture/behaviors-and-guards.md → "Chat"): an allowlisted player's is
+// sleep, wake or an instruction (refused while asleep); a peer Jeeve's is a peer_message for 2A, never a goal, and
+// can't wake a sleeping Jeeve. Anyone else's is ignored.
+export function whisperKind (from: string, message: string, who: { allowed: string[], peers: string[] }, asleep: boolean) {
+  if (who.allowed.includes(from)) {
+    const said = message.trim().toLowerCase()
+    return said === 'sleep' || said === 'wake' ? said : asleep ? 'asleep' : 'instruction'
+  }
+  return who.peers.includes(from) && !asleep ? 'peer_message' : 'ignore'
+}
+
+// true if from → to may send now, at most once per ms.
+export function pairLimiter (ms: number) {
+  const last = new Map<string, number>()
+  return (from: string, to: string, now = Date.now()) => {
+    const k = `${from}>${to}`
+    if (now - (last.get(k) ?? -Infinity) < ms) return false
+    last.set(k, now)
+    return true
+  }
+}
 
 export async function startAgent (opts: AgentOptions) {
   const project = opts.project ?? process.env.JEEVE_PROJECT ?? 'jeeve-dev'
@@ -74,6 +100,8 @@ export async function startAgent (opts: AgentOptions) {
   const bot = mineflayer.createBot({ host: opts.host ?? 'localhost', port: opts.port ?? 25565, username: opts.username ?? 'Jeeve', auth: 'offline' })
   bot.loadPlugin(pf.pathfinder)
   bot.loadPlugin(collectblock.plugin)
+  const peers = (opts.peers ?? []).filter(p => p !== bot.username)
+  const peerLimit = pairLimiter(PEER_MS)
 
   // ---- live event stream: the last few seconds for Jev, longer for System 2 ----
   const events: Array<{ t: number, text: string }> = []
@@ -462,7 +490,8 @@ export async function startAgent (opts: AgentOptions) {
     const key = `${reason}|${goal.id}|${version(program)}`
     // A fast health drop bypasses the window: in run jeeve-2026-10-11T16-36-51-167Z it suppressed every jev_escalate
     // while slimes took health from 11 to 1.
-    const bypass = reason === 'instruction' || reason === 'capability_result' || reason === 'owner_hurt' || fallingFast()
+    // Peer messages have their own limit (PEER_MS).
+    const bypass = reason === 'instruction' || reason === 'capability_result' || reason === 'owner_hurt' || reason === 'peer_message' || fallingFast()
     // 2A answered this kind of escalation for this goal with "no change" lately: it's quiet for a while (see below).
     const hushed = (quiet.get(`${reason}|${goal.id}`)?.until ?? 0) > Date.now()
     if (jevDoubtDuringTrial(reason) || (!bypass && (hushed || Date.now() - (lastSent.get(key) ?? 0) < NO_REPEAT_MS))) {
@@ -494,6 +523,7 @@ export async function startAgent (opts: AgentOptions) {
       seen_map: seenMap(bot), // everything the bot has seen around it, so the scene doesn't hinge on this turn's scans
       // Where it has looked, and where not yet: the frontier widens from where the instruction came.
       explored: { cell: 16, bot_at: [Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.z)], origin: root?.origin ? [root.origin[0], root.origin[2]] : null, frontier: frontier(bot, root?.origin ? { x: root.origin[0], z: root.origin[2] } : undefined), centers: explored(bot) },
+      peers: peers.length ? peers : undefined,
       modules: modules.list(),
       requests: requests.map(r => ({ id: r.id, goal: r.goal.id, need: r.need, status: windowAsk?.req === r ? 'waiting_for_trial_window' : trial?.ask?.req === r ? 'trialling' : r.status })),
       recent_events: recentFor(30_000),
@@ -528,7 +558,9 @@ export async function startAgent (opts: AgentOptions) {
     const live = goal.status === 'active' || goal.status === 'suspended'
     if (!live) return // the goal was closed while System 2 was thinking: keep only the note (a message would be stale)
     const root = goals.nodes.find(g => g.id === goals.path()[0]?.id)
-    if (d.message && root?.from?.via === 'whisper') bot.whisper(root.from.player, d.message)
+    const player = root?.from?.via === 'whisper' ? root.from.player : null
+    if (d.message && d.to && d.to !== player) whisperPeer(d.to, d.message, goal)
+    else if (d.message && player) bot.whisper(player, d.message)
 
     // Modules first, so the rest of the decision can reference them. Each refusal is evidence for the next try.
     const problems: string[] = []
@@ -812,6 +844,20 @@ export async function startAgent (opts: AgentOptions) {
     t.done?.({ behavior: id, run_id: t.runId, passed, end, ms: result.ms, error: detail?.error, actions: detail?.actions, self: judged.self, preempted: 0 })
   }
 
+  // ---- peers: other Jeeves' whispers escalate to 2A; 2A whispers back with decision.to ----
+  function peerMessage (from: string, text: string) {
+    const leaf = goals.leaf()
+    // ponytail: with no goal there's nothing for 2A's decision to apply to, so the message is dropped; a goalless
+    // 2A call (reply only) if idle Jeeves need to answer peers.
+    if (!leaf || !peerLimit(from, bot.username)) return recorder.jsonl({ kind: 'peer_message_dropped', from, reason: leaf ? 'rate' : 'no_goal' })
+    escalate('peer_message', { from, text: text.slice(0, 200) }, leaf)
+  }
+  function whisperPeer (to: string, text: string, goal: Goal) {
+    const refused = !peers.includes(to) ? `${to} is not a peer` : !peerLimit(bot.username, to) ? `one message per peer per ${PEER_MS / 1000} s` : null
+    if (refused) return goal.log.push(`message to ${to} dropped: ${refused}`)
+    bot.whisper(to, text.slice(0, 200))
+  }
+
   // ---- instructions: whispers from allowed players, or the local API ----
   function instruct (text: string, from: { player: string, via: 'whisper' | 'api' }) {
     const { root, abandoned } = goals.instruction(text, from, bot)
@@ -859,14 +905,13 @@ export async function startAgent (opts: AgentOptions) {
     return null
   }
 
-  // Allowed players' whispers: "sleep" and "wake" toggle sleep; anything else is an instruction, refused while asleep.
   bot.on('whisper', (from, message) => {
-    if (!opts.allowed.includes(from)) return
-    const said = message.trim().toLowerCase()
-    if (said === 'sleep') { budget.sleep('operator'); return bot.whisper(from, 'asleep') }
-    if (said === 'wake') return bot.whisper(from, wakeUp() ?? 'awake')
-    if (budget.asleep) return bot.whisper(from, `asleep (${budget.asleep}): whisper "wake" first`)
-    instruct(message, { player: from, via: 'whisper' })
+    const kind = whisperKind(from, message, { allowed: opts.allowed, peers }, !!budget.asleep)
+    if (kind === 'sleep') { budget.sleep('operator'); return bot.whisper(from, 'asleep') }
+    if (kind === 'wake') return bot.whisper(from, wakeUp() ?? 'awake')
+    if (kind === 'asleep') return bot.whisper(from, `asleep (${budget.asleep}): whisper "wake" first`)
+    if (kind === 'instruction') instruct(message, { player: from, via: 'whisper' })
+    if (kind === 'peer_message') peerMessage(from, message)
   })
 
   let api: Server | null = null
@@ -1040,7 +1085,8 @@ export async function startAgent (opts: AgentOptions) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const allowed = (process.env.JEEVE_ALLOWED ?? '').split(',').filter(Boolean)
   if (!allowed.length) console.warn('[jeeve] JEEVE_ALLOWED is empty: only the local API can give instructions')
-  const agent = await startAgent({ host: process.env.JEEVE_HOST, port: Number(process.env.JEEVE_PORT ?? 25565), username: process.env.JEEVE_USERNAME, allowed, apiPort: Number(process.env.JEEVE_API_PORT ?? 7777), apiHost: process.env.JEEVE_API_HOST })
+  const peers = (process.env.JEEVE_PEERS ?? '').split(',').filter(Boolean)
+  const agent = await startAgent({ host: process.env.JEEVE_HOST, port: Number(process.env.JEEVE_PORT ?? 25565), username: process.env.JEEVE_USERNAME, allowed, peers, apiPort: Number(process.env.JEEVE_API_PORT ?? 7777), apiHost: process.env.JEEVE_API_HOST })
   let exiting = false
   const exit = (code: number) => { if (!exiting) { exiting = true; void agent.stop().then(() => process.exit(code)) } }
   process.on('SIGINT', () => exit(0))

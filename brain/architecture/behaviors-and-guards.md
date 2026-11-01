@@ -173,6 +173,13 @@ The selfcheck parses Mineflayer's typed `Bot` interface and fails on any method 
 
 **Chat: whispers to allowlisted players only.** For the local milestone, authored code can `whisper` the players who may give instructions, and never runs a `/` command. There's no public chat. Speech stays tied to the people Jeeve works for ([[system-2]] → "Reporting back"). Incoming chat reaches code only as event data from `next("chat")`; code can't eval it, so the injection risk stays where it was: System 2 reading players' text. **Revisit before other servers:** public chat, and marking chat from players who aren't allowlisted as untrusted in System 2's context.
 
+**Chat between Jeeves (peer messaging, 2026-11-01).** Several Jeeves coordinate by whispering each other, not through a shared blackboard: chat is the general channel, and what to say is 2A's to discover ([[bitter-lesson]]). `JEEVE_PEERS` names the other Jeeves.
+- A peer's whisper reaches 2A as a `peer_message` escalation (`from`, `text`) on the current goal: news or a request to weigh, never an instruction or a root goal. With no goal it's dropped (`peer_message_dropped`, `no_goal`).
+- 2A whispers a peer through its decision: `message` plus `to` (a peer's name). Without `to`, `message` still goes to the player who gave the instruction.
+- Each sender pair gets one whisper per 10 s, in and out, so two Jeeves can't burn each other's budgets. A dropped reply goes in the goal log.
+- A peer's whisper never wakes a sleeping Jeeve: only Joshua's allowlisted whisper or the authed API do.
+- Authored code still whispers allowlisted players only, and public chat stays off.
+
 **Item targets.** A behavior can take an `item` target (`{ name, count }`), e.g. something to craft. Jev is offered it for the item an `inventory_delta` goal still needs, the way `collect` is offered block types. Without it, a registered craft behavior would pass its trial and never be picked again.
 
 **Seed behaviors stay wrapped plugins.** They could be written on this API: `track` is `look` plus `wait(1)`, and `attack_when_ready` is `attack` on a cooldown. Rewriting them would give one kind of behavior instead of two, but no new capability, and it would risk an e2e that passes today. `navigate` and `follow` are pathfinding, which is search ([[seed-behaviors]]). `collect` is still the first one System 2 should replace, now that it can.

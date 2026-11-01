@@ -10,6 +10,7 @@ x-jeeve-env: &jeeve-env
   JEEVE_HOST: paper
   JEEVE_API_HOST: 0.0.0.0 # the compose network only: no ports are published
   JEEVE_ALLOWED: JoshBGosh321
+  JEEVE_PEERS: Jeeve_1,Jeeve_2,Jeeve_3 # each Jeeve skips its own name
 
 x-jeeve: &jeeve
   build: .
