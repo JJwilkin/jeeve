@@ -2,10 +2,11 @@
 // (GET /events) and shows the stage at the current time. Replay: open a traces/<session>.jsonl and scrub.
 // Query: ?api=http://127.0.0.1:7777 (live source), ?trace=/@fs/<path>.jsonl (replay a file), &layout=tall, &obs=1
 // (transparent game area, controls hidden: an OBS browser source over the game capture).
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { C, MONO, Stage, SIZE, type Layout } from '../Stage.tsx'
-import { beats, captionAt, parse, slim, stateAt, type Row } from '../timeline.ts'
+import { useLiveRows } from '../live.ts'
+import { beats, captionAt, parse, stateAt, type Row } from '../timeline.ts'
 
 const q = new URLSearchParams(location.search)
 const API = q.get('api') ?? 'http://127.0.0.1:7777'
@@ -21,33 +22,12 @@ function useScale () {
 }
 
 function App () {
-  const [rows, setRows] = useState<Row[]>([])
   const [mode, setMode] = useState<'live' | 'replay'>(q.has('trace') ? 'replay' : 'live')
-  const [status, setStatus] = useState('connecting…')
-  const [t, setT] = useState(Date.now())
+  const live = useLiveRows(mode === 'live' ? `${API}/events` : null)
+  const [replay, setReplay] = useState<{ rows: Row[], name: string, t: number }>({ rows: [], name: '', t: 0 })
   const [playing, setPlaying] = useState(false)
-  const buf = useRef<Row[]>([])
   const scale = useScale()
-
-  // Live: rows arrive one by one; batch them into state ten times a second.
-  useEffect(() => {
-    if (mode !== 'live') return
-    const es = new EventSource(`${API}/events`)
-    let fresh = true // each (re)connect replays the session from its first row
-    es.onopen = () => { setStatus(`live · ${API}`); buf.current = []; fresh = true }
-    es.onerror = () => setStatus(`no agent at ${API} (retrying)`)
-    es.onmessage = e => { buf.current.push(slim(JSON.parse(e.data))) }
-    const tick = setInterval(() => {
-      if (buf.current.length) {
-        const add = buf.current
-        buf.current = []
-        setRows(r => fresh ? add : [...r, ...add])
-        fresh = false
-      }
-      setT(Date.now())
-    }, 100)
-    return () => { es.close(); clearInterval(tick) }
-  }, [mode])
+  const setT = (t: (t: number) => number) => setReplay(r => ({ ...r, t: t(r.t) }))
 
   // Replay: play forward at 1× from the slider.
   useEffect(() => {
@@ -58,9 +38,11 @@ function App () {
 
   const open = async (f: { name: string, text: () => Promise<string> }) => {
     const r = parse(await f.text())
-    setMode('replay'); setRows(r); setT(r[0]?.t ?? 0); setPlaying(false); setStatus(`replay · ${f.name.split("/").pop()}`)
+    setMode('replay'); setReplay({ rows: r, name: f.name.split("/").pop()!, t: r[0]?.t ?? 0 }); setPlaying(false)
   }
   useEffect(() => { const url = q.get('trace'); if (url) void open({ name: url, text: () => fetch(url).then(r => r.text()) }) }, [])
+  const { rows, t } = mode === 'live' ? live : replay
+  const status = mode === 'replay' ? `replay · ${replay.name}` : live.up === null ? 'connecting…' : live.up ? `live · ${API}` : `no agent at ${API} (retrying)`
   const bs = useMemo(() => beats(rows), [rows])
   const p = stateAt(rows, t)
   const t0 = rows[0]?.t ?? 0, t1 = rows.at(-1)?.t ?? 0
@@ -74,9 +56,9 @@ function App () {
           <span style={{ color: C.dim }}>{status}</span>
           {mode === 'replay' && <>
             <button onClick={() => setPlaying(x => !x)}>{playing ? 'pause' : 'play'}</button>
-            <input type='range' min={t0} max={t1} step={100} value={t} onChange={e => setT(+e.target.value)} style={{ flex: 1 }} aria-label='time' />
+            <input type='range' min={t0} max={t1} step={100} value={t} onChange={e => setT(() => +e.target.value)} style={{ flex: 1 }} aria-label='time' />
             <span style={{ fontFamily: MONO }}>{((t - t0) / 1000).toFixed(1)} s</span>
-            <button onClick={() => { setMode('live'); setRows([]); setStatus('connecting…') }}>live</button>
+            <button onClick={() => setMode('live')}>live</button>
           </>}
           <label style={{ marginLeft: mode === 'live' ? 'auto' : 0 }}>open trace <input type='file' accept='.jsonl' onChange={e => { const f = e.target.files?.[0]; if (f) void open(f) }} /></label>
         </div>

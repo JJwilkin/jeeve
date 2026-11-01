@@ -2,7 +2,7 @@
 // trace file: node src/timeline.check.ts ../traces/<session>.jsonl prints its beats and speed-ups.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { activity, beats, duration, parse, speedups, stateAt, traceTime, type Row } from './timeline.ts'
+import { activity, beats, duration, parse, recentGoals, speedups, stateAt, traceTime, type Row } from './timeline.ts'
 
 const code = 'async (api, t) => {\n  await api.place([0, 1, 0], "oak_log")\n  await api.dig([0, 5, 0])\n  return "done"\n}'
 const decide = (t: number, pos: number[], changed = false): Row => ({ t, kind: 'decide', attrs: { 'jeeve.decide.changed': changed, 'jeeve.decide.latency_ms': 190, 'jeeve.decide.raw_state': JSON.stringify({ self: { pos, health: 20 } }) }, output: { answers: { body: { type: 'choice', choice: 'keep_current', confidence: 0.9, probabilities: { keep_current: 0.9, collect: 0.1 } }, escalate: { type: 'noul', noul: 0.2 } } } })
@@ -50,6 +50,10 @@ assert.equal(fast.length, 1)
 assert.deepEqual([fast[0].t0, fast[0].t1], [6001, 59000])
 assert.equal(Math.round(duration(segs)), 64000 - (59000 - 6001) + 2000)
 assert.equal(Math.round(traceTime(segs, 5001 + 1000).t), Math.round(6001 + 1000 * fast[0].rate)) // 1 s into the squash
+// Recent goals: only player-given roots, newest first, each with how it ended.
+const goal = (t: number, id: string, transition: string, from?: string) => ({ t, kind: 'goal', attrs: { 'jeeve.goal.id': id, 'jeeve.goal.transition': transition }, input: { text: id, ...(from && { from: { player: from, via: 'api' } }) } })
+assert.deepEqual(recentGoals([goal(1, 'g-1', 'pushed', 'Josh'), goal(2, 'g-2', 'pushed'), goal(3, 'g-1', 'completed'), goal(4, 'g-3', 'pushed', 'web')]).map(g => [g.id, g.outcome]),
+  [['g-3', 'open'], ['g-1', 'completed']])
 console.log('timeline check ok')
 
 const file = process.argv[2]
