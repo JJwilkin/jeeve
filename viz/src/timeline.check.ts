@@ -52,8 +52,8 @@ assert.equal(Math.round(duration(segs)), 64000 - (59000 - 6001) + 2000)
 assert.equal(Math.round(traceTime(segs, 5001 + 1000).t), Math.round(6001 + 1000 * fast[0].rate)) // 1 s into the squash
 // Recent goals: only player-given roots, newest first, each with how it ended.
 const goal = (t: number, id: string, transition: string, from?: string) => ({ t, kind: 'goal', attrs: { 'jeeve.goal.id': id, 'jeeve.goal.transition': transition }, input: { text: id, ...(from && { from: { player: from, via: 'api' } }) } })
-assert.deepEqual(recentGoals([goal(1, 'g-1', 'pushed', 'Josh'), goal(2, 'g-2', 'pushed'), goal(3, 'g-1', 'completed'), goal(4, 'g-3', 'pushed', 'web')]).map(g => [g.id, g.outcome]),
-  [['g-3', 'open'], ['g-1', 'completed']])
+assert.deepEqual(recentGoals([goal(1, 'g-1', 'pushed', 'Josh'), goal(2, 'g-2', 'pushed'), goal(3, 'g-1', 'completed'), goal(4, 'g-3', 'pushed', 'web')]),
+  [{ t: 4, id: 'g-3', text: 'g-3', from: 'web', outcome: 'open' }, { t: 1, id: 'g-1', text: 'g-1', from: 'Josh', outcome: 'completed' }])
 console.log('timeline check ok')
 
 const file = process.argv[2]

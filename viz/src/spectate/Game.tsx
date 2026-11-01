@@ -28,6 +28,7 @@ controls.enableDamping = true
 
 // The camera's subject: the followed Jeeve's position (or, in the god view, the first Jeeve's, once).
 const cam: { follow: boolean, at?: THREE.Vector3, placed: boolean } = { follow: false, placed: false }
+let jeeves = new Set<string>() // the relay's Jeeves: they wear the robot, and the god view starts on one
 
 function frame () {
   requestAnimationFrame(frame)
@@ -63,16 +64,17 @@ function connect (source: string, focus: string | null) {
     if (m.type === 'entity') {
       if (m.username) names.set(m.id, m.username)
       const who = names.get(m.id)
-      if (m.username?.startsWith('Jeeve')) m.skin = skin // the Judgment Labs robot, as in clips
-      if (m.pos && who && (focus ? who === focus : !cam.at && who.startsWith('Jeeve'))) cam.at = new THREE.Vector3(m.pos.x, m.pos.y + 1, m.pos.z)
+      if (jeeves.has(m.username)) m.skin = skin // the Judgment Labs robot, as in clips
+      if (m.pos && who && (focus ? who === focus : !cam.at && jeeves.has(who))) cam.at = new THREE.Vector3(m.pos.x, m.pos.y + 1, m.pos.z)
     }
     feed.emit(m.type, m)
   }
   return () => es.close()
 }
 
-export function Game ({ source, focus, w, h }: { source: string, focus: string | null, w: number, h: number }) {
+export function Game ({ source, focus, names, w, h }: { source: string, focus: string | null, names: string[], w: number, h: number }) {
   const box = useRef<HTMLDivElement>(null)
+  useEffect(() => { jeeves = new Set(names) }, [names])
   useEffect(() => { box.current!.appendChild(renderer.domElement) }, [])
   useEffect(() => {
     renderer.setSize(w, h)

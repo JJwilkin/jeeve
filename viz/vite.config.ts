@@ -1,5 +1,5 @@
 import { createReadStream, cpSync } from 'node:fs'
-import { extname, join, resolve } from 'node:path'
+import { extname, join, resolve, sep } from 'node:path'
 import { defineConfig, type Plugin } from 'vite'
 
 // prismarine-viewer in the browser (the spectate page) fetches its mesher worker and 26.1 assets relative to the page.
@@ -12,9 +12,10 @@ const viewerAssets: Plugin = {
   configureServer (server) {
     server.middlewares.use((req, res, next) => {
       const path = decodeURIComponent((req.url ?? '').split('?')[0]).slice(1)
-      if (!ASSETS.some(a => path === a || path.startsWith(`${a}/`))) return next()
+      const file = resolve(PV, path) // contained: a decoded `..` must not leave the package's public/
+      if (!file.startsWith(resolve(PV) + sep) || !ASSETS.some(a => path === a || path.startsWith(`${a}/`))) return next()
       res.setHeader('Content-Type', TYPES[extname(path)] ?? 'application/octet-stream')
-      createReadStream(join(PV, path)).on('error', () => { res.statusCode = 404; res.end() }).pipe(res)
+      createReadStream(file).on('error', () => { res.statusCode = 404; res.end() }).pipe(res)
     })
   },
   writeBundle ({ dir }) { for (const a of ASSETS) cpSync(join(PV, a), join(dir!, a), { recursive: true }) }

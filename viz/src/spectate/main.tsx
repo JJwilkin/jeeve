@@ -130,7 +130,7 @@ function Goals ({ goals }: { goals: ReturnType<typeof recentGoals> }) {
 }
 
 // A Jeeve's tab: its world under the monitor's Stage panels, and the sidebar.
-function JeeveView ({ name, s, refresh, viewW, narrow }: { name: string, s: Status | null | undefined, refresh: () => void, viewW: number, narrow: boolean }) {
+function JeeveView ({ name, names, s, refresh, viewW, narrow }: { name: string, names: string[], s: Status | null | undefined, refresh: () => void, viewW: number, narrow: boolean }) {
   const { rows, up, t } = useLiveRows(`/api/${name}/events`)
   const bs = useMemo(() => beats(rows), [rows])
   const goals = useMemo(() => recentGoals(rows), [rows])
@@ -140,7 +140,7 @@ function JeeveView ({ name, s, refresh, viewW, narrow }: { name: string, s: Stat
   return <>
     <div style={{ width: viewW, height: SIZE[layout].h * scale, flexShrink: 0 }}>
       <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}>
-        <Stage p={stateAt(rows, t)} caption={caption} layout={layout} footage={<Game source={name} focus={name} {...FOOTAGE[layout]} />} />
+        <Stage p={stateAt(rows, t)} caption={caption} layout={layout} footage={<Game source={name} focus={name} names={names} {...FOOTAGE[layout]} />} />
       </div>
     </div>
     <Side narrow={narrow}><State name={name} s={s} /><GoalBox name={name} s={s} sent={refresh} /><Goals goals={goals} /><Blurb /></Side>
@@ -152,7 +152,7 @@ const Side = ({ narrow, children }: { narrow: boolean, children: ReactNode }) =>
 
 function GodView ({ names, status, pick, viewW, narrow }: { names: string[], status: Record<string, Status | null>, pick: (n: string) => void, viewW: number, narrow: boolean }) {
   return <>
-    <Game source={GOD} focus={null} w={viewW} h={Math.round(viewW * 9 / 16)} />
+    <Game source={GOD} focus={null} names={names} w={viewW} h={Math.round(viewW * 9 / 16)} />
     <Side narrow={narrow}>
       <Card title='JEEVES'>
         {names.map(n => (
@@ -191,7 +191,7 @@ function App () {
       </div>
       <div style={{ display: 'flex', flexDirection: narrow ? 'column' : 'row', gap: narrow ? 12 : 16, padding: narrow ? 0 : 16, alignItems: 'flex-start' }}>
         {names && tab === GOD && <GodView names={names} status={status} pick={pick} viewW={viewW} narrow={narrow} />}
-        {names?.includes(tab) && <JeeveView key='jeeve' name={tab} s={status[tab]} refresh={refresh} viewW={viewW} narrow={narrow} />}
+        {names?.includes(tab) && <JeeveView key='jeeve' name={tab} names={names} s={status[tab]} refresh={refresh} viewW={viewW} narrow={narrow} />}
       </div>
     </div>
   )
