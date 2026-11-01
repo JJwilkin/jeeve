@@ -704,24 +704,22 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   feed.close()
 }
 
-// Asleep → no model calls: a tier's entry point behind budget.gate never runs while asleep (heartbeats included),
-// runs once woken, and stops again once its own spend trips the hourly cap.
+// Asleep → no model calls: a tier's entry point behind budget.gate never runs while asleep, runs once woken, and
+// stops again once its own spend trips the hourly cap.
 {
   const slept: string[] = []
   const budget = new Budget({ hour: 10, day: 50 }, 'start', reason => slept.push(reason))
   let calls = 0
-  const wake = coalescing(budget.gate(async () => { calls++; budget.spend(6) }), 0)
-  const settle = () => new Promise(r => setTimeout(r, 10))
-  for (let i = 0; i < 20; i++) wake('heartbeat')
-  await settle()
+  const run = budget.gate(async () => { calls++; budget.spend(6) })
+  for (let i = 0; i < 20; i++) await run()
   assert.equal(calls, 0)
   assert.equal(budget.wake(), null)
-  wake('awake'); await settle()
-  wake('heartbeat'); await settle()
+  await run()
+  await run()
   assert.equal(calls, 2) // $12 spent: over $10/h
   assert.equal(budget.asleep, 'budget')
   assert.deepEqual(slept, ['budget'])
-  wake('heartbeat'); await settle()
+  await run()
   assert.equal(calls, 2)
   assert.match(budget.wake()!, /over the hour cap: \$12\.00 of \$10/)
 }

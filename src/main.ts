@@ -361,10 +361,11 @@ export async function startAgent (opts: AgentOptions) {
           recorder.record('program', { attrs: { 'jeeve.program.version': version(back), 'jeeve.program.activation': 'rolled_back', 'jeeve.program.because': because } })
           queueMicrotask(() => activate(back, because))
         }
-        if (span.llm) budget.spend(usd(PRICES.typesafe, span.llm as Tokens))
         const id = recorder.record('decide', { attrs: span.attrs, input: span.input, output: span.output, kind: 'llm', llm: span.llm })
         chosenOn.set(id, String(span.attrs['jeeve.decide.trigger']).split(',')[0].replace(/^.*:/, ''))
         if (chosenOn.size > 200) chosenOn.delete(chosenOn.keys().next().value!)
+        // After the row, so a call that trips a cap stays in the window it ran in.
+        if (span.llm) budget.spend(usd(PRICES.typesafe, span.llm as Tokens))
         return id
       },
       escalate: (reason, detail) => { const leaf = goals.leaf(); if (leaf) escalate(reason, detail, leaf) },
@@ -507,12 +508,12 @@ export async function startAgent (opts: AgentOptions) {
     const d = result.decision
     const u = result.usage
     const llm = u ? { model: result.model, provider: 'anthropic', non_cached_input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_read_input_tokens: u.cache_read_input_tokens ?? 0, cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0 } : undefined
-    if (llm) budget.spend(usd(PRICES.anthropic, llm))
     const spanId = recorder.finish(span, 'system2', {
       attrs: { 'jeeve.system2.trigger': trigger, 'jeeve.system2.latency_ms': Date.now() - t0, 'jeeve.system2.turns': result.turns, 'jeeve.system2.refusal': result.refusal },
       input: context, output: { decision: d, sql: result.sql }, kind: 'llm',
       llm
     })
+    if (llm) budget.spend(usd(PRICES.anthropic, llm)) // after the span ends, so it ends inside its window
     if (stopped || budget.asleep) return // fell asleep while 2A thought: its decision would start work
     recorder.stats.system2.push(`${trigger} → ${d ? d.note : result.refusal ? 'refused' : 'no decision'}`)
     console.log(`[system2] ${trigger} (${Date.now() - t0} ms): ${d?.note ?? 'no decision'}`)
@@ -818,7 +819,7 @@ export async function startAgent (opts: AgentOptions) {
     dropStaleRequests()
     channels.stopStalePlace(null) // other behaviors keep running while System 2 reads the instruction
     channels.stop(CHANNELS.filter(c => BEHAVIORS[channels.slots[c]?.behavior ?? '']?.idle), 'instruction') // idle pastimes end
-    for (const g of abandoned) recorder.record('goal', { attrs: { 'jeeve.goal.id': g.id, 'jeeve.goal.transition': 'abandoned' }, output: { summary: g.summary } })
+    recordAbandoned(abandoned)
     recorder.goalPath = goals.pathText()
     recorder.cut('goal_boundary')
     recorder.record('goal', { attrs: { 'jeeve.goal.id': root.id, 'jeeve.goal.path': recorder.goalPath, 'jeeve.goal.transition': 'pushed' }, input: { text, from } })
@@ -831,28 +832,29 @@ export async function startAgent (opts: AgentOptions) {
     return root
   }
 
+  const recordAbandoned = (gs: Goal[]) => {
+    for (const g of gs) recorder.record('goal', { attrs: { 'jeeve.goal.id': g.id, 'jeeve.goal.transition': 'abandoned' }, output: { summary: g.summary } })
+  }
+
   // ---- sleep: the goal tree is dropped, the body stops and 2B's build is cancelled; it wakes with no goal ----
   function fallAsleep (reason: string) {
     pending = []
     const root = goals.path()[0]
-    for (const g of goals.path().reverse()) {
-      goals.close(g, 'abandoned', `asleep: ${reason}`)
-      recorder.record('goal', { attrs: { 'jeeve.goal.id': g.id, 'jeeve.goal.transition': 'abandoned' }, output: { summary: g.summary } })
-    }
+    recordAbandoned(goals.abandon(`asleep: ${reason}`))
     if (root) afterGoalChange(root) // stops the channels, cancels its requests, cuts the window
     channels.stop(CHANNELS, 'asleep')
     recorder.windowEvent('asleep', { reason, spent_hour: budget.spent('hour'), spent_day: budget.spent('day') })
     console.log(`[jeeve] asleep: ${reason}`)
     if (root?.from?.via === 'whisper') bot.whisper(root.from.player, `going to sleep (${reason}): ${root.text} dropped`)
   }
-  // What the caller is told: why it's still asleep, or that it woke.
-  function wakeUp () {
+  // Why it can't wake (a cap is still over), or null once awake.
+  function wakeUp (): string | null {
     const refused = budget.wake()
     if (refused) return refused
     recorder.windowEvent('awake')
     console.log('[jeeve] awake')
     wake('awake')
-    return 'awake'
+    return null
   }
 
   // Allowed players' whispers: "sleep" and "wake" toggle sleep; anything else is an instruction, refused while asleep.
@@ -860,7 +862,7 @@ export async function startAgent (opts: AgentOptions) {
     if (!opts.allowed.includes(from)) return
     const said = message.trim().toLowerCase()
     if (said === 'sleep') { budget.sleep('operator'); return bot.whisper(from, 'asleep') }
-    if (said === 'wake') return bot.whisper(from, wakeUp())
+    if (said === 'wake') return bot.whisper(from, wakeUp() ?? 'awake')
     if (budget.asleep) return bot.whisper(from, `asleep (${budget.asleep}): whisper "wake" first`)
     instruct(message, { player: from, via: 'whisper' })
   })
@@ -906,8 +908,8 @@ export async function startAgent (opts: AgentOptions) {
       }
       if (req.method === 'POST' && req.url === '/sleep') { budget.sleep('operator'); return reply(200, { asleep: budget.asleep }) }
       if (req.method === 'POST' && req.url === '/wake') {
-        const said = wakeUp()
-        return reply(said === 'awake' ? 200 : 409, { asleep: budget.asleep, ...(said === 'awake' ? {} : { error: said }) })
+        const refused = wakeUp()
+        return reply(refused ? 409 : 200, { asleep: budget.asleep, ...(refused && { error: refused }) })
       }
       // A clock-sync row, e.g. when a recording starts (scripts/clip.ts), so footage lines up with the trace.
       if (req.method === 'POST' && req.url === '/marker') {

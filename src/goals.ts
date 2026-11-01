@@ -161,9 +161,15 @@ export class Goals {
 
   // A new instruction replaces the root: the old root and everything under it is abandoned.
   instruction (text: string, from: Goal['from'], bot: Bot): { root: Goal, abandoned: Goal[] } {
-    const abandoned = this.path().reverse()
-    for (const g of abandoned) this.close(g, 'abandoned', 'replaced by a new instruction')
+    const abandoned = this.abandon('replaced by a new instruction')
     return { root: this.create(text, null, from, bot), abandoned }
+  }
+
+  // Closes the whole active path, leaf first.
+  abandon (summary: string): Goal[] {
+    const abandoned = this.path().reverse()
+    for (const g of abandoned) this.close(g, 'abandoned', summary)
+    return abandoned
   }
 
   close (g: Goal, status: 'completed' | 'failed' | 'abandoned', summary: string) {
