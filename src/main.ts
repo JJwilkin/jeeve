@@ -19,6 +19,7 @@ import { compileBehavior, MODULE_LIMITS, ModuleRegistry, type ModuleSource, type
 import { DEFAULT_PROGRAM, ENCODERS, LIMITS, validate, version, type Program } from './program.ts'
 import { makeSystem2, type Decision, type RequestDraft } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
+import { worldFeed } from './worldfeed.ts'
 import { blockAt, explored, frontier, noteDug, observe, placedStanding, reachable, scan, seenMap, seenTypes, type Pos } from './world.ts'
 
 export type AgentOptions = {
@@ -819,6 +820,7 @@ export async function startAgent (opts: AgentOptions) {
   bot.on('whisper', (from, message) => { if (opts.allowed.includes(from)) instruct(message, { player: from, via: 'whisper' }) })
 
   let api: Server | null = null
+  const feed = worldFeed(bot)
   if (opts.apiPort !== null) {
     api = createServer((req, res) => {
       const reply = (code: number, body: unknown) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)) }
@@ -833,6 +835,12 @@ export async function startAgent (opts: AgentOptions) {
         if (existsSync(recorder.file)) for (const line of readFileSync(recorder.file, 'utf8').split('\n')) if (line) send(line)
         recorder.listeners.add(send)
         req.on('close', () => recorder.listeners.delete(send))
+        return
+      }
+      // The world as server-sent events: every loaded column and entity, then deltas (src/worldfeed.ts).
+      if (req.method === 'GET' && req.url === '/world') {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*' })
+        req.on('close', feed.connect(m => res.write(`data: ${JSON.stringify(m)}\n\n`)))
         return
       }
       const body = (then: (b: Record<string, unknown>) => void) => {
@@ -851,7 +859,7 @@ export async function startAgent (opts: AgentOptions) {
       if (req.method === 'POST' && req.url === '/marker') {
         return body(b => { recorder.jsonl({ ...b, kind: 'marker' }); reply(202, {}) })
       }
-      reply(404, { error: 'POST /instructions, POST /marker, GET /status or GET /events' })
+      reply(404, { error: 'POST /instructions, POST /marker, GET /status, GET /events or GET /world' })
     })
     // Bound to localhost only: anyone who can reach it is the operator.
     api.listen(opts.apiPort ?? 7777, '127.0.0.1')
@@ -957,6 +965,7 @@ export async function startAgent (opts: AgentOptions) {
     for (const r of requests) r.abort.abort('episode_end')
     if (heartbeat) clearInterval(heartbeat)
     api?.close()
+    feed.close()
     channels.stop(CHANNELS, 'episode_end')
     modules.save() // with when each module was last used
     await recorder.shutdown()

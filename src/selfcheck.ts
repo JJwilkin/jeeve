@@ -22,6 +22,7 @@ import { compile, glob, Goals } from './goals.ts'
 import { controlVector, guardedMovements, unsafeAt } from './guards.ts'
 import { compileBehavior, compileModule, ModuleRegistry, startBehavior, type BehaviorHost } from './modules.ts'
 import { DEFAULT_PROGRAM, optionsFor, validate, version } from './program.ts'
+import { worldFeed, type FeedMessage } from './worldfeed.ts'
 
 // Direction is egocentric: yaw 0 faces north (-z), positive turns left.
 assert.equal(direction(0, -5, 0), 'ahead')
@@ -657,6 +658,37 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.match(out.lessons, /`r-1`, `deadbeefdeadbeef` \(not in the queried traces\)/)
   assert.match(out.lessons, /contexts: pvp@arena:25565\n/) // r-1 ran in s2
   assert.deepEqual(JSON.parse(out.library).modules[0].origin.contexts, ['unlabelled@unknown server'])
+}
+
+// World feed: the loaded columns and entities on connect, then a dug block as a blockUpdate, and moves coalesced to the
+// latest per entity (none for one that left in the same flush).
+{
+  const registry = registryFor('1.21.8')
+  const world = new ((worldLoader as any)(registry))().sync
+  world.setColumn(1, -2, new ((chunkLoader as any)(registry))({ minY: -64, worldHeight: 384 }))
+  const zombie = { id: 7, name: 'zombie', position: new Vec3(20, 0, -30), yaw: 0, pitch: 0, width: 0.6, height: 1.95 }
+  const bot: any = Object.assign(new EventEmitter(), { world, entities: { 7: zombie } })
+  const feed = worldFeed(bot)
+  const got: FeedMessage[] = []
+  const off = feed.connect(m => got.push(m))
+  assert.deepEqual(got.map(m => m.type === 'loadChunk' ? [m.type, m.x, m.z] : [m.type, (m as any).id, (m as any).name]), [['loadChunk', 16, -32], ['entity', 7, 'zombie']])
+  assert.equal(typeof (got[0] as any).chunk, 'string')
+  got.length = 0
+  bot.emit('blockUpdate', { position: new Vec3(17, 0, -31) }, { position: new Vec3(17, 0, -31), stateId: 0 })
+  bot.emit('entityMoved', { ...zombie, position: new Vec3(21, 0, -30) })
+  bot.emit('entityMoved', { ...zombie, position: new Vec3(22, 0, -30) })
+  bot.emit('entityMoved', { id: 8, position: new Vec3(0, 0, 0) })
+  bot.emit('entityGone', { id: 8 })
+  feed.flush()
+  assert.deepEqual(JSON.parse(JSON.stringify(got)), [
+    { type: 'blockUpdate', pos: { x: 17, y: 0, z: -31 }, stateId: 0 },
+    { type: 'entity', id: 8, delete: true },
+    { type: 'entity', id: 7, pos: { x: 22, y: 0, z: -30 }, yaw: 0, pitch: 0 }])
+  off()
+  bot.emit('blockUpdate', null, { position: new Vec3(0, 0, 0), stateId: 1 })
+  feed.flush()
+  assert.equal(got.length, 3) // nothing after disconnecting
+  feed.close()
 }
 
 console.log('selfcheck ok')
