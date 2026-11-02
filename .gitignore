@@ -12,3 +12,6 @@ episodes/
 compose.collect.json
 collector.log
 authoring/
+.venv/
+__pycache__/
+.pytest_cache/
