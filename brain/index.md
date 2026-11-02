@@ -29,6 +29,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[full-player-action-api]] (done → [[behaviors-and-guards]]): give code System 2 writes every action a player has (craft, containers, attack, use, eat, chat…), keeping no raw bot, guards and channels
 - [[system-2a-2b]] (done → [[orchestrator-and-builder]]): split System 2 into an orchestrator (2A, custom loop) and a builder (2B, Vercel AI SDK; Luna later) that talk through capability requests and trial windows
 - [[brain-monitor-and-clips]] (done → [[brain-monitor]]): live monitor + Remotion clips showing System 1, System 2 and the builder side by side with the game; fills five trace gaps
+- [[live-deployment]] (done → [[deployment]]): Jeeve live at a URL: public spectate page, a goal box only Joshua can use, on one GCP VM
 - [[tasks/stateful-system-1|stateful-system-1 task]] (doing → [[architecture/stateful-system-1|stateful-system-1]], proposal): System 1 keeps a working memory (commitment, intent, outcomes) and takes on commitments, local recovery and when to escalate; replay done (moot-answer filter + plan/doing memory; persistent doubt rejected; needs defaults and objects replayed), build and bench A/B next
 
 ### Architecture
@@ -44,6 +45,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[brain-monitor]]: the one visual of the three systems (caption, game, System 2 / builder / System 1 with message arrows and the running code): the timeline core, the live monitor on `GET /events`, Remotion clips with speed-ups and captions, `npm run clip <scenario>`, client-look footage from recordings (prismarine-viewer), reels and highlight cuts
 - [[bench-hill-climb]]: three scenes scored by Josh (orchard, workshop, guard), unattended `npm run bench`, a skill library shared across runs, `gaps.ts` (ground truth vs what Jeeve believed), and the round-by-round log of gaps and harness fixes
 - [[architecture/stateful-system-1|stateful-system-1]] (proposal): a working memory rendered into every Jev call, one writer per slot; escalate on persistent doubt, not one close call; stages 2A writes only if needed; needs as System 1's default objective; objects (not voxels or frames) for space and time; replay results
+- [[deployment]]: three Jeeves on one GCP VM (Docker Compose, Caddy, a relay that fans the streams out to viewers); what's public vs. locked (basic auth on POSTs, 25565 tailnet-only), sleep and spend caps, measured cost (~$25/h for three awake), CPU and RAM
 - [[learning]]: decision: context only, no training. Live and cross-episode loops, per-minute traces linked by lineage, agentic search over past traces
 
 ### Research

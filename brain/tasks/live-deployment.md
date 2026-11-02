@@ -2,9 +2,11 @@
 date: 2026-10-12
 tags: [task, infrastructure, deployment, visualization]
 status: active
-progress: todo
+progress: done
 ---
 # Task: Jeeve live at a URL
+
+**Done 2026-11-02** → [[deployment]]: three Jeeves on a GCP VM at `https://35.197.6.238.sslip.io`, watched publicly and steered by Joshua.
 
 **Start a chat with:** "Read `AGENTS.md` and follow it, then work on `brain/tasks/live-deployment.md`."
 

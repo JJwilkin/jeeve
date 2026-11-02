@@ -73,7 +73,7 @@ All three instructions pass, and so do a live guard veto and the local API. Syst
 ## Order after the current work (decided 2026-10-11)
 1. ~~**"Defend me" fixes:**~~ done 2026-10-11.
 2. **Faster e2e:** split the 20-minute e2e into small independent scenarios that run in parallel (each on its own `JEEVE_PORT` and world), plus a quick smoke subset. Do this after the in-flight sessions ([[full-player-action-api]], [[system-2a-2b]]) land, because both add e2e scenarios.
-3. **Online infrastructure:** a hosted server (e.g. GCP), and the ability to spawn one or many agents on running infrastructure somewhere. This comes **before** stage 4's benchmarks, so scenarios and benchmarks run on real infrastructure, not only this laptop.
+3. ~~**Online infrastructure:** a hosted server (e.g. GCP), and the ability to spawn one or many agents on running infrastructure somewhere.~~ Done 2026-11-02 ([[live-deployment]] → [[deployment]]: three Jeeves on a GCP VM, public spectate page). This comes **before** stage 4's benchmarks, so scenarios and benchmarks run on real infrastructure, not only this laptop.
 4. **Stage 4, goals and reward,** plus the first benchmarks (tech-tree ladder, PvP arena), run on that infrastructure. The judge design can be scoped in parallel, as notes only.
 5. **The outer loop** on 2B, once there's a signal to climb.
 
