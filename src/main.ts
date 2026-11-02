@@ -517,8 +517,8 @@ export async function startAgent (opts: AgentOptions) {
     const u = result.usage
     const llm = u ? { model: result.model, provider: 'anthropic', non_cached_input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_read_input_tokens: u.cache_read_input_tokens ?? 0, cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0 } : undefined
     const spanId = recorder.finish(span, 'system2', {
-      attrs: { 'jeeve.system2.trigger': trigger, 'jeeve.system2.latency_ms': Date.now() - t0, 'jeeve.system2.turns': result.turns, 'jeeve.system2.refusal': result.refusal },
-      input: context, output: { decision: d, sql: result.sql }, kind: 'llm',
+      attrs: { 'jeeve.system2.trigger': trigger, 'jeeve.system2.latency_ms': Date.now() - t0, 'jeeve.system2.turns': result.turns, 'jeeve.system2.refusal': result.refusal, 'jeeve.system2.fetches': result.fetches.length },
+      input: context, output: { decision: d, sql: result.sql, fetches: result.fetches }, kind: 'llm',
       llm
     })
     if (llm) budget.spend(usd(PRICES.anthropic, llm)) // after the span ends, so it ends inside its window

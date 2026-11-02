@@ -74,6 +74,12 @@ Two channels, handled the same way:
 - **For failures, refusals and clarifying questions,** System 2 writes the message.
 - **Jev never speaks.**
 
+**Links in an instruction (2026-11-01).** 2A can open a link Joshua sends, e.g. a picture of a build design. It has Anthropic's server-side `web_fetch` for pages and PDFs, and `view_image` for images, which web fetch can't open. `view_image` returns an image block with a URL source, so Anthropic downloads the image and the VM needs no network beyond the API. Then 2A describes what it saw in a `request_capability` to 2B, instead of failing the goal.
+- **Bounded, because fetched content is a prompt-injection surface:** at most 2 links per request, and only links already in the conversation (the instruction, or a page 2A fetched).
+- **A link that isn't an image** fails the whole API request (400), so code turns it into an error result 2A can read, and retries.
+- **Cost:** fetched content and images are billed as ordinary input tokens, so they count toward the spend caps. The `system2` span records them in `jeeve.system2.fetches` and in `output.fetches`.
+- **Opening a link costs one of 2A's 4 turns.** In one of two live runs it used all 4 and never decided.
+
 ## Sleep and spend caps (2026-11-01)
 A live Jeeve costs about $8–15 an hour in model calls, so one not in use sleeps (`src/budget.ts`).
 - **Asleep means no model calls at any tier:** Jev's wakes (heartbeats included), 2A's escalations and 2B's builds are all skipped. Falling asleep abandons the goal tree, stops the body and cancels a build in flight; it wakes with no goal.
