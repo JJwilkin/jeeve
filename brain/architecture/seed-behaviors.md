@@ -54,12 +54,12 @@ There's no separate filter layer in M1:
 | **Jev** | Which option to run right now: which target, whether to fight or keep collecting, pulling back, retrying after `stuck` |
 | **System 2** | Turns an instruction into a success check and a System 1 program (guidance, allowed behaviors, triggers); handles escalations; writes failure and clarification replies ([[system-2]]) |
 
-**Jev re-decides at least every second, not only on events.** It has to react to changes in the surroundings: a mob walking up, lava on the route. The default program ([[system-1]]) covers this:
-- a 1 s heartbeat,
+**Jev re-decides at least every 5 seconds, not only on events.** It has to react to changes in the surroundings: a mob walking up, lava on the route. The default program ([[system-1]]) covers this:
+- a 5 s heartbeat (1 s until 2026-11-02, [[system-1]] → Triggers),
 - event triggers (behavior events, damage, a hostile within 6 blocks, a new directive),
 - a ~5 s event window in the state.
 
-System 2 can shorten the heartbeat down to the 5 calls/s cap when a situation needs it.
+The heartbeat is fixed. System 2 adds watch modules when a situation needs Jev woken sooner.
 
 ## The three instructions end to end
 All three start the same way:

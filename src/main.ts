@@ -494,7 +494,7 @@ export async function startAgent (opts: AgentOptions) {
       triggers,
       instruction: triggers.some(t => t.reason === 'instruction') ? { text: root?.text, from: root?.from } : undefined,
       goals: goals.status(bot),
-      program: { version: version(program), guidance: program.guidance, allowed_behaviors: program.allowed_behaviors, heartbeat_ms: program.triggers.heartbeat_ms },
+      program: { version: version(program), guidance: program.guidance, allowed_behaviors: program.allowed_behaviors },
       fast_model_view: lastView,
       seen_map: seenMap(bot), // everything the bot has seen around it, so the scene doesn't hinge on this turn's scans
       // Where it has looked, and where not yet: the frontier widens from where the instruction came.
@@ -588,7 +588,6 @@ export async function startAgent (opts: AgentOptions) {
         allowed_behaviors: d.program.allowed_behaviors?.map(bare) ?? base.allowed_behaviors,
         triggers: {
           ...base.triggers,
-          heartbeat_ms: Math.min(5000, Math.max(LIMITS.minIntervalMs, d.program.heartbeat_ms ?? base.triggers.heartbeat_ms)),
           watch: (d.program.watch?.map(bare) ?? base.triggers.watch ?? []).filter(n => {
             const ok = modules.get(n)?.kind === 'watch'
             if (!ok) problems.push(`no registered watch module named ${n}`)

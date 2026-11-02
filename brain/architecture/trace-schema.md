@@ -127,7 +127,7 @@ GROUP BY v ORDER BY decides DESC LIMIT 20
 ## Volume
 | Span | Per minute |
 |---|---|
-| `decide` | 60–180 at the default 1 s heartbeat plus triggers; up to 300 at the 5/s cap |
+| `decide` | ~12 from the 5 s heartbeat plus triggers (~20 a minute while things happen); up to 300 at the 5/s cap |
 | `behavior` | about 10 |
 | `system2` | 1–3 |
 | `program` | about 1 |
