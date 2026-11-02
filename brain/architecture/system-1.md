@@ -58,7 +58,7 @@ questions:
 triggers:
   events: [done, stuck, blocked, vetoed, target_lost, damage_taken, new_directive]
   watch:  [{ module: entity_within@1, params: { radius: 6, hostile: true } }]
-  heartbeat_ms: 1000
+  heartbeat_ms: 5000
 escalate_when: { confidence_below: 0.5, noul_above: 0.5 }
 allowed_behaviors: [navigate, follow, track, attack_when_ready, eat, keep_current]
 guidance: "..."
@@ -104,7 +104,7 @@ The smallest scaffold that should work before System 2 tunes anything. It's the 
 - **Questions:**
   - one Choice per channel for single-channel behaviors, plus one joint `body` Choice for whole-body ones (`collect`), with options = allowed behaviors × encoded targets, plus `keep_current` to stop churn. Body answers are applied first, and a body start wins its channels for that call ([[seed-behaviors]]). Option order is shuffled per call, and the order is traced, because the order changes answers ([[jev-measurements]]);
   - one `escalate` Noul.
-- **Triggers:** behavior events (`done`, `stuck`, `blocked`, `vetoed`, `target_lost`), damage taken, a hostile entity within 6 blocks, a new directive, and a 1 s heartbeat.
+- **Triggers:** behavior events (`done`, `stuck`, `blocked`, `vetoed`, `target_lost`), damage taken, a hostile entity within 6 blocks, a new directive, and a 5 s heartbeat (1 s until 2026-11-02: only 8% of heartbeat calls changed anything, so events make the real decisions; the heartbeat is a safety net, and not 2A's to set).
 - **Escalation:** confidence below 0.5 on any question, `escalate` above 0.5, or a typed escalation event from code.
 
 ## How programs are compared

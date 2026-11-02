@@ -130,7 +130,9 @@ export const DEFAULT_PROGRAM: Program = {
   triggers: {
     events: ['done', 'stuck', 'vetoed', 'none_found', 'target_lost', 'target_dead', 'damage_taken', 'new_directive', 'hostile_near'],
     hostile_within: 6,
-    heartbeat_ms: 1000
+    // Events make the decisions that matter; at a 1 s heartbeat only 8% of heartbeat calls changed anything (Jeeve_1,
+    // 10 min, 2026-11-02). Fixed, not 2A's to set: it shortened it to 0.8 s while stuck, which only added calls.
+    heartbeat_ms: 5000
   },
   escalate_when: { confidence_below: 0.5, noul_above: 0.5, ignore_moot: true },
   allowed_behaviors: ['navigate', 'follow', 'track', 'attack_when_ready', 'collect', 'wander', 'glance'], // eat: always (NEEDS_BEHAVIORS)

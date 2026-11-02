@@ -16,7 +16,7 @@ export type Decision = {
   goal: { done_when: CheckSpec | null, escalate_if: CheckSpec[], budget_s: number | null, review_s: number | null, place: number[] | null } | null
   goal_action: 'none' | 'fail' | 'renew'
   push_child: { text: string, done_when: CheckSpec | null, budget_s: number | null } | null
-  program: { guidance: string | null, allowed_behaviors: string[] | null, heartbeat_ms: number | null, watch: string[] | null } | null
+  program: { guidance: string | null, allowed_behaviors: string[] | null, watch: string[] | null } | null
   new_modules: ModuleSource[]
   message: string | null
   to?: string | null // a peer Jeeve to whisper message to; null: the player who gave the instruction
@@ -80,13 +80,12 @@ const TOOLS: Anthropic.Tool[] = [
           ...nullable('object'),
           description: "Change System 1's program for the active goal. null keeps it. Changes revert when the goal closes.",
           additionalProperties: false,
-          required: ['guidance', 'allowed_behaviors', 'heartbeat_ms', 'watch'],
+          required: ['guidance', 'allowed_behaviors', 'watch'],
           properties: {
             watch: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }], description: 'Names of watch modules that wake the fast model when they turn true. null keeps the current list.' },
             guidance: nullable('string', { description: 'Full replacement guidance for the fast model. Concrete and short.' }),
             // No enum: behaviors the builder writes join the list once their trial passes, and validation checks names.
-            allowed_behaviors: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }], description: 'Seed behaviors, or ones the builder wrote whose trial passed.' },
-            heartbeat_ms: nullable('integer', { description: 'How often the fast model re-decides without an event (200–5000).' })
+            allowed_behaviors: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }], description: 'Seed behaviors, or ones the builder wrote whose trial passed.' }
           }
         },
         new_modules: {
