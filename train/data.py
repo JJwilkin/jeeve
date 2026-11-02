@@ -28,10 +28,11 @@ OUTCOMES = ['done', 'stuck', 'vetoed', 'died', 'timeout']
 OUTCOME_OF = {'done': 'done', 'target_dead': 'done', 'stuck': 'stuck', 'target_lost': 'stuck', 'vetoed': 'vetoed',
               'died': 'died', 'timeout': 'timeout'}
 CENSORED = {'timeout', 'episode_end', 'stopped'}  # the action was still running when it was cut off
+CUT = {'episode_end', 'stopped'}  # cut off from outside: where it ended and its health change aren't its own
 POSITION_KEYS = ('place', 'at', 'far', 'floor', 'top', 'near')  # where an action is going, best first (block coords)
 NOT_PARAMS = {*POSITION_KEYS, 'dir', 'yaw', 'id'}  # carried as the target, or meaningless (an entity id)
 P_NUM, P_CAT = 16, 48  # parameter vector: hashed numeric slots + hashed categorical buckets
-TARGET = 9  # rel x y z /16, has position, dir x z, has direction, elapsed /20
+TARGET = 8  # rel x y z /16, has position, dir x z, has direction, elapsed /20
 SELF = 14  # vel xyz, facing xz, pitch, position in the feet block xyz, on ground, in water, in lava, health, food
 ENT = 6  # rel pos /16, vel
 NONE = 'none'  # the action id of a dense row between actions
@@ -55,6 +56,9 @@ def episode_rows(ep):
     if n == 0:
         return None, []
     actions, starts, kept = [], [], {}
+    # the kit gave placeable blocks: any kit item that's a block, except torches (collect/bot.ts KIT)
+    solid = {b for c, bs in h.get('class_blocks', {}).items() if c != 'light' for b in bs}
+    blocks = any(k.get('item') in solid for k in h.get('kit', []))
     for k, a in enumerate(h.get('actions', [])):
         key = outcome_key(a.get('outcome'))
         if key == 'error' or a.get('end_step') is None:
@@ -68,7 +72,7 @@ def episode_rows(ep):
             'event': key not in CENSORED, 'duration_s': (a.get('ms') or 0) / 1000,
             'end_disp': (s['pos'][j] - s['pos'][i]).tolist(),
             'dhealth': float(-s['health'][i] if key == 'died' else s['health'][j] - s['health'][i]),
-            'scene': h.get('scene', 'natural'), 'biome': h.get('biome', ''),
+            'full': key not in CUT, 'blocks': blocks,
         })
         starts.append(i)
     # a dense row's running action: recorded index → kept index (−1, between actions, is the last entry)
@@ -147,8 +151,10 @@ def build(episodes, shards, workers=8):
 
 # ---------------------------------------------------------------- the frame: xz symmetries of the views
 # A symmetry g = (swap, flip_x, flip_z): swap x and z, then mirror x and/or z about the centre of the feet block.
-# Every view's x and z start the same distance from the feet, so these are exact on the grids; a mirror keeps the
-# feet block in place and fills the one slice it pushes past the edge with 'unloaded'. Rotations are the four with
+# Every view's x and z start the same distance from the feet, so these are exact on the near and far grids; a mirror
+# keeps the feet block in place and fills the one slice it pushes past the edge with 'unloaded'. The mid view's cells
+# are 2 blocks wide with the feet at a cell's low edge, so no mirror about the feet block is exact there: its cells
+# land one block off (half a cell). ponytail: accepted for a coarse view; exact would need mid cells centred on the feet. Rotations are the four with
 # an even number of mirrors (counting swap as one).
 
 ROTATIONS = [(False, False, False), (True, True, False), (False, True, True), (True, False, True)]  # 0°, 90°, 180°, 270°
@@ -301,22 +307,21 @@ class Rows(torch.utils.data.Dataset):
         a = int(self.shards[k].a['act'][r])
         return self.shards[k].actions[a] if a >= 0 else None
 
-    def __getitem__(self, i, params=None):
+    def __getitem__(self, i):
         k, r = self.index[i]
         # torch's generator, seeded per DataLoader worker (a numpy one would repeat across forked workers)
         rng = np.random.default_rng(int(torch.randint(1 << 62, ()))) if self.augment else None
-        return sample(self.shards[k], r, self.actions, rng, params)
+        return sample(self.shards[k], r, self.actions, rng)
 
 
-def sample(sh, r, actions, rng=None, params=None):
-    """Row r of a shard → model inputs and labels in the action's frame (see `canonical`). params: replaces the
-    action's parameters (to score alternatives)."""
+def sample(sh, r, actions, rng=None):
+    """Row r of a shard → model inputs and labels in the action's frame (see `canonical`)."""
     a = sh.a
     ai = int(a['act'][r])
     act = sh.actions[ai] if ai >= 0 else None
     start = bool(a['is_start'][r])
     pos = np.asarray(a['pos'][r], dtype=np.float64)
-    params = params if params is not None else (act['params'] if act else {})
+    params = act['params'] if act else {}
     rel, d = target_of(params, pos) if act else (None, None)
     directed = d is not None
     g = canonical(d if directed else facing(float(a['look'][r][0])))
@@ -332,8 +337,8 @@ def sample(sh, r, actions, rng=None, params=None):
         tgt[3] = 1
     if directed:
         tgt[4:6] = apply_vec(g, d)
-        tgt[7] = 1
-    tgt[8] = a['elapsed'][r] / 20
+        tgt[6] = 1
+    tgt[7] = a['elapsed'][r] / 20
     yaw, pitch = float(a['look'][r][0]), float(a['look'][r][1])
     fl = a['flags'][r]
     selfv = np.concatenate([apply_vec3(g, np.asarray(a['vel'][r], dtype=np.float32)), apply_vec(g, facing(yaw)), [pitch],
@@ -351,7 +356,7 @@ def sample(sh, r, actions, rng=None, params=None):
         'params': param_vector(params), 'target': tgt,
         # labels
         'is_start': start, 'outcome': np.int64(act['outcome'] if start else -1),
-        'event': bool(act['event']) if start else False, 'duration_s': np.float32(act['duration_s'] if start else 0),
+        'event': bool(act['event']) if start else False, 'full': bool(act['full']) if start else False, 'duration_s': np.float32(act['duration_s'] if start else 0),
         'end_disp': (apply_vec3(g, np.array(act['end_disp'])) / 16 if start else np.zeros(3)).astype(np.float32),
         'dhealth': np.float32(act['dhealth'] / 20 if start else 0),
         'disp1': (apply_vec3(g, np.asarray(a['disp1'][r])) / 16).astype(np.float32),

@@ -77,39 +77,52 @@ def report(pred, actions, t):
     return rows
 
 
+# Which methods a seeker could have drawn: the `fits` in collect/actions/{cross_water,reach_ledge}.ts (any method not
+# named fits always). blocks: the kit gave placeable blocks; blocks picked up later are missed.
+FITS = {
+    'jump_gap': lambda p, blocks: p['dist'] <= 3 and p['width'] <= 3 and p['far'][1] - p['near'][1] <= 1,
+    'bridge': lambda p, blocks: blocks and 0 in p['dir'] and p['width'] <= 8,
+    'pillar_up': lambda p, blocks: blocks,
+}
+
+
 @torch.no_grad()
-def top_ranked(model, ds, device):
+def top_ranked(model, ds, device, t=1.0):
     """Whether the top-ranked option succeeds, for actions that pick a method (cross_water, get_down_cliff,
-    reach_ledge). The collector draws the method at random, so the success rate over samples whose method is the
-    model's top pick estimates the success rate of following the model (replay; Li et al. 2011)."""
+    reach_ledge). The collector draws the method uniformly among those that fit, so over the samples whose method is
+    the model's top pick among the fitting ones, each weighted by how many fit (1 / its chance of being drawn), the
+    success rate estimates following the model (replay; Li et al. 2011)."""
     model.eval()
     methods = {}
-    picked = []
     for i in range(len(ds)):
         a = ds.action_of(i)
-        if a and 'method' in a['params'] and a['outcome'] >= 0:
+        if a and 'method' in a['params']:
             methods.setdefault(a['name'], set()).add(a['params']['method'])
-            picked.append(i)
     per = {}
-    for i in picked:
+    for i in range(len(ds)):
         a = ds.action_of(i)
-        options = sorted(methods[a['name']])
-        if len(options) < 2:
+        if not (a and 'method' in a['params'] and a['outcome'] >= 0):
             continue
-        x = {k: torch.as_tensor(np.asarray(v))[None].to(device) for k, v in ds[i].items()}
-        tokens = model.encoder(*(x[k] for k in STATE)).expand(len(options), -1, -1)
-        params = torch.as_tensor(np.stack([param_vector({**a['params'], 'method': m}) for m in options])).to(device)
-        o = model.query(tokens, x['action'].expand(len(options)), params, x['target'].expand(len(options), -1))
-        best = options[int(o['outcome'].softmax(1)[:, 0].argmax())]
-        r = per.setdefault(a['name'], {'n': 0, 'success': 0, 'n_top': 0, 'success_top': 0})
+        options = [m for m in sorted(methods[a['name']]) if FITS.get(m, lambda p, b: True)(a['params'], a['blocks'])]
+        if a['params']['method'] not in options:  # the fit rules above disagree with the collector's
+            continue
+        best = options[0]
+        if len(options) > 1:
+            x = {k: torch.as_tensor(np.asarray(v))[None].to(device) for k, v in ds[i].items()}
+            tokens = model.encoder(*(x[k] for k in STATE)).expand(len(options), -1, -1)
+            params = torch.as_tensor(np.stack([param_vector({**a['params'], 'method': m}) for m in options])).to(device)
+            o = model.query(tokens, x['action'].expand(len(options)), params, x['target'].expand(len(options), -1))
+            best = options[int((o['outcome'] / t).softmax(1)[:, 0].argmax())]
+        r = per.setdefault(a['name'], {'n': 0, 'success': 0, 'n_top': 0, 'w_top': 0, 'success_top': 0})
         ok = a['outcome'] == 0
         r['n'] += 1
         r['success'] += ok
         if a['params']['method'] == best:
             r['n_top'] += 1
-            r['success_top'] += ok
+            r['w_top'] += len(options)
+            r['success_top'] += len(options) * ok
     return {k: {'n': r['n'], 'random_pick_success': r['success'] / r['n'], 'n_top_pick': r['n_top'],
-                'top_pick_success': r['success_top'] / r['n_top'] if r['n_top'] else None} for k, r in per.items()}
+                'top_pick_success': r['success_top'] / r['w_top'] if r['w_top'] else None} for k, r in per.items()}
 
 
 def evaluate(model, root, actions, device, workers=0):
@@ -122,7 +135,7 @@ def evaluate(model, root, actions, device, workers=0):
     t = fit_temperature(pc['logits'][has], pc['outcome'][has]) if has.any() else 1.0
     return {'temperature': t, 'calibration_seeds': sorted(cal), 'test_seeds': sorted(test),
             'per_action': report(predict(model, ds_test, device, workers=workers), actions, t),
-            'top_ranked': top_ranked(model, ds_test, device)}
+            'top_ranked': top_ranked(model, ds_test, device, t)}
 
 
 def load(path, device='cpu'):

@@ -8,7 +8,7 @@ from data import ENT, OUTCOMES, P_CAT, P_NUM, SELF, TARGET
 
 BIN_S, BINS = 0.5, 40  # the duration head's hazard bins, out to the 20 s action limit
 DENSE = 8  # disp1 xyz, disp3 xyz, veto1 logit, damage3
-CONFIGS = {  # ~parameters (tests/test_model.py checks the counts)
+CONFIGS = {  # ~parameters (tests/test_train.py checks the counts)
     'tiny': dict(d=32, layers=1, heads=2, q_layers=1),
     '2m': dict(d=160, layers=4, heads=5, q_layers=1),
     '5m': dict(d=224, layers=6, heads=7, q_layers=1),
@@ -105,9 +105,10 @@ def survival_loss(hazard, duration_s, event):
 
 
 def expected_duration(hazard):
-    """Mean duration out to 20 s (Σ survival × bin width)."""
+    """Mean duration out to 20 s: Σ survival × bin width, with an action that ends in a bin counted to its middle."""
     surv = torch.cumsum(F.logsigmoid(-hazard), 1).exp()  # Π(1 − h), as a sum: ONNX has no cumprod
-    return BIN_S * torch.cat([torch.ones_like(surv[:, :1]), surv[:, :-1]], 1).sum(1)
+    before = torch.cat([torch.ones_like(surv[:, :1]), surv[:, :-1]], 1)
+    return BIN_S * (before + surv).sum(1) / 2
 
 
 def masked_mean(x, m):
@@ -118,13 +119,14 @@ def masked_mean(x, m):
 def losses(out, b):
     """Each head's loss, masked to the rows that have its label."""
     start = b['is_start']
+    full = start & b['full']  # not cut off by the episode's end
     dense = out['dense']
     huber = lambda p, y: F.smooth_l1_loss(p, y, reduction='none', beta=0.1)
     return {
         'outcome': masked_mean(F.cross_entropy(out['outcome'], b['outcome'].clamp(min=0), reduction='none'), b['outcome'] >= 0),
         'duration': masked_mean(survival_loss(out['hazard'], b['duration_s'], b['event']), start),
-        'disp': masked_mean(huber(out['disp'], b['end_disp']).sum(1), start),
-        'health': masked_mean(huber(out['health'], b['dhealth']), start),
+        'disp': masked_mean(huber(out['disp'], b['end_disp']).sum(1), full),
+        'health': masked_mean(huber(out['health'], b['dhealth']), full),
         'disp1': masked_mean(huber(dense[:, 0:3], b['disp1']).sum(1), b['m1']),
         'disp3': masked_mean(huber(dense[:, 3:6], b['disp3']).sum(1), b['m3']),
         'veto1': masked_mean(F.binary_cross_entropy_with_logits(dense[:, 6], b['veto1'], reduction='none'), b['m1']),

@@ -56,7 +56,8 @@ function episode (seed: number, k: number) {
   }
   const header = {
     bot: `fixture${k}`, seed, biome: 'plains', scene: 'river', start: new Date(0).toISOString(), end: 'episode_end',
-    classes: CLASSES, items: ['cobblestone'], entity_types: ['zombie'], vetoes: ['drop of 4'],
+    classes: CLASSES, class_blocks: { stone: ['stone', 'cobblestone'], light: ['torch'] }, items: ['cobblestone'],
+    kit: k % 2 ? [{ item: 'cobblestone', count: 16 }, { item: 'bread', count: 2 }] : [{ item: 'torch', count: 4 }], entity_types: ['zombie'], vetoes: ['drop of 4'],
     actions: acts.map(([name, params, start_step, end_step, outcome]) => ({ name, params, start_step, end_step, outcome, ms: (end_step - start_step) * 200 }))
   }
   return encodeEpisode(header, steps, far)

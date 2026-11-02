@@ -21,6 +21,8 @@ def test_shard_labels(shards):
                          ('wander', OUTCOMES.index('timeout'), False), ('bridge', -1, True),
                          ('cross_water', OUTCOMES.index('vetoed'), True), ('walk_raw', -1, False)]
     assert len(sh.actions) == 12 and sh.n == 12 + 2 * 30
+    assert [sh.actions[k]['blocks'] for k in (0, 6)] == [False, True]  # a torch isn't a placeable block
+    assert [a['full'] for a in sh.actions[:6]] == [True] * 5 + [False]  # walk_raw was cut off by the episode's end
     nav = sh.actions[0]
     assert nav['duration_s'] == pytest.approx(9.8) and nav['end_disp'] == pytest.approx([49 / 5, 0, 0])  # steps 0 → 49
     dense = ~np.asarray(sh.a['is_start'])
@@ -32,9 +34,8 @@ def test_symmetries_are_exact():
     rng = np.random.default_rng(0)
     near = rng.integers(0, 60, (16, 16, 16)).astype(np.uint8)
     for g in SYMMETRIES:
-        a = apply_grid(g, near, 0, 2, 255)
         # the feet column stays put under every symmetry
-        assert (a[8, :, 8] == near[8, :, 8]).all()
+        assert (apply_grid(g, near, 0, 2, 255)[8, :, 8] == near[8, :, 8]).all()
     # 90°: block (+3, 0) ahead goes to (0, +3) or (0, −3), and a vector follows the same way
     g = ROTATIONS[1]
     v = apply_vec(g, np.array([3.0, 0.0]))
@@ -80,7 +81,7 @@ def test_survival_loss_prefers_the_right_time():
     late[0, 30] = 8
     d, ev = torch.tensor([1.2]), torch.tensor([True])
     assert survival_loss(early, d, ev) < survival_loss(late, d, ev)
-    assert expected_duration(early) == pytest.approx(1.5, abs=0.01)  # counts the end bin whole
+    assert expected_duration(early) == pytest.approx(1.25, abs=0.01)  # the 1–1.5 s bin's middle
     # a timeout at 20 s only says it survived: nothing to prefer between the two late ones
     assert survival_loss(torch.full((1, 40), -6.0), torch.tensor([20.0]), torch.tensor([False])) < 0.1
 

@@ -30,7 +30,7 @@ How `train/` turns the collector's episodes ([[world-model-collector]]) into the
 - **Dropped or unlabelled:**
   - `error` drops the action;
   - `none_found` gets no outcome label, so it stays out of the success target; its duration and displacement still count;
-  - `episode_end` and `stopped` get no outcome, and their duration is censored.
+  - `episode_end` and `stopped` get no outcome, their duration is censored, and they're left out of the displacement and health losses (where they ended isn't their own).
 - **Dense labels:** displacement 1 s and 3 s on, a veto within 1 s, damage within 3 s. A dense row carries the action running then (with the time elapsed in it), or `none`.
 
 ## The frame
@@ -38,7 +38,7 @@ How `train/` turns the collector's episodes ([[world-model-collector]]) into the
   - the target is the parameters' position (`place`, `at`, `far`, `floor`, `top`, `near`) or direction (`dir`, `yaw`);
   - undirected actions (and `flee`, for now) use the bot's facing.
 - **Only the four 90° rotations,** exact on the voxel grids. The residual (±45°) is in the target's direction vector.
-- **Mirrors are about the centre of the feet block,** so the feet stay at the same token in every frame. The one slice a mirror pushes off the grid becomes "unloaded".
+- **Mirrors are about the centre of the feet block,** so the feet stay at the same token in every frame. The one slice a mirror pushes off the grid becomes "unloaded". This is exact for near and far; the mid view's 2-block cells land one block off (half a cell), which is accepted for a coarse view.
 - **Augmentation:**
   - directed actions: a random mirror across the target axis, which keeps the target on +x;
   - undirected actions: any of the eight symmetries.
@@ -84,7 +84,7 @@ Entity types and held items are crc32-hashed into 256 buckets, so a new name nee
   - AUROC;
   - the success rate in the top fifth by predicted success;
   - the duration error on actions that ended by themselves.
-- **Whether the top-ranked option succeeds.** This is measured on the actions that draw a method at random (cross_water, get_down_cliff, reach_ledge), by replay: the success rate over the samples whose method was the model's top pick.
+- **Whether the top-ranked option succeeds.** This is measured on the actions that draw a method at random (cross_water, get_down_cliff, reach_ledge), by replay: the model ranks only the methods that fit (the collector's `fits`, mirrored in `evaluate.py`; whether the kit had blocks stands in for `placeable`), and the success rate is taken over the samples whose method was its top pick, each weighted by how many methods fit.
 - **The baseline is scored on the same half.**
 
 ## Export

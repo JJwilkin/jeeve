@@ -6,11 +6,11 @@
 #
 # From the Mac, after Joshua's yes (GPU quota for one L4 in us-west1 is approved):
 #   g() { gcloud --configuration jeeve --quiet "$@"; }
-#   # a Deep Learning VM image with the NVIDIA driver; check the current family with
+#   # a Deep Learning VM image with NVIDIA driver 580+ (the locked torch wheels are CUDA 13); check the families with
 #   #   g compute images list --project deeplearning-platform-release --filter='family~common-cu' --format='value(family)'
 #   g compute instances create jeeve-train --zone us-west1-b --machine-type g2-standard-8 \
 #     --accelerator type=nvidia-l4,count=1 --maintenance-policy TERMINATE \
-#     --image-family common-cu128-ubuntu-2204-nvidia-570 --image-project deeplearning-platform-release \
+#     --image-family common-cu129-ubuntu-2404-nvidia-580 --image-project deeplearning-platform-release \
 #     --boot-disk-size 150GB --boot-disk-type pd-ssd --scopes storage-full --tags jeeve-train \
 #     --max-run-duration 8h --instance-termination-action STOP
 #   g compute firewall-rules create jeeve-train-iap-ssh --network default --direction INGRESS \
@@ -43,6 +43,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv sync --locked --no-dev
+uv run python -c "import torch; assert torch.cuda.is_available(), 'torch sees no GPU (driver too old for its CUDA?)'; print(torch.__version__, torch.version.cuda)"
 
 gcloud storage rsync -r --exclude='^logs/' "$TRAIN_DATA" "$WORK/episodes" # ~3 GB
 uv run python data.py build "$WORK/episodes" "$WORK/shards" 8
