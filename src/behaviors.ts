@@ -280,7 +280,7 @@ export class Channels {
     const slot: Slot = { key, runId: `r-${++this.runs}`, behavior, version: spec.version ?? 1, channels: spec.channels, status: 'running', run: { stop () {} }, emit: () => {}, target, decidedBy, pinned: opts.pinned, startedAt: Date.now() }
     slot.emit = (event, terminal = true) => {
       if (slot.status !== 'running') return
-      if (terminal) slot.status = event
+      if (terminal) { slot.status = event; slot.run.stop() } // a vetoed navigate kept its goal and pushed on (river, 2026-11-02)
       this.hooks.event(slot, event)
       if (terminal) this.hooks.end(slot, event.split(' ')[0])
     }

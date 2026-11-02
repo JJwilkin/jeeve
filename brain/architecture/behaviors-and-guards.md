@@ -32,6 +32,8 @@ These are physics checks (position relative to the edge, the block type below), 
 
 - **On by default; System 2 can lift one on purpose:** "drop into the water below", "pearl across the gap".
 - **A veto is an event.** Jev learns its choice was blocked instead of watching it silently do nothing.
+- **A terminal event (`vetoed`, `stuck`, `done`…) also stops the run.** A vetoed `navigate` used to keep its pathfinder goal and push into the same drop ~20 times a second; Jeeve_1 stood at a river for 10 minutes that way (2026-11-02). Authored runs keep their non-terminal veto path (`onVeto`) and can still recover.
+- **The pathfinder plans no drop the guard would veto.** Mineflayer-pathfinder plans drops of any height into water by default (`infiniteLiquidDropdownDistance`); the guard only accepts water within `MAX_DROP + 1`, so that's turned off in `guardedMovements`, and `reachable()` stops promising those routes too (same river).
 
 ## Runtime-authored behaviors
 The library isn't fixed. When System 2 finds a missing capability ("I need to ride a boat"), it writes a new behavior. This is Voyager's skill library ([[mindcraft-and-voyager]]) moved down to the motor level. It fits "no training": learned knowledge lives in context (guidance) and in code (behaviors).
