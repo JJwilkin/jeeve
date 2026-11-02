@@ -60,6 +60,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[realtime-landscape]]: fast, smart, general: pick two. Scripted bots vs. pixel policies vs. LLM agents, why nobody has combined them, and the gap Jeeve targets
 - [[fast-bots]]: how scripted bots (mineflayer-pvp, KillAura, Baritone) perceive and decide: tick timers, filter→sort→act, A* with hand-tuned costs. Physics rules vs. strategy rules.
 - [[mineflayer-plugin-compat]]: which server version the seed plugins work on (1.21.10, or 26.1.2 with a one-line physics fix), why 1.21.11+ stalls, and which channels pathfinder, pvp and collectblock really drive
+- [[3d-world-representation]]: why 2A got stuck at a river (no terrain in its view, `reachable` disagreeing with the guards), prior art for 3D understanding (MineWorld and Oasis, Memory/Geometry Forcing, Dreamer 4, Hydra, SayPlan, VoxPoser, VSI-Bench), and the proposal: a region graph code builds from the voxel memory, which 2A plans over
 - [[sota-minecraft-agents]]: survey of ~30 Minecraft agents (2023 → Oct 2026), grouped by family, action level, and whether the world waits for the model. What's unsolved.
 - [[peam]]: slow GPT-4o distilled into a fast Qwen3-VL-8B over Mineflayer. The closest Minecraft precedent for System 2 → System 1 distillation.
 - [[openha-crossha]]: no single action level wins; learning which level to use per step does. Evidence for the primitives question.
