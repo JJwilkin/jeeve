@@ -172,8 +172,13 @@ Vetoes, failures and deaths are kept on purpose: they're the "this won't work he
    - the hand-written actions, the noise and random input, the scheduler, the coverage report;
    - **2B authors bridge, swim across and shelter** on the smoke VM, against the 20-scene validation set. *The harness is built (`collect/author.ts`, `deploy/collect/author.sh`; [[world-model-collector]] → "2B's actions") and was tested end to end with a stubbed builder on the dev server. The real run (keys on the smoke VM, ~$3–8 expected, $25 cap) is still to do;*
    - a second smoke run with everything on.
-3. **The big run,** after the quota increase.
-4. **Training** (separate decision): a no-neural-net baseline first (decision trees on hand-built features), then Tier 1, tested on the held-out seeds and on the river scene against the code-only baseline.
+3. **The big run,** after the quota increase. *Started 2026-11-02 18:28 UTC on `jeeve-collect` (c2d-standard-32, 8 servers × 8 bots, 60 seeds), into `gs://jeeve-worlddata/v3`; `v1/` holds smoke run 1.*
+4. **Training** (separate decision): a no-neural-net baseline first (decision trees on hand-built features), then Tier 1, tested on the held-out seeds and on the river scene against the code-only baseline. Decided with Joshua, 2026-11-02:
+   - **True state, no handicap:** the model trains on the server's views as recorded, and live Jeeve reads the chunks the server sends in the same way. Masking to what a player could see can come later.
+   - **One view builder:** live inference calls the recorder's view code (`collect/recorder.ts`) on the live bot, giving the same byte layout; Python only reads it.
+   - **Sizes:** train ~2M, 5M and 15M parameters on one L4 and keep the best by held-out calibration. ~160k labelled actions (one per ~31 steps) cap the outcome head; a dense extra objective over all 5M steps (where the bot is 1 s and 3 s later, vetoes, damage) is what can use the larger sizes.
+   - **Durations are censored at 20 s:** a survival-style loss, not plain regression.
+   - **Defaults, not yet questioned:** the action is an input (a query against the encoded state, so many options score for the cost of one); samples are rotated so the action's target points one way, with rotations and mirrors as augmentation; `error` outcomes are dropped, and `none_found` is left out of the success head; temperature scaling on the held-out seeds.
 5. **Joshua's play** (later): an observer bot in spectator mode on the Jeeve server records his sessions in the same format, for demonstrations and fine-tuning ([[3d-world-representation]]).
 
 ## Safety (outward-facing, so confirm first)
