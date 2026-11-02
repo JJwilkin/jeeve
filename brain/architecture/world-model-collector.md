@@ -16,6 +16,7 @@ What [[world-model-data]] phase 1 built in `collect/`, and what the first local 
 | `collect/bot.ts` | One bot per process: teleport + kit over RCON, the scheduler, one file per episode |
 | `collect/main.ts` | Starts the bot processes, rotates each server's time and weather every 10 min, starts Chunky, stops at the step target |
 | `collect/compose.ts`, `deploy/collect/run.sh` | The Compose file for N Paper servers + the collector, and the VM-side run (copy to the bucket every 10 min, power off at the end) |
+| `collect/author.ts`, `collect/author-stub.ts`, `deploy/collect/author.sh` | 2B's authoring harness for bridge, swim across and shelter (below) |
 | `collect/read_episode.py`, `collect/check.ts` | The numpy reader, and checks (`npm run collect:check [file]`) that compare it with the TypeScript decoder |
 
 ## Format
@@ -37,6 +38,16 @@ What [[world-model-data]] phase 1 built in `collect/`, and what the first local 
 - **Noise while an action runs:** yaw wobbles, an extra jump, a brief forward release, a pause. Each step records which kinds were injected (`noise`).
 - **Outcomes:** the first terminal end of the action's runs (done, stuck, none_found, vetoed, target_dead, target_lost…), or `timeout` (its own limit, ≤20 s), `episode_end`, `died`, `stopped`.
 - **Episode start:** `spreadplayers` (surface only, never in a liquid; retried up to 10 times), clear, heal, feed, then a random kit (blocks, a tool, a sword, food, torches).
+
+## 2B's actions: the authoring harness (phase 2)
+`collect/author.ts` (`npm run author -- [bridge,swim_across,shelter] [--stub]`) has 2B write bridge, swim across and shelter by calling `build()` (`src/builder.ts`) with a capability request and a pass check, as 2A would. It drives its own bot (named Jeeve, since `scripts/scenes.ts` addresses it by name) on one superflat Paper server, through RCON, and runs drafts through `Channels` + `authoredSpec` under the guards, like the collector.
+- **Scenes:** bridge alternates river and ravine (`crossingScene(kind, false, seed)`: no way round, 32 cobblestone); swim across uses rivers; shelter is open superflat with 0–2 trees, a random wall or hut template, size 3–5 and building block. Validation seeds are 1–20; practice seeds (one per trial) are `1000 + 10·round + trial`, so trials never see a validation scene.
+- **Targets** (passed as-is to the code): bridge `{ name, count, dir: [dx, dz] }` (count = the gap's width in validation), swim `{ at: [x, y, z] }` (the far-bank goal block), shelter `{ name, size, template }`. `timeout_s` ≤ 20, the collector's per-action limit.
+- **Pass checks** are TypeScript functions in `author.ts`; their source goes into 2B's brief as `pass_when.code`, so 2B reads exactly what judges it. Bridge: every gap column has a block at bank level and the bot stands dry on the far side. Swim: the bot was in water and ends dry on the aim block's level within 2.5 blocks. Shelter: a wall run of `size` columns 2 high, or (hut) a 4-way flood fill from the feet can't get further than `size` and every reachable cell is roofed. As in live trials, only a run that returns `done` is judged.
+- **The loop:** a round is one `build()`; the first trial that passes ends it, and that draft runs on all 20 validation scenes. At ≥ 50% the action is written to `collect/actions/<name>.ts` (the module only, with the pass rate in a header; the collector's `fits`/`target` wrapper is separate). Below it, or if no trial passed, the next round's brief carries the last draft (as a library entry) and the evidence: the passing scenes, up to 6 failing ones with their end, error, state and last 15 API calls, and the rest in one line each. Up to 3 rounds (`AUTHOR_ROUNDS`), and a dollar cap (`AUTHOR_MAX_USD`, default 25) that aborts the build.
+- **Output:** `authoring/<session>.json` (per round: trials, per-scene pass/fail with the failures' last calls, cost) and the builder's trace, to Judgment when keys are set (project `JEEVE_PROJECT`, default `jeeve-test`) and to `traces/<session>.jsonl` always.
+- **On the VM:** `deploy/collect/author.sh` starts a superflat Paper container and runs `author.ts` in the `jeeve` image. The keys come down ssh's stdin ahead of the script and reach Node through a pipe (`--env-file=/dev/stdin`), so they're never in a file, a command line or the container config.
+- **`--stub`** swaps the model for `MockLanguageModelV4` replaying canned drafts (`collect/author-stub.ts`), so the whole loop runs without model calls.
 
 ## Measured (local, 2026-11-02, Apple-silicon Mac; one Paper 26.1.2 server, normal terrain, no Chunky)
 Two bots for 8 episodes, then one bot for 2 (2 × 4 min + 2 min):

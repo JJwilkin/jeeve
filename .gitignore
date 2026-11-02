@@ -11,3 +11,4 @@ bench/logs/
 episodes/
 compose.collect.json
 collector.log
+authoring/

@@ -170,7 +170,7 @@ Vetoes, failures and deaths are kept on purpose: they're the "this won't work he
 2. **Variety and authoring:**
    - the seed and biome sampler, terrain pre-generation, the built stress scenes;
    - the hand-written actions, the noise and random input, the scheduler, the coverage report;
-   - **2B authors bridge, swim across and shelter** on the smoke VM, against the 20-scene validation set;
+   - **2B authors bridge, swim across and shelter** on the smoke VM, against the 20-scene validation set. *The harness is built (`collect/author.ts`, `deploy/collect/author.sh`; [[world-model-collector]] → "2B's actions") and was tested end to end with a stubbed builder on the dev server. The real run (keys on the smoke VM, ~$3–8 expected, $25 cap) is still to do;*
    - a second smoke run with everything on.
 3. **The big run,** after the quota increase.
 4. **Training** (separate decision): a no-neural-net baseline first (decision trees on hand-built features), then Tier 1, tested on the held-out seeds and on the river scene against the code-only baseline.
