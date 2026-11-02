@@ -54,9 +54,9 @@ What [[world-model-data]] phases 1 and 2 built in `collect/`, and what the first
   - Shelter: 15 of 20 (75%); all 5 failures were huts of size 4–5 that ran past the 20 s limit.
   - About 10 s a scene, so a 20-scene validation takes 3–4 min.
 
-## Hand-written actions (phase 2)
+## Hand-written and 2B's actions (phase 2)
 - **One file each in `collect/actions/`,** each exporting an `Authored`: its source, `fits` (from the features) and `target` (its random parameters). The code is a string run in the behavior sandbox, on all three channels (the only layout with legs and aim together).
-  - **Shared helpers** (`collect/actions/common.ts`: passable blocks, `walkTo` a column's centre on raw controls, a stall check, the best tool) are **inlined as source into each action** (once per seeker, however many methods it has), so each stays self-contained and could go into Jeeve's library unchanged.
+  - **Shared helpers** (`collect/actions/common.ts`: passable blocks, `walkTo` a column's centre on raw controls, a stall check, the best tool) are **inlined as source into each action** (and into each seeker method's own source), so each stays self-contained and could go into Jeeve's library unchanged.
   - `collect/check.ts` compiles every one as an authored behavior.
 - **The actions** (outcomes `done`/`stuck`/`none_found` from the code, `vetoed` when a veto goes uncaught, `timeout` at 20 s):
 
@@ -71,7 +71,7 @@ What [[world-model-data]] phases 1 and 2 built in `collect/`, and what the first
 | `tunnel` | 3–15 blocks, cardinal direction | always | every block dug and walked |
 | `jump_gap` | a gap: direction, distance, width 1–3 | `gaps` | landed past it, at most a block lower |
 | `flee` | a mob, distance 8–20 | mobs | that far from it, or it's gone |
-| `cross_water` | a method: `jump_gap` (≤ 3 wide and ≤ 3 away, run-up from where it stands, far bank ≤ 1 up), `navigate` | `waters` | that method's done |
+| `cross_water` | a method: `jump_gap` (≤ 3 wide and ≤ 3 away, run-up from where it stands, far bank ≤ 1 up), `navigate`, 2B's `bridge` (straight, ≤ 8 wide), 2B's `swim_across` | `waters` | that method's done |
 | `get_down_cliff` | a method: `navigate`, `climb_down_safely` | `drops` | that method's done |
 | `reach_ledge` | a method: `navigate`, `pillar_up` (then a step onto it) | `ledges` | that method's done |
 
@@ -81,7 +81,13 @@ What [[world-model-data]] phases 1 and 2 built in `collect/`, and what the first
   - **`climb_down_safely`:** the route-finder first, then digging straight down. The guards allow a dig under the feet only while there's a floor within 3 below it. A veto of the route-finder at the edge counts as "no route", not as the outcome.
 - **Feature-seeking actions** (`seeker` in `common.ts`) pick a feature and a method that fits it. Their code walks to the block before the feature (`near`), unless the method makes its own run-up, then runs the method's code (another action's source, inlined) on a target made from the feature.
   - Not `step_down` for cliffs: walking off 4+ is always vetoed.
-  - **2B's bridge and swim across join `cross_water`'s method list** once they're in `collect/actions/` (the slot is marked in `cross_water.ts`).
+  - **Each method gets its own source** (helpers, the walk to `near`, and that method only), and the target picks it. So 2B's long code (swim_across is 5.8k characters) stays under the library's 8,000 limit.
+- **2B's actions** (`collect/author.ts`, smoke VM, 2026-11-02, $0.92; one round each) are committed unchanged as `bridge.ts`, `swim_across.ts` and `shelter.ts`, each exporting its `source`. `from_2b.ts` gives them `fits` and targets in the shapes their trials used:
+  - `bridge` `{ name, count, dir }`: a straight gap or water ≤ 8 wide, blocks in the kit. Validation: 100%.
+  - `swim_across` `{ at }`: the far bank's ground block. Validation: 60%; the fails are wide, deep rivers with a high far bank.
+  - `shelter` `{ name, size 3–5, template wall or hut }`: blocks in the kit. Validation: 100%.
+  - bridge and swim_across start from where the bot stands, as in their trials (`swim_across` threw from the bank's edge).
+  - 2B's code throws on some failures (`stuck: …`) instead of returning, so those runs end as `error`.
 - **The terrain queries** (`terrain()` in `collect/actions.ts`) run once per action choice on the recorder's view (`rec.at`, a block's class).
   - **The walk:** up to 12 blocks out in each of 8 directions, from the bot's own ground (so mid-jump doesn't read as a step down). Each column's ground is read at the walk's current level: below the feet if the feet and head blocks there are open (a canopy overhead isn't a ledge), else the first block up to 4 higher with two open blocks above it. A walk stops at its first feature, at a wall (a rise of 5+), at lava, at an unloaded chunk, or at a diagonal step between two blocked corners. Water more than a block down is a drop, not a crossing. That's ≤ 2,000 lookups.
   - **What it reports:**

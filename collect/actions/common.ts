@@ -55,24 +55,28 @@ export const NAVIGATE_BODY = String.raw`
   return flat(pos(), [t.to[0] + 0.5, 0, t.to[2] + 0.5]) <= 1 && Math.abs(pos()[1] - t.to[1]) < 1 ? 'done' : 'stuck';`
 
 // A feature-seeking action (row 17 of the actions table in brain/tasks/world-model-data.md): one of the features
-// find() returns, and a method among those that fit it. Its code walks to where the feature starts (near) unless
-// it's there already or the method says stay (it makes its own run-up), then runs the method on a target made from
-// the feature. A method is another action's body (HELPERS are inlined once, for all of them) or whole code (2B's).
+// find() returns, and a method among those that fit it. Each method gets its own source, so 2B's long ones stay under
+// the library's size limit: the code walks to where the feature starts (near) unless it's there already or the method
+// says stay (it walks to the edge itself, or makes its own run-up), then runs the method on a target made from the
+// feature. A method is another action's body (on HELPERS) or whole code (2B's, which brings its own helpers).
 export type Method<F> = ({ body: string } | { code: string }) & { stay?: true, fits?: (x: F, f: Features) => boolean, target: (x: F, f: Features) => unknown }
+const APPROACH = "if (t.near) try { await api.goto(t.near[0], t.near[1], t.near[2], 0) } catch (e) { if (/^vetoed/.test(String(e && e.message))) throw e; return 'stuck' }"
 export function seeker<F extends { dist: number, near: Xyz }> (name: string, description: string, find: (f: Features) => F[], methods: Record<string, Method<F>>): Authored {
-  const code = `async (api, t) => {${HELPERS}
-  const methods = {${Object.entries(methods).map(([k, m]) => `\n${k}: ${'body' in m ? `async (api, t) => {${m.body}\n}` : m.code}`).join(',')}
-  };
-  if (t.near) try { await api.goto(t.near[0], t.near[1], t.near[2], 0) } catch (e) { if (vetoed(e)) throw e; return 'stuck' }
-  return methods[t.method](api, t.target);
-}`
+  const sources = Object.fromEntries(Object.entries(methods).map(([k, m]): [string, ModuleSource] => [k, {
+    kind: 'behavior', name, description: `${description}, by ${k}`, channels: ['legs', 'aim', 'hands'], targets: 'block', timeout_s: 20,
+    code: 'body' in m
+      ? `async (api, t) => {${HELPERS}\n  ${APPROACH}\n  return (async (api, t) => {${m.body}\n  })(api, t.target);\n}`
+      : `async (api, t) => {\n  ${APPROACH}\n  return (${m.code})(api, t.target);\n}`
+  }]))
+  const [first, ...variants] = Object.values(sources)
   return {
-    source: { kind: 'behavior', name, description, code, channels: ['legs', 'aim', 'hands'], targets: 'block', timeout_s: 20 },
+    source: first,
+    variants,
     fits: f => find(f).length > 0,
     target: (_bot, f) => {
       const x = pick(find(f))
       const [method, m] = pick(Object.entries(methods).filter(([, m]) => m.fits?.(x, f) ?? true))
-      return { params: { method, ...x }, target: { method, near: !m.stay && x.dist > 1 ? x.near : null, target: m.target(x, f) } }
+      return { params: { method, ...x }, target: { near: !m.stay && x.dist > 1 ? x.near : null, target: m.target(x, f) }, source: sources[method] }
     }
   }
 }

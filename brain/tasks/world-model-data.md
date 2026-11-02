@@ -74,12 +74,12 @@ Held-out seeds hold out their built scenes too.
 | 7 | pillar up | 2–8 blocks | blocks in kit | hand |
 | 8 | dig stairs down | 3–12 steps | – | hand |
 | 9 | tunnel | 3–15 blocks, direction | – | hand |
-| 10 | **swim across** | aim point on the far bank | water | **2B** |
-| 11 | **bridge** | 1–8 blocks, direction | a gap or water | **2B** |
+| 10 | **swim across** | aim point on the far bank | water | **2B** (60%) |
+| 11 | **bridge** | 1–8 blocks, direction | a gap or water | **2B** (100%) |
 | 12 | jump a gap | width 1–3 | a gap | hand |
 | 13 | fell a tree (`collect`) | which tree | trees | reuse |
 | 14 | collect a resource | block type | that block | reuse |
-| 15 | **wall / small shelter** | size 3–5, template | blocks in kit | **2B** |
+| 15 | **wall / small shelter** | size 3–5, template | blocks in kit | **2B** (100%) |
 | 16 | `track` / flee / `attack_when_ready` | which mob (flee: how far, 8–20) | mobs (night) | reuse; flee by hand |
 | 17 | feature-seeking: cross water, get down a cliff, reach a ledge | a method drawn from those that fit: water 12 or 1 (10, 11 when 2B's land), cliff 6 or 1, ledge 7 or 1 | that feature | hand (picks among the others) |
 | 18 | random input | 2–10 s | – | generated |
@@ -92,7 +92,7 @@ Chests, crafting and eating are out of v1: they teach little about space, and ea
   - **the same rules:** the same guards and channel limits as Jeeve;
   - **promotion:** any that prove useful can go into Jeeve's library unchanged.
 - **Hand-written ones** live in `collect/actions/`, ~20–40 lines each ([[world-model-collector]] → "Hand-written actions"). Step down isn't a cliff method: walking off 4+ is always vetoed by the guards.
-- **2B's three** (bridge, swim across, shelter) are written by calling `build()` (`src/builder.ts`) from a small script (`collect/author.ts`). The script hands 2B a capability request and a pass check, as 2A would, and runs the trials on built scenes.
+- **2B's three** (bridge, swim across, shelter) are written by calling `build()` (`src/builder.ts`) from a small script (`collect/author.ts`). The script hands 2B a capability request and a pass check, as 2A would, and runs the trials on built scenes. Done 2026-11-02 in one round each ($0.92); they're in `collect/actions/` and the collector runs them ([[world-model-collector]]).
   - **The bar:** each must pass on at least half of a validation set of 20 built scenes (rivers and gaps of varied width, depth and bank height). Below that, 2B gets the failing scenes as evidence and another round.
   - **Imperfect is fine:** a 70% bridge gives the model the failures it needs to learn when bridging won't work.
 - **Feature-seeking actions find their target with small code queries on the views:** the nearest water with land on both sides, the nearest drop of 4+, a ledge 2–4 up.
