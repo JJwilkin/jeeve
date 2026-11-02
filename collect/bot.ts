@@ -1,9 +1,10 @@
-// One collector bot (one process, started by collect/main.ts): episodes of 60 s, each starting with a teleport and a
-// random kit over RCON, then scripted actions picked by the scheduler, recorded at 5 steps a second.
-// No model calls.
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
+// One collector bot (one process, started by collect/main.ts): episodes of 60 s, each starting with a teleport to one
+// of the seed's start points (by biome quota) or into a freshly built stress scene, and a random kit over RCON, then
+// scripted actions picked by the scheduler, recorded at 5 steps a second. No model calls.
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import mineflayer from 'mineflayer'
 import pf from 'mineflayer-pathfinder'
+import { Vec3 } from 'vec3'
 import collectblock from 'mineflayer-collectblock'
 import { CHANNELS, Channels } from '../src/behaviors.ts'
 import { guardedMovements, installGuards } from '../src/guards.ts'
@@ -11,17 +12,22 @@ import { HAND_WRITTEN, SEED_ACTIONS, features, libraryActions, randomInput, star
 import { CONTROLS, FAR_EVERY, MID_FLAGS, NOISE, STATE_FLAGS, STEPS_PER_S, VIEWS, classTable } from './format.ts'
 import { rconWhenUp } from './rcon.ts'
 import { EpisodeRecorder } from './recorder.ts'
+import { drawScene, sceneFills } from './scenes.ts'
+import type { Start } from './worlds.ts'
 
 const env = process.env
-const NAME = env.COLLECT_NAME ?? 'C1_1'
+const NAME = env.COLLECT_NAME ?? 'C_1'
 const HOST = env.COLLECT_HOST ?? 'localhost'
 const PORT = Number(env.COLLECT_PORT ?? 25565)
 const SEED = env.COLLECT_SEED ?? 'unknown'
 const SPLIT = env.COLLECT_SPLIT ?? 'train'
 const OUT = env.COLLECT_OUT ?? 'episodes'
-const RADIUS = Number(env.COLLECT_RADIUS ?? 1000) // episode starts land within this many blocks of 0, 0
+const RADIUS = Number(env.COLLECT_RADIUS ?? 1000) // with no start points, episodes start within this many blocks of 0, 0
 const EPISODE_MS = Number(env.COLLECT_EPISODE_S ?? 60) * 1000
 const RANDOM_SHARE = 0.15
+const SCENE_SHARE = Number(env.COLLECT_SCENE_SHARE ?? 0.2)
+const DIR = `${OUT}/${SPLIT}/${SEED}`
+const STARTS: Start[] = existsSync(`${DIR}/starts.json`) ? JSON.parse(readFileSync(`${DIR}/starts.json`, 'utf8')).starts : []
 
 const between = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
 const int = (lo: number, hi: number) => Math.floor(between(lo, hi + 1))
@@ -123,36 +129,78 @@ const KIT = () => [
   Math.random() < 0.3 && ['torch', int(1, 16)]
 ].filter(Boolean).sort(() => Math.random() - 0.5) as Array<[string, number]>
 
-async function start () {
-  // spreadplayers lands on the surface, never in a liquid, so over open water it fails: try another spot.
+// spreadplayers lands on the surface (or, with under, the highest floor below that y), never in a liquid; where it
+// finds no spot, try another.
+async function teleport (at: () => [number, number], range: number, under = '') {
   for (let tries = 1; ; tries++) {
-    const reply = await r.command(`spreadplayers ${int(-RADIUS, RADIUS)} ${int(-RADIUS, RADIUS)} 0 24 false ${NAME}`)
-    if (/^Spread/.test(reply)) break
-    if (tries >= 10) { log('teleport failed 10 times; starting where it stands:', reply); break }
+    const [x, z] = at()
+    const reply = await r.command(`spreadplayers ${Math.round(x)} ${Math.round(z)} 0 ${range} ${under}false ${NAME}`)
+    if (/^Spread/.test(reply)) return
+    if (tries >= 10) return log('teleport failed 10 times; starting where it stands:', reply)
+  }
+}
+
+// Each kind of start has an equal share, underground (below y 50 under any start) included. A scene goes into a
+// surface start's pre-generated area, on a ring that gives each of the server's bots its own spot.
+const KINDS = [...new Set(STARTS.map(s => s.kind)), ...(STARTS.length ? ['underground'] : [])]
+const RING = Number(NAME.split('_').at(-1)) * Math.PI / 4
+async function place (scene: boolean) {
+  if (!STARTS.length) return teleport(() => [int(-RADIUS, RADIUS), int(-RADIUS, RADIUS)], 24).then(() => 'random')
+  if (scene) {
+    let s = pick(STARTS)
+    await teleport(() => { s = pick(STARTS); return [s.x + Math.cos(RING) * 64, s.z + Math.sin(RING) * 64] }, 8) // all water there: another start
+    return s.kind
+  }
+  const kind = pick(KINDS)
+  const s = pick(kind === 'underground' ? STARTS : STARTS.filter(s => s.kind === kind))
+  await teleport(() => [s.x, s.z], 24, kind === 'underground' ? 'under 50 ' : '')
+  return kind
+}
+
+// The ground under the bot: the top solid block, below any tree it landed on.
+function ground () {
+  const p = bot.entity.position.floored()
+  for (let y = p.y - 1; y > p.y - 40; y--) {
+    const b = bot.blockAt(new Vec3(p.x, y, p.z))
+    if (b && b.boundingBox === 'block' && !/leaves|_log|_wood|mushroom_block/.test(b.name)) return new Vec3(p.x, y, p.z)
+  }
+  return p.offset(0, -1, 0)
+}
+
+async function start () {
+  const scene = Math.random() < SCENE_SHARE ? drawScene() : null
+  const kind = await place(!!scene)
+  // Each wait gives up after 10 s, and fresh terrain can take longer while Chunky keeps the server busy: wait up to a
+  // minute rather than crash the bot (smoke run, 2026-11-02), then start anyway.
+  const chunks = async () => { for (let i = 0; i < 6; i++) { try { await bot.waitForChunksToLoad(); break } catch {} } }
+  await chunks()
+  if (scene) {
+    const g = ground()
+    const { fills, stand } = sceneFills(scene, g.x, g.y, g.z)
+    for (const cmd of fills) { const reply = await r.command(cmd); if (!/^Successfully|^No blocks/.test(reply)) log(cmd, '→', reply) }
+    await r.command(`tp ${NAME} ${stand[0] + 0.5} ${stand[1]} ${stand[2] + 0.5} -90 0`) // facing +x, toward the obstacle
   }
   const kit = KIT()
   const hungry = Math.random() < 0.25 // so `eat` fits in some episodes
   for (const cmd of [`clear ${NAME}`, `effect clear ${NAME}`, `effect give ${NAME} instant_health 1 10 true`, `effect give ${NAME} saturation 1 20 true`,
     ...kit.map(([item, n]) => `give ${NAME} ${item} ${n}`), ...(hungry ? [`effect give ${NAME} hunger 30 40 true`] : [])]) await r.command(cmd)
   bot.setQuickBarSlot(0)
-  // Each wait gives up after 10 s, and fresh terrain can take longer while Chunky keeps the server busy: wait up to a
-  // minute rather than crash the bot (smoke run, 2026-11-02), then start anyway.
-  for (let i = 0; i < 6; i++) { try { await bot.waitForChunksToLoad(); break } catch {} }
+  await chunks()
   await bot.waitForTicks(30) // land, and let the kit's slot updates arrive
-  return { kit: kit.map(([item, count]) => ({ item, count })), hungry }
+  return { kit: kit.map(([item, count]) => ({ item, count })), hungry, kind, scene }
 }
 
 let episodes = 0
 let cpu = process.cpuUsage()
 while (!stopping) {
   died = false
-  const { kit, hungry } = await start()
+  const { kit, hungry, kind, scene } = await start()
   if (stopping) break
   const p = bot.entity.position
   const biome = bot.registry.biomes[(bot.world as any).getBiome(p.floored())]?.name ?? 'unknown'
   const header = {
     format: 'jeeve-episode/1', bot: NAME, server: `${HOST}:${PORT}`, seed: SEED, split: SPLIT, mc_version: bot.version,
-    start: new Date().toISOString(), start_pos: [p.x, p.y, p.z], biome, scene: 'natural',
+    start: new Date().toISOString(), start_pos: [p.x, p.y, p.z], biome, start_kind: kind, scene: scene?.name ?? 'natural', scene_params: scene,
     conditions: { time_of_day: bot.time.timeOfDay, raining: bot.isRaining, thunder: bot.thunderState > 0, difficulty: bot.game.difficulty },
     kit, hungry, steps_per_s: STEPS_PER_S, far_every: FAR_EVERY, views: VIEWS,
     controls: CONTROLS, state_flags: STATE_FLAGS, noise: NOISE, mid_flags: MID_FLAGS, classes: classes.names, class_blocks: classes.blocks
@@ -165,14 +213,13 @@ while (!stopping) {
   endEpisode = null
   const wall = Date.now() - t0
   const { gz, steps } = rec.finish({ ...header, end: stopping ? 'stopped' : died ? 'died' : 'time', wall_ms: wall })
-  const dir = `${OUT}/${SPLIT}/${SEED}`
-  mkdirSync(dir, { recursive: true })
-  const file = `${dir}/${NAME}-${header.start.replace(/[:.]/g, '-')}.ep.gz`
+  mkdirSync(DIR, { recursive: true })
+  const file = `${DIR}/${NAME}-${header.start.replace(/[:.]/g, '-')}.ep.gz`
   writeFileSync(`${file}.tmp`, gz) // renamed when complete, so a copy to the bucket never takes half a file
   renameSync(`${file}.tmp`, file)
   const used = process.cpuUsage(cpu)
   cpu = process.cpuUsage()
-  process.send?.({ steps, wall_ms: wall, cpu_ms: (used.user + used.system) / 1000, bytes: gz.length, capture_ms: rec.stepMs / Math.max(1, steps), counts: Object.fromEntries(counts), biome, episode: ++episodes })
+  process.send?.({ steps, wall_ms: wall, cpu_ms: (used.user + used.system) / 1000, bytes: gz.length, capture_ms: rec.stepMs / Math.max(1, steps), counts: Object.fromEntries(counts), biome, scene: header.scene, episode: ++episodes })
 }
 r.close()
 bot.quit()
