@@ -49,7 +49,8 @@ function startBot (index: number) {
     total += m.steps
     counts.set(name, m.counts)
     const all = merged()
-    for (const c of children.keys()) c.connected && c.send({ counts: all })
+    // A bot exiting at the seed's end can close its pipe after `connected` was read: without the callback, EPIPE kills the collector.
+    for (const c of children.keys()) c.connected && c.send({ counts: all }, () => {})
     console.log(`[collect] ${name} ep ${m.episode} (${m.biome}, ${m.scene}): ${m.steps} steps in ${(m.wall_ms / 1000).toFixed(1)} s = ${(m.steps / m.wall_ms * 1000).toFixed(2)} steps/s; ` +
       `cpu ${(m.cpu_ms / m.wall_ms * 100).toFixed(0)}%; capture ${m.capture_ms.toFixed(1)} ms/step; ${(m.bytes / m.steps / 1024).toFixed(2)} KB/step gz; total ${total}`)
     if (total >= TARGET) void stop()
