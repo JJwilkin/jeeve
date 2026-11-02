@@ -133,6 +133,18 @@ const PERCEPTION: Anthropic.Tool[] = [
     input_schema: { type: 'object', additionalProperties: false, properties: {} }
   },
   {
+    name: 'terrain',
+    description: 'A height map from what the bot has seen: one row per block north to south, one column per block west to east, each the ground height relative to your feet, with water, lava, unseen spots and drops the guards forbid marked. Use it when region_graph alone doesn\'t tell you the shape of a place: where a bank is lowest, where a gap is narrowest.',
+    input_schema: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        region: { type: 'string', description: 'A region id from region_graph, e.g. "R3": the map covers it.' },
+        at: { type: 'array', items: { type: 'integer' }, minItems: 3, maxItems: 3, description: 'Or a centre, absolute [x, y, z]. Default: where you stand.' },
+        radius: { type: 'integer', description: 'Blocks, 2-16. Default 10, or enough to cover the region.' }
+      }
+    }
+  },
+  {
     name: 'reachable',
     description: 'Can you walk to where a block is within arm\'s reach (about 4.5 blocks from your eyes), using the same pathfinder as collect: no placing blocks, and no breaking anything but logs and leaves? Judged on the world as it is now: a block behind others of the same tree may become reachable once those are broken. status noPath means no path stays within 16 blocks of you and the block; timeout means the search ran out of time (unknown). Absolute position.',
     input_schema: {
@@ -142,7 +154,7 @@ const PERCEPTION: Anthropic.Tool[] = [
   }
 ]
 
-const PERCEIVE = `You can look at the world with scan and reachable. Your context has seen_map: everything the bot has seen within 64 blocks, as clusters (a tree is one cluster of logs and leaves) with exact counts, names, bounds and heights; terrain is left out. It's what the bot remembers seeing, line of sight only, so it can be out of date for places it hasn't looked at lately. Use it to keep the whole scene in mind (which trees are left, what's half done). If what the instruction is about may be out of view, call survey to walk around and look first. Look with scan before you set a count or a check that depends on blocks it doesn't show, or before you judge whether something can be reached. Each tool call costs a turn of a few seconds, so make every look you need in the same turn (several tool calls at once), then decide.`
+const PERCEIVE = `You can look at the world with scan, reachable and terrain. Your context has seen_map: everything the bot has seen within 64 blocks, as clusters (a tree is one cluster of logs and leaves) with exact counts, names, bounds and heights; terrain is left out. It's what the bot remembers seeing, line of sight only, so it can be out of date for places it hasn't looked at lately. Use it to keep the whole scene in mind (which trees are left, what's half done). Your context also has region_graph: the terrain within 40 blocks as code sees it from what the bot has seen, as regions you can walk around in (R1 is where you stand; y is relative to your feet) and the links between them, by the rules the guards enforce: drop N (down 2-3, one way), climb N (up, a pillar of N blocks), swim, bridge N (N blocks placed across a gap), unseen (not looked at yet: a frontier, not a wall). Two regions with no link have no way between them that code knows of. Plan routes over it, with waypoints at a link's at, and call terrain for a region's height map when you need its shape. If what the instruction is about may be out of view, call survey to walk around and look first. Look with scan before you set a count or a check that depends on blocks it doesn't show, or before you judge whether something can be reached. Each tool call costs a turn of a few seconds, so make every look you need in the same turn (several tool calls at once), then decide.`
 
 // Its own tool, not a submit_decision field: one more strict object makes the grammar too large for the API.
 const REQUEST_CAPABILITY: Anthropic.Tool = {

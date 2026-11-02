@@ -8,6 +8,7 @@ import { glob } from './goals.ts'
 
 export type Pos = [number, number, number]
 const NOTHING = new Set(['air', 'cave_air', 'void_air'])
+export const LIQUIDS = new Set(['water', 'lava'])
 const feet = (bot: Bot) => bot.entity.position.floored()
 const tuple = (v: { x: number, y: number, z: number }): Pos => [v.x, v.y, v.z]
 const centerDist = (bot: Bot, p: Pos) => +bot.entity.position.distanceTo(new Vec3(p[0] + 0.5, p[1], p[2] + 0.5)).toFixed(1)
@@ -112,7 +113,9 @@ const empty = (b: { name: string } | null) => !b || NOTHING.has(b.name)
 // eye level or half hidden read as unseen: the bot "saw" 3 of a tree's 27 leaves, 2026-10-12.)
 const eyesOf = (bot: Bot) => bot.entity.position.offset(0, (bot.entity as { eyeHeight?: number }).eyeHeight ?? 1.62, 0)
 const FACES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
-export function visible (bot: Bot, eyes: Vec3, p: Vec3) {
+// A liquid has no collision shape, so a ray passes through it: it's seen when the ray reaches the face unblocked.
+// (Until 2026-11-02 water and lava were never seen, so 2A's map had no rivers.)
+export function visible (bot: Bot, eyes: Vec3, p: Vec3, liquid = false) {
   for (const [x, y, z] of FACES) {
     const face = p.offset(0.5 + x * 0.5, 0.5 + y * 0.5, 0.5 + z * 0.5)
     const d = face.minus(eyes)
@@ -120,7 +123,7 @@ export function visible (bot: Bot, eyes: Vec3, p: Vec3) {
     if (!empty(bot.blockAt(p.offset(x, y, z)))) continue // covered by a neighbour
     const range = d.norm()
     const hit = bot.world.raycast(eyes, d.scaled(1 / range), range + 0.05)
-    if (hit && (hit as unknown as { position: Vec3 }).position.equals(p)) return true
+    if (hit ? (hit as unknown as { position: Vec3 }).position.equals(p) : liquid) return true
   }
   return false
 }
@@ -128,6 +131,8 @@ export function visible (bot: Bot, eyes: Vec3, p: Vec3) {
 // near: every block within SEEN.radius, every 250 ms. far (every 2 s): out to SEEN.far horizontally and SEEN.up above
 // the feet, skipping types with more than SEEN.common blocks there (ground, air), so a tree across the field is seen
 // without walking over to it. A wider look finds what an objective needs; the near one keeps what's close current.
+// The far look also keeps each column's top (ground, water, a roof) where it's in sight, as terrain for the region
+// graph (src/regions.ts), apart from the block memory so seen_map and the checks don't fill with ground.
 export function observe (bot: Bot, far = false) {
   const t0 = performance.now()
   const mem = memory(bot)
@@ -143,24 +148,37 @@ export function observe (bot: Bot, far = false) {
     const range = eyes.distanceTo(to)
     return !bot.world.raycast(eyes, to.minus(eyes).normalize(), range - 0.5)
   }
-  const each = (f: (name: string | null, key: string) => void) => {
+  const each = (f: (b: ReturnType<Bot['blockAt']>, key: string) => void) => {
     for (let dx = -r; dx <= r; dx++) for (let dy = -down; dy <= up; dy++) for (let dz = -r; dz <= r; dz++) {
       p.set(me.x + dx, me.y + dy, me.z + dz)
-      f(bot.blockAt(p)?.name ?? null, `${p.x},${p.y},${p.z}`)
+      f(bot.blockAt(p), `${p.x},${p.y},${p.z}`)
     }
   }
   const common = new Set<string>()
+  const surf = surface(bot)
   if (far) {
     const n = new Map<string, number>()
-    each(name => { if (name) n.set(name, (n.get(name) ?? 0) + 1) })
+    const tops = new Map<string, { y: number, name: string }>()
+    each(b => {
+      if (!b) return
+      n.set(b.name, (n.get(b.name) ?? 0) + 1)
+      const col = `${p.x},${p.z}`
+      if ((b.boundingBox === 'block' || LIQUIDS.has(b.name)) && (tops.get(col)?.y ?? -Infinity) < p.y) tops.set(col, { y: p.y, name: b.name })
+    })
     for (const [name, c] of n) if (c > SEEN.common) common.add(name)
+    for (const [col, top] of tops) if (topInSight(tops, eyes, col, top.y)) surf.set(col, { ...top, t: now })
   }
-  each((name, key) => {
-    if (!name || NOTHING.has(name)) { if (mem.has(key) && seesEmpty(p)) mem.delete(key); return }
+  each((b, key) => {
+    const name = b?.name
+    if (!name || NOTHING.has(name)) {
+      if (mem.has(key) && seesEmpty(p)) { mem.delete(key); if (surf.get(`${p.x},${p.z}`)?.y === p.y) surf.delete(`${p.x},${p.z}`) }
+      return
+    }
     if (common.has(name)) return
-    if (visible(bot, eyes, p)) mem.set(key, { name, pos: [p.x, p.y, p.z], t: now })
+    if (visible(bot, eyes, p, LIQUIDS.has(name))) mem.set(key, { name, pos: [p.x, p.y, p.z], t: now })
   })
   if (mem.size > 20_000) for (const [k, v] of mem) if (Math.abs(v.pos[0] - me.x) + Math.abs(v.pos[2] - me.z) > SEEN.keepWithin) mem.delete(k)
+  if (surf.size > 20_000) for (const k of surf.keys()) { const [x, z] = k.split(',').map(Number); if (Math.abs(x - me.x) + Math.abs(z - me.z) > SEEN.keepWithin) surf.delete(k) }
   // Coverage: the 16-block cells the far look has swept (its whole box), for System 2 to search where it hasn't looked.
   if (far) {
     let cells = coveredBy.get(bot)
@@ -175,6 +193,41 @@ export function observe (bot: Bot, far = false) {
   if (ms > SEEN.warnMs) console.warn(`[world] observe${far ? ' (far)' : ''} took ${ms.toFixed(0)} ms`)
 }
 
+// Column tops the far look has seen: "x,z" → the highest block there you could stand on or swim in.
+const surfaces = new WeakMap<Bot, Map<string, { y: number, name: string, t: number }>>()
+const surface = (bot: Bot) => { let m = surfaces.get(bot); if (!m) surfaces.set(bot, m = new Map()); return m }
+
+// Is a column's top face in sight from the eyes? Checked against the other columns' tops, with no block reads, so it
+// costs next to nothing over the far box. The eyes must be above the face, and an overhang counts as solid down to the
+// ground, so it errs toward unseen (no x-ray).
+function topInSight (tops: Map<string, { y: number }>, eyes: Vec3, col: string, y: number) {
+  const [x, z] = col.split(',').map(Number)
+  const tx = x + 0.5, ty = y + 1, tz = z + 0.5
+  if (ty > eyes.y) return false
+  const steps = Math.ceil(Math.hypot(tx - eyes.x, tz - eyes.z) * 2)
+  for (let i = 1; i < steps; i++) {
+    const f = i / steps
+    const cx = Math.floor(eyes.x + (tx - eyes.x) * f), cz = Math.floor(eyes.z + (tz - eyes.z) * f)
+    if (cx === x && cz === z) continue
+    const t = tops.get(`${cx},${cz}`)
+    if (t && t.y + 1 > eyes.y + (ty - eyes.y) * f) return false
+  }
+  return true
+}
+
+// What the bot has seen in a box around a point, for the region graph and height map: the block memory, plus the far
+// look's column tops where the memory has nothing at that spot. "x,y,z" → block name; absent is air or unseen.
+export function seenGrid (bot: Bot, center: Pos, radius: number, down: number, up: number): Map<string, string> {
+  const inside = (x: number, y: number, z: number) => Math.max(Math.abs(x - center[0]), Math.abs(z - center[2])) <= radius && y >= center[1] - down && y <= center[1] + up
+  const out = new Map<string, string>()
+  for (const [k, v] of memory(bot)) if (inside(...v.pos)) out.set(k, v.name)
+  for (const [col, v] of surface(bot)) {
+    const [x, z] = col.split(',').map(Number)
+    if (inside(x, v.y, z) && !out.has(`${x},${v.y},${z}`)) out.set(`${x},${v.y},${z}`, v.name)
+  }
+  return out
+}
+
 // Blocks the bot placed itself (scaffolding, a pillar), remembered until the bot sees them gone. A step that clears a
 // spot isn't done while its own placed blocks stand there (goals.ts cleared): an oak-only check passed with two
 // birch-log pillar blocks left (orchard bench, 2026-10-12).
@@ -182,7 +235,11 @@ const placedBy = new WeakMap<Bot, Set<string>>()
 export const notePlaced = (bot: Bot, p: Pos) => { let s = placedBy.get(bot); if (!s) placedBy.set(bot, s = new Set()); s.add(p.join(',')) }
 // A block the bot dug itself is gone, whether or not it can see the spot: a log broken inside a canopy stayed in
 // memory forever (its empty spot is hidden by leaves), and the goal could never close (e2e 2026-10-12).
-export const noteDug = (bot: Bot, p: Pos) => { memory(bot).delete(p.join(',')); placedBy.get(bot)?.delete(p.join(',')) }
+export const noteDug = (bot: Bot, p: Pos) => {
+  memory(bot).delete(p.join(','))
+  placedBy.get(bot)?.delete(p.join(','))
+  if (surface(bot).get(`${p[0]},${p[2]}`)?.y === p[1]) surface(bot).delete(`${p[0]},${p[2]}`)
+}
 // The bot's placed blocks it still believes are there (in the seen memory, which drops a spot once it's seen empty).
 export function placedStanding (bot: Bot): Pos[] {
   const mem = memory(bot)
@@ -199,6 +256,7 @@ export const explored = (bot: Bot) => [...coveredBy.get(bot) ?? []].map(k => k.s
 // Picking unexplored directions from a list of cell centres was too hard for 2A (forage: west four times, trees
 // north and south), and a frontier ranked from the bot drifted ever outward: 300 blocks east, trees within 60 of start.
 const DIRS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] // +x is east, +z is south
+export const compass = (dx: number, dz: number) => DIRS[(Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) + 8) % 8]
 export function frontier (bot: Bot, origin?: { x: number, z: number }, within = 128): Array<{ dir: string, at: [number, number], dist: number }> {
   const seen = coveredBy.get(bot) ?? new Set<string>()
   const me = origin ?? bot.entity.position
@@ -210,7 +268,7 @@ export function frontier (bot: Bot, origin?: { x: number, z: number }, within = 
       if (seen.has(`${nx},${nz}`)) continue
       const dist = Math.hypot(nx - me.x, nz - me.z)
       if (dist > within) continue
-      const dir = DIRS[(Math.round(Math.atan2(nz - me.z, nx - me.x) / (Math.PI / 4)) + 8) % 8]
+      const dir = compass(nx - me.x, nz - me.z)
       if (!best.has(dir) || dist < best.get(dir)!.dist) best.set(dir, { dir, at: [nx, nz], dist: Math.round(dist) })
     }
   }

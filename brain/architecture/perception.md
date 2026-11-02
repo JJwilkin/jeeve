@@ -19,7 +19,7 @@ Two tools cover "how many, where, how high, can I reach it". Both are general; n
 
 **Not built:**
 - **`look`, GITM-style ray casts.** The fairness use of ray casts is covered by `scan`'s `los` flag, and no goal yet needs "what's in front of me".
-- **`surroundings`, a height map.** `navigate` handles terrain, and [[system-1]] deliberately gives Jev no terrain map.
+- ~~**`surroundings`, a height map.** `navigate` handles terrain, and [[system-1]] deliberately gives Jev no terrain map.~~ *Built for 2A on 2026-11-02 as `terrain`, with the region graph ([[region-graph]]): the river showed `navigate` can't plan around terrain alone. Jev still gets no terrain map.*
 
 Add either one when a goal shows it's needed.
 
@@ -114,6 +114,7 @@ Decided with Joshua while making the orchard clip ([[brain-monitor]]): **no x-ra
 - **Costs.** A goal whose check reads blocks takes ~10–20 s longer. Built-in checks (inventory, distance) don't look. A goal can no longer complete during a trial, so a trial passes on `done` plus `pass_when` only.
 - **2A sees the whole remembered scene.** Every 2A call carries `seen_map` (`src/world.ts` `seenMap`): the seen memory within 32 blocks as clusters (a tree is one cluster of logs and leaves), with counts, names, bounds and heights, and terrain left out (types with more than 512 there). Before it, 2A had Jev's 8-block view plus whatever it scanned that turn, and in the orchard it kept re-scanning and lost track of which trees were left (Joshua: "it seems to lose context").
 - **Jev is offered only the blocks a check names.** Under an authored check, the block options are the types the check's code names (`"oak_leaves"`, `"*_log"`). In the orchard Jev ran the new pillaring skill on `dirt(64)`, the dirt its own pillar left.
+- **Liquids (fixed 2026-11-02).** Water and lava have no collision shape, so the visibility ray passed through them and they were never remembered; now a ray that reaches a liquid's face unblocked sees it. The far look also keeps column tops for terrain ([[region-graph]]).
 - *Ceilings:* `crowded` types are a blind spot for checks (a region query would fix it). Four fixed spots can still miss a block hidden from all of them.
 
 ## Open questions

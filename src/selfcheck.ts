@@ -18,7 +18,8 @@ import { curate, gather, newEvidence, propose, type Sql } from './curate.ts'
 import { Budget, PRICES, usd } from './budget.ts'
 import { coalescing, makeDecider } from './decide.ts'
 import { describeMemory, direction, distanceBucket, foods, makeEgocentric, needs, newHandles, rawSnapshot } from './encoder.ts'
-import { blockAt, explored, frontier, notableBlocks, notePlaced, observe, reachable, scan } from './world.ts'
+import { blockAt, explored, frontier, notableBlocks, notePlaced, observe, reachable, scan, seenGrid } from './world.ts'
+import { describeGraph, heightMap, regionGraph, regionsNear } from './regions.ts'
 import { compile, glob, Goals } from './goals.ts'
 import { controlVector, guardedMovements, unsafeAt } from './guards.ts'
 import { compileBehavior, compileModule, ModuleRegistry, startBehavior, type BehaviorHost } from './modules.ts'
@@ -505,6 +506,63 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   bot.pathfinder.setMovements(guardedMovements(bot))
   const status = async (p: [number, number, number]) => (await reachable(bot, p)).status
   assert.deepEqual([await status([6, 0, 0]), await status([-10, 12, 0]), await status([14, 0, 0]), await status([4, -12, 3])], ['success', 'noPath', 'success', 'noPath'])
+}
+
+// The region graph over a synthetic seen grid. West bank x -12..-3 (feet y 0) with a ledge 3 lower at x -12..-8; a
+// river x -2..2 (surface y -1); east bank x 3..6 (feet 0), then a 4-block cliff down to low ground x 7..12. Bot at (-4, 0, 0).
+{
+  const seen = new Map<string, string>()
+  for (let z = -10; z <= 10; z++) {
+    for (let x = -12; x <= -3; x++) seen.set(`${x},${x <= -8 ? -4 : -1},${z}`, 'grass_block')
+    for (let x = -2; x <= 2; x++) seen.set(`${x},-1,${z}`, 'water')
+    for (let x = 3; x <= 6; x++) seen.set(`${x},-1,${z}`, 'grass_block')
+    for (let x = 7; x <= 12; x++) seen.set(`${x},-5,${z}`, 'stone')
+  }
+  const solid = (n: string) => n !== 'water' && n !== 'lava'
+  const g = regionGraph(seen, [-4, 0, 0], solid)
+  const at = (x: number, z: number) => g.regions.find(r => r.x[0] <= x && x <= r.x[1] && r.z[0] <= z && z <= r.z[1])!
+  const [bank, ledge, river, east, low] = [at(-4, 0), at(-10, 0), at(0, 0), at(4, 0), at(10, 0)]
+  const link = (a: { id: string }, b: { id: string }) => g.links.filter(l => l.from === a.id && l.to === b.id).map(l => `${l.type} ${l.n}`)
+  // The river splits the banks into two regions, joined by swimming (both ways) and a 5-block bridge.
+  assert.equal(new Set([bank, river, east].map(r => r.id)).size, 3)
+  assert.deepEqual([bank.id, bank.here, river.kind, river.name, east.name], ['R1', true, 'water', 'river', 'east bank'])
+  assert.deepEqual([link(bank, river), link(river, east), link(east, river), link(bank, east)], [['swim 0'], ['swim 0'], ['swim 0'], ['bridge 5']])
+  // A 3-block drop is a drop one way and a climb back; a 4-block drop isn't a link down at all (the guards veto it).
+  assert.deepEqual([link(bank, ledge), link(ledge, bank)], [['drop 3'], ['climb 3']])
+  assert.deepEqual([link(east, low), link(low, east)], [[], ['climb 4']])
+  assert.ok(g.links.some(l => l.from === low.id && l.type === 'unseen'))
+  const brief = describeGraph(g)
+  assert.ok(brief.includes('R1↔R2 swim ~2s at [-3,0,0]') && brief.join('\n').length < 1800, brief.join('\n'))
+  // The height map marks water, the bot, and the foot of the cliff the guards won't drop down.
+  const map = heightMap(seen, [0, 0, 0], [-4, 0, 0], solid, 10)
+  const row = map.find(r => r.startsWith('  0 '))!
+  assert.match(row, / @ {2}0 {2}~ {2}~ {2}~ {2}~ {2}~ {2}0/)
+  assert.match(row, /-4v-4/)
+}
+
+// The seen memory on a real block world: water is seen (it has no collision shape, so a ray passes through it), and the
+// far look keeps the ground's column tops beyond the near look, so the region graph reaches the far bank.
+{
+  const registry = registryFor('1.21.8')
+  const World = (worldLoader as any)(registry)
+  const Chunk = (chunkLoader as any)(registry)
+  const world = new World().sync
+  const set = (x: number, y: number, z: number, name: string) => world.setBlockStateId(new Vec3(x, y, z), registry.blocksByName[name].defaultState)
+  for (let cx = -3; cx < 3; cx++) for (let cz = -3; cz < 3; cz++) world.setColumn(cx, cz, new Chunk({ minY: -64, worldHeight: 384 }))
+  for (let x = -40; x < 40; x++) for (let z = -40; z < 40; z++) {
+    set(x, -3, z, 'stone')
+    for (const y of [-2, -1]) set(x, y, z, x >= 6 && x <= 10 ? 'water' : 'grass_block')
+  }
+  const bot: any = { registry, world, entity: { position: new Vec3(0.5, 0, 0.5) }, blockAt: (p: Vec3) => world.getBlock(p) }
+  observe(bot)
+  assert.equal(seenGrid(bot, [0, 0, 0], 8, 4, 4).get('6,-1,0'), 'water')
+  assert.equal(seenGrid(bot, [0, 0, 0], 40, 4, 4).get('20,-1,0'), undefined) // the near look reaches 8
+  observe(bot, true)
+  assert.equal(seenGrid(bot, [0, 0, 0], 40, 4, 4).get('20,-1,0'), 'grass_block')
+  const g = regionsNear(bot)
+  const east = g.regions.find(r => r.x[0] === 11)!
+  assert.deepEqual([g.regions[0].here, g.regions[1].name, east.name], [true, 'river', 'east bank'])
+  assert.ok(g.links.some(l => l.from === 'R1' && l.to === east.id && l.type === 'bridge' && l.n === 5))
 }
 
 // Behaviors System 2 writes: async code in a fresh realm per run, talking to the host only through strings.

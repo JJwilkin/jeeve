@@ -49,6 +49,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[architecture/stateful-system-1|stateful-system-1]] (proposal): a working memory rendered into every Jev call, one writer per slot; escalate on persistent doubt, not one close call; stages 2A writes only if needed; needs as System 1's default objective; objects (not voxels or frames) for space and time; replay results
 - [[deployment]]: three Jeeves on one GCP VM (Docker Compose, Caddy, a relay that fans the streams out to viewers); what's public vs. locked (basic auth on POSTs, 25565 tailnet-only), sleep and spend caps, measured cost (~$25/h for three awake), CPU and RAM
 - [[world-model-collector]]: phase 1 of the world-model data: the episode format (header + fixed records, 63 block classes), the step recorder, scripted actions through `Channels` with noise and random input, the rarity-weighted scheduler, the Compose collector; local measurements (5 steps/s, ~7.5% CPU a bot, ~0.67 KB a step gzipped)
+- [[region-graph]]: 2A's view of terrain: regions code flood-fills from the seen memory (water and far ground now seen), links by the guards' rules (drop ≤ 3, climb N, swim, bridge N, unseen), `region_graph` in every call, the `terrain` height-map tool, token budget, ceilings
 - [[learning]]: decision: context only, no training. Live and cross-episode loops, per-minute traces linked by lineage, agentic search over past traces
 
 ### Research
