@@ -32,6 +32,8 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[live-deployment]] (done → [[deployment]]): Jeeve live at a URL: public spectate page, a goal box only Joshua can use, on one GCP VM
 - [[tasks/stateful-system-1|stateful-system-1 task]] (doing → [[architecture/stateful-system-1|stateful-system-1]], proposal): System 1 keeps a working memory (commitment, intent, outcomes) and takes on commitments, local recovery and when to escalate; replay done (moot-answer filter + plan/doing memory; persistent doubt rejected; needs defaults and objects replayed), build and bench A/B next
 
+- [[world-model-data]] (todo): collect game-state data for a small world model (Tier 1): a 64-block layered view, 18 scripted actions (3 written by 2B), 60 natural seeds plus built stress scenes, on a separate GCP VM; how the model would plug into Jeeve, cost (~$20–30), phases
+
 ### Architecture
 - [[overview]]: what we build vs. what the agent discovers, the discovery loop, fast and slow thinking, goals and time as one hierarchy, open questions
 - [[layers]]: System 2 / Jev / behaviors / guards; the one-right-answer vs. judgment vs. plan rule; concurrent channels; System 2 sets when Jev decides; first milestone: a local client that takes instructions
