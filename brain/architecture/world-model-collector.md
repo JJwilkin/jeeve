@@ -48,6 +48,11 @@ What [[world-model-data]] phase 1 built in `collect/`, and what the first local 
 - **Output:** `authoring/<session>.json` (per round: trials, per-scene pass/fail with the failures' last calls, cost) and the builder's trace, to Judgment when keys are set (project `JEEVE_PROJECT`, default `jeeve-test`) and to `traces/<session>.jsonl` always.
 - **On the VM:** `deploy/collect/author.sh` starts a superflat Paper container and runs `author.ts` in the `jeeve` image. The keys come down ssh's stdin ahead of the script and reach Node through a pipe (`--env-file=/dev/stdin`), so they're never in a file, a command line or the container config.
 - **`--stub`** swaps the model for `MockLanguageModelV4` replaying canned drafts (`collect/author-stub.ts`), so the whole loop runs without model calls.
+- **Stubbed run (local dev Paper, 2026-11-02, ~35 min):**
+  - Bridge round 1: a draft capped at 3 blocks passed a trial, then 9 of 20 validation scenes (45%). Round 2's brief carried those failures (~8 KB): a draft that claims done without bridging failed its trial on the pass check, and the full bridge passed 20 of 20 and was written.
+  - Swim: a plain `goto` to the aim point failed every trial in 3 rounds. **The guarded pathfinder scaffolds with kit blocks** (its Movements can place), so it crossed dry, and the "was in water" check caught it. Banks of 4+ were vetoed as drops.
+  - Shelter: 15 of 20 (75%); all 5 failures were huts of size 4–5 that ran past the 20 s limit.
+  - About 10 s a scene, so a 20-scene validation takes 3–4 min.
 
 ## Measured (local, 2026-11-02, Apple-silicon Mac; one Paper 26.1.2 server, normal terrain, no Chunky)
 Two bots for 8 episodes, then one bot for 2 (2 × 4 min + 2 min):
