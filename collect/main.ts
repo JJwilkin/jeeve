@@ -31,6 +31,11 @@ function merged () {
   return all
 }
 
+// Paper refuses a second login from one address within 4 s (bukkit.yml connection-throttle): bots that connected
+// together kicked each other in a loop (smoke run, 2026-11-02). So logins go one at a time, at least 5 s apart.
+let nextLogin = 0
+const loginIn = (min = 0) => { const t = Math.max(Date.now() + min, nextLogin); nextLogin = t + 5000; return t - Date.now() }
+
 function startBot (s: Server, name: string) {
   const child = fork('collect/bot.ts', [], {
     env: {
@@ -50,7 +55,7 @@ function startBot (s: Server, name: string) {
   })
   child.on('exit', code => {
     children.delete(child)
-    if (!stopping) { console.log(`[collect] ${name} exited (${code}); restarting in 5 s`); setTimeout(() => startBot(s, name), 5000) }
+    if (!stopping) { const ms = loginIn(5000); console.log(`[collect] ${name} exited (${code}); restarting in ${(ms / 1000).toFixed(0)} s`); setTimeout(() => startBot(s, name), ms) }
   })
 }
 
@@ -92,4 +97,4 @@ process.on('SIGINT', () => void stop())
 setInterval(() => writeFileSync(`${OUT}/coverage.json`, JSON.stringify({ steps: total, counts: merged() }, null, 1)), 60_000)
 
 await Promise.all(SERVERS.map(setUp))
-SERVERS.forEach((s, i) => { for (let b = 1; b <= BOTS; b++) startBot(s, `C${i + 1}_${b}`) })
+SERVERS.forEach((s, i) => { for (let b = 1; b <= BOTS; b++) setTimeout(() => startBot(s, `C${i + 1}_${b}`), loginIn()) })

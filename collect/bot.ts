@@ -135,7 +135,9 @@ async function start () {
   for (const cmd of [`clear ${NAME}`, `effect clear ${NAME}`, `effect give ${NAME} instant_health 1 10 true`, `effect give ${NAME} saturation 1 20 true`,
     ...kit.map(([item, n]) => `give ${NAME} ${item} ${n}`), ...(hungry ? [`effect give ${NAME} hunger 30 40 true`] : [])]) await r.command(cmd)
   bot.setQuickBarSlot(0)
-  await bot.waitForChunksToLoad()
+  // Each wait gives up after 10 s, and fresh terrain can take longer while Chunky keeps the server busy: wait up to a
+  // minute rather than crash the bot (smoke run, 2026-11-02), then start anyway.
+  for (let i = 0; i < 6; i++) { try { await bot.waitForChunksToLoad(); break } catch {} }
   await bot.waitForTicks(30) // land, and let the kit's slot updates arrive
   return { kit: kit.map(([item, count]) => ({ item, count })), hungry }
 }
