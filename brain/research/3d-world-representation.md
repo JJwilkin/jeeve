@@ -73,6 +73,8 @@ B on top of the existing voxel memory, with A's height map as its first view and
 
 This keeps the line the brain already draws: code does the geometry and the model gets conclusions ([[architecture/stateful-system-1|stateful-system-1]] → "objects, not voxels or frames").
 
+**Built (2026-11-02):** the region graph and height map for 2A, see [[region-graph]]. Not yet: code checking the plan, the minimap.
+
 ## Open questions
 - **Region size.** Hydra cuts places from free space; Minecraft's grid may make simple flood-fill over standable cells enough. Measure cost on the VM: CPU, not memory, is the limit there ([[deployment]]).
 - **Seen vs. true.** The graph is built from what Jeeve has seen, so an unseen far bank is a frontier, not a wall. Links into unseen space need their own type.
