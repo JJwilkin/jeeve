@@ -2,7 +2,7 @@
 date: 2026-11-02
 tags: [task, world-models, data, infrastructure, perception]
 status: active
-progress: todo
+progress: doing
 ---
 # Task: collect state data for a small world model
 
@@ -145,6 +145,8 @@ Vetoes, failures and deaths are kept on purpose: they're the "this won't work he
   - Total ≈ **$20–30**, worst case ~$35 (the 8-hour cap plus a costly authoring round).
 
 ## Phases
+*Phase 1's code and a local run are done ([[world-model-collector]]): measured numbers there; the GCP smoke run still needs Joshua's yes. `climb_down_safely` turned out not to be in the library, so action 6 is phase-2 work.*
+
 0. **Prerequisite:** land the water-drop fix (`moves.infiniteLiquidDropdownDistance = false` in `guardedMovements`), so the route-finder never plans a drop the guards veto. Otherwise every water label would teach the bug.
 1. **Recorder, format and the reused actions:** written and unit-tested in the repo. Then the smoke run: one server, 4 then 8 bots, ~1 hour. It measures:
    - steps per second per bot (target ≥ 4.5);

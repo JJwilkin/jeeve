@@ -8,3 +8,6 @@ traces/
 clips/
 viz/dist/
 bench/logs/
+episodes/
+compose.collect.json
+collector.log

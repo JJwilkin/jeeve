@@ -32,7 +32,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[live-deployment]] (done → [[deployment]]): Jeeve live at a URL: public spectate page, a goal box only Joshua can use, on one GCP VM
 - [[tasks/stateful-system-1|stateful-system-1 task]] (doing → [[architecture/stateful-system-1|stateful-system-1]], proposal): System 1 keeps a working memory (commitment, intent, outcomes) and takes on commitments, local recovery and when to escalate; replay done (moot-answer filter + plan/doing memory; persistent doubt rejected; needs defaults and objects replayed), build and bench A/B next
 
-- [[world-model-data]] (todo): collect game-state data for a small world model (Tier 1): a 64-block layered view, 18 scripted actions (3 written by 2B), 60 natural seeds plus built stress scenes, on a separate GCP VM; how the model would plug into Jeeve, cost (~$20–30), phases
+- [[world-model-data]] (doing → [[world-model-collector]]): collect game-state data for a small world model (Tier 1): a 64-block layered view, 18 scripted actions (3 written by 2B), 60 natural seeds plus built stress scenes, on a separate GCP VM; how the model would plug into Jeeve, cost (~$20–30), phases
 
 ### Architecture
 - [[overview]]: what we build vs. what the agent discovers, the discovery loop, fast and slow thinking, goals and time as one hierarchy, open questions
@@ -48,6 +48,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[bench-hill-climb]]: three scenes scored by Josh (orchard, workshop, guard), unattended `npm run bench`, a skill library shared across runs, `gaps.ts` (ground truth vs what Jeeve believed), the round-by-round log of gaps and harness fixes, and the river, ravine and ledge crossing scenes
 - [[architecture/stateful-system-1|stateful-system-1]] (proposal): a working memory rendered into every Jev call, one writer per slot; escalate on persistent doubt, not one close call; stages 2A writes only if needed; needs as System 1's default objective; objects (not voxels or frames) for space and time; replay results
 - [[deployment]]: three Jeeves on one GCP VM (Docker Compose, Caddy, a relay that fans the streams out to viewers); what's public vs. locked (basic auth on POSTs, 25565 tailnet-only), sleep and spend caps, measured cost (~$25/h for three awake), CPU and RAM
+- [[world-model-collector]]: phase 1 of the world-model data: the episode format (header + fixed records, 63 block classes), the step recorder, scripted actions through `Channels` with noise and random input, the rarity-weighted scheduler, the Compose collector; local measurements (5 steps/s, ~7.5% CPU a bot, ~0.67 KB a step gzipped)
 - [[region-graph]]: 2A's view of terrain: regions code flood-fills from the seen memory (water and far ground now seen), links by the guards' rules (drop ≤ 3, climb N, swim, bridge N, unseen), `region_graph` in every call, the `terrain` height-map tool, token budget, ceilings
 - [[learning]]: decision: context only, no training. Live and cross-episode loops, per-minute traces linked by lineage, agentic search over past traces
 

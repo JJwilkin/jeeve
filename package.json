@@ -13,7 +13,9 @@
     "clip": "node --env-file=../judgment/.env.jeeve scripts/clip.ts",
     "bench": "node scripts/bench.ts",
     "curate": "node --env-file=../judgment/.env.jeeve scripts/curate.ts",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "collect": "node collect/main.ts",
+    "collect:check": "node collect/check.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.78",
