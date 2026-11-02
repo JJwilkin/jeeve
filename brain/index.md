@@ -48,6 +48,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[bench-hill-climb]]: three scenes scored by Josh (orchard, workshop, guard), unattended `npm run bench`, a skill library shared across runs, `gaps.ts` (ground truth vs what Jeeve believed), the round-by-round log of gaps and harness fixes, and the river, ravine and ledge crossing scenes
 - [[architecture/stateful-system-1|stateful-system-1]] (proposal): a working memory rendered into every Jev call, one writer per slot; escalate on persistent doubt, not one close call; stages 2A writes only if needed; needs as System 1's default objective; objects (not voxels or frames) for space and time; replay results
 - [[deployment]]: three Jeeves on one GCP VM (Docker Compose, Caddy, a relay that fans the streams out to viewers); what's public vs. locked (basic auth on POSTs, 25565 tailnet-only), sleep and spend caps, measured cost (~$25/h for three awake), CPU and RAM
+- [[region-graph]]: 2A's view of terrain: regions code flood-fills from the seen memory (water and far ground now seen), links by the guards' rules (drop ≤ 3, climb N, swim, bridge N, unseen), `region_graph` in every call, the `terrain` height-map tool, token budget, ceilings
 - [[learning]]: decision: context only, no training. Live and cross-episode loops, per-minute traces linked by lineage, agentic search over past traces
 
 ### Research

@@ -22,6 +22,7 @@ import { makeSystem2, type Decision, type RequestDraft } from './system2.ts'
 import { judgmentOrg, Recorder } from './trace.ts'
 import { worldFeed } from './worldfeed.ts'
 import { blockAt, explored, frontier, noteDug, observe, placedStanding, reachable, scan, seenMap, seenTypes, type Pos } from './world.ts'
+import { describeGraph, regionsNear, terrain } from './regions.ts'
 
 export type AgentOptions = {
   host?: string
@@ -416,6 +417,7 @@ export async function startAgent (opts: AgentOptions) {
       out = tool === 'scan' ? scan(bot, input as Parameters<typeof scan>[1])
         : tool === 'reachable' ? await reachable(bot, input.position as Pos)
           : tool === 'survey' ? await survey()
+            : tool === 'terrain' ? terrain(bot, input as Parameters<typeof terrain>[1])
             : { error: `unknown tool ${tool}` }
     } catch (err) { out = { error: String(err) } }
     recorder.record('perceive', {
@@ -497,6 +499,7 @@ export async function startAgent (opts: AgentOptions) {
       program: { version: version(program), guidance: program.guidance, allowed_behaviors: program.allowed_behaviors },
       fast_model_view: lastView,
       seen_map: seenMap(bot), // everything the bot has seen around it, so the scene doesn't hinge on this turn's scans
+      region_graph: describeGraph(regionsNear(bot)), // the terrain as regions and links (src/regions.ts)
       // Where it has looked, and where not yet: the frontier widens from where the instruction came.
       explored: { cell: 16, bot_at: [Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.z)], origin: root?.origin ? [root.origin[0], root.origin[2]] : null, frontier: frontier(bot, root?.origin ? { x: root.origin[0], z: root.origin[2] } : undefined), centers: explored(bot) },
       peers: peers.length ? peers : undefined,
