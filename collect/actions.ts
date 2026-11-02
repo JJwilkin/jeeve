@@ -56,68 +56,77 @@ export function features (bot: Bot, rec: EpisodeRecorder): Features {
 }
 
 // ---- the terrain queries, on the recorder's view of the chunks (rec.at: a block's class) ----
-// Walks out up to 12 blocks in each of 8 directions, reading each column's ground: the first block that isn't open,
-// from 4 above the feet down to 16 below. Stops at the first feature, a wall (a rise of 5+), lava or an unloaded chunk.
-// About 8 × 12 × 21 class lookups at most, once per action choice.
-const OPEN_CLASSES = new Set(['air', 'plant', 'passable_other', 'crop', 'light', 'rail', 'climbable', 'snow_layer', 'cobweb', 'sugar_cane_bamboo'])
+// Walks out up to 12 blocks in each of 8 directions from the bot's own ground, reading each column's ground at the
+// walk's current level: below the feet if the feet and head blocks there are open (so a canopy overhead doesn't
+// count), else the first block up to 4 higher with two open blocks above it. Stops at the first feature, a wall (a
+// rise of 5+), lava, an unloaded chunk, or a diagonal step between two blocked corners. ≤ ~2,000 lookups, once per
+// action choice.
+const OPEN_CLASSES = new Set(['air', 'plant', 'passable_other', 'crop', 'rail', 'climbable', 'snow_layer', 'cobweb'])
 const [OPEN, WATER, SOLID, STOP] = [0, 1, 2, 3]
 const DIRS: Dir[] = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]]
 const REACH = 12
-const kinds = new WeakMap<object, Uint8Array>()
-const kindsOf = (names: string[]) => {
-  const k = new Uint8Array(256).fill(STOP) // 255: not loaded
-  names.forEach((n, i) => { k[i] = OPEN_CLASSES.has(n) ? OPEN : n === 'water' || n === 'water_plant' ? WATER : n === 'lava' || n === 'fire' ? STOP : SOLID })
-  return k
-}
 export function terrain (rec: Pick<EpisodeRecorder, 'at' | 'classes'>, [fx, fy, fz]: Xyz): Terrain {
-  let kind = kinds.get(rec.classes)
-  if (!kind) kinds.set(rec.classes, kind = kindsOf(rec.classes.names))
+  const kind = new Uint8Array(256).fill(STOP) // 255: not loaded
+  rec.classes.names.forEach((n, i) => { kind[i] = OPEN_CLASSES.has(n) ? OPEN : n === 'water' || n === 'water_plant' ? WATER : n === 'lava' || n === 'fire' ? STOP : SOLID })
+  const k = (x: number, y: number, z: number) => kind[rec.at(x, y, z)]
   const out: Terrain = { edges: [], drops: [], ledges: [], gaps: [], waters: [] }
-  // A column's ground height relative to the block under the feet (0: level), or null where the walk must stop.
-  const ground = (x: number, z: number) => {
-    for (let y = fy + 4; y >= fy - 16; y--) {
-      const k = kind[rec.at(x, y, z)]
-      if (k !== OPEN) return k === STOP ? null : { rel: y - fy + 1, water: k === WATER, deep: false }
+  const clear = (x: number, y: number, z: number) => k(x, y, z) === OPEN && k(x, y + 1, z) === OPEN
+  // A column's ground relative to the block under the feet (0: level), seen from level prev; null: stop here.
+  const ground = (x: number, z: number, prev: number) => {
+    const base = fy + prev
+    const found = (y: number, at: number) => at === STOP ? null : { rel: y - fy + 1, water: at === WATER, deep: false }
+    if (clear(x, base, z)) {
+      for (let y = base - 1; y >= base - 17; y--) if (k(x, y, z) !== OPEN) return found(y, k(x, y, z))
+      return { rel: prev - 16, water: false, deep: true }
     }
-    return { rel: -16, water: false, deep: true }
+    for (let y = base; y <= base + 4; y++) {
+      if (k(x, y, z) === STOP) return null
+      if (k(x, y, z) !== OPEN && clear(x, y + 1, z)) return found(y, k(x, y, z))
+    }
+    return { rel: prev + 5, water: false, deep: false }
   }
+  const here = ground(fx, fz, 0)
+  const start = here && !here.water ? here.rel : 0 // not 0 when the bot is mid-jump
   for (const dir of DIRS) {
     const [dx, dz] = dir
-    const col = (d: number) => ground(fx + dx * d, fz + dz * d)
-    const stand = (d: number, rel: number): Xyz => [fx + dx * d, fy + rel, fz + dz * d]
-    let prev = 0
+    const x = (d: number) => fx + dx * d
+    const z = (d: number) => fz + dz * d
+    const col = (d: number, prev: number) => ground(x(d), z(d), prev)
+    const stand = (d: number, rel: number): Xyz => [x(d), fy + rel, z(d)]
+    const squeezes = (d: number, prev: number) => !(dx && dz) || clear(x(d), fy + prev, z(d - 1)) || clear(x(d - 1), fy + prev, z(d))
+    let prev = start
     let level = true
     for (let d = 1; d <= REACH; d++) {
-      const c = col(d)
-      if (!c) break
-      const step = c.rel - prev
-      if (c.water) {
-        for (let e = d + 1; e <= REACH; e++) {
-          const b = col(e)
-          if (b?.water) continue
-          if (b && !b.deep && b.rel >= c.rel && b.rel <= c.rel + 3) out.waters.push({ dir, dist: d, width: e - d, near: stand(d - 1, prev), far: stand(e, b.rel) })
+      const next = squeezes(d, prev) ? col(d, prev) : null
+      if (!next) break
+      const step = next.rel - prev
+      if (next.water && step >= -1) {
+        for (let end = d + 1; end <= REACH; end++) {
+          const bank = col(end, next.rel)
+          if (bank?.water) continue
+          if (bank && !bank.deep && bank.rel >= next.rel && bank.rel <= next.rel + 3) out.waters.push({ dir, dist: d, width: end - d, near: stand(d - 1, prev), far: stand(end, bank.rel) })
           break
         }
         break
       }
       if (level && d <= 4 && step <= -1 && step >= -4) out.edges.push({ dir, dist: d, depth: -step })
-      if (step <= -4 && !c.deep) out.drops.push({ dir, dist: d, depth: -step, near: stand(d - 1, prev), floor: stand(d, c.rel) })
+      if (step <= -4 && !next.deep) out.drops.push({ dir, dist: d, depth: -step, near: stand(d - 1, prev), floor: stand(d, next.rel) })
       if (step <= -2) {
-        for (let w = 1; level && d <= 3 && w <= 3; w++) {
-          const b = col(d + w)
-          if (!b || b.water) break
-          if (b.rel - prev <= -2) continue
-          if (b.rel - prev <= 1) out.gaps.push({ dir, dist: d, width: w, depth: -step })
+        for (let width = 1; level && d <= 3 && width <= 3; width++) {
+          const land = col(d + width, prev)
+          if (!land || land.water) break
+          if (land.rel - prev <= -2) continue
+          if (land.rel - prev <= 1) out.gaps.push({ dir, dist: d, width, depth: -step })
           break
         }
         break
       }
       if (step >= 2) {
-        if (step <= 4) out.ledges.push({ dir, dist: d, height: step, near: stand(d - 1, prev), top: stand(d, c.rel) })
+        if (step <= 4) out.ledges.push({ dir, dist: d, height: step, near: stand(d - 1, prev), top: stand(d, next.rel) })
         break
       }
       if (step) level = false
-      prev = c.rel
+      prev = next.rel
     }
   }
   return out

@@ -12,8 +12,10 @@ export const CARDINAL: Array<[number, number]> = [[1, 0], [0, 1], [-1, 0], [0, -
 // open: blocks a player walks through (water and lava too: the guards, not the action, keep it out of lava).
 // walkTo steers to a column's centre with raw controls until standing there (at the boundary the hitbox still
 // rests on the column before, so a step down wouldn't drop yet). stalled: under half a block in a second.
-// A vetoed call rejects with "vetoed: …"; code that catches errors rethrows those, so the outcome says vetoed.
-// clear: digs a block until it's open (retried while gravel or sand falls in); "nothing to dig" means passable too.
+// A vetoed call rejects with "vetoed: …"; code that catches errors rethrows those, so the outcome says vetoed
+// (unless the action says otherwise: climb_down_safely and pillar_up handle some vetoes themselves).
+// clear: digs a block until it's open (waiting for gravel or sand above to fall in, then digging that too);
+// "nothing to dig" means passable too.
 const HELPERS = String.raw`
   const OPEN = /^((cave_|void_)?air|water|lava|short_grass|tall_grass|fern|large_fern|dead_bush|snow|vine|seagrass|tall_seagrass|torch|wall_torch|dandelion|poppy|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley)$|_(flower|tulip|sapling|mushroom|roots|sprouts|petals|bush)$/;
   const open = (x, y, z) => { const n = api.blockAt(x, y, z); return n !== null && OPEN.test(n) };
@@ -24,7 +26,13 @@ const HELPERS = String.raw`
   const vetoed = e => /^vetoed/.test(String(e && e.message));
   const stalled = (() => { let n = 0, mark = null; return () => { if (++n % 20) return false; const p = pos(), was = mark; mark = p; return !!was && flat(p, was) < 0.5 } })();
   const tool = async () => { const t = Object.keys(api.inventory()).find(n => /_pickaxe$/.test(n)) || Object.keys(api.inventory()).find(n => /_shovel$/.test(n)); if (t) await api.equip(t) };
-  const clear = async (x, y, z) => { for (let k = 0; k < 4 && !open(x, y, z); k++) { try { await api.dig(x, y, z) } catch (e) { if (/^nothing to dig/.test(e.message)) return; throw e } } };
+  const clear = async (x, y, z) => {
+    for (let k = 0; k < 4 && !open(x, y, z); k++) {
+      const falls = /^(gravel|sand|red_sand)$/.test(api.blockAt(x, y + 1, z) || '');
+      try { await api.dig(x, y, z) } catch (e) { if (/^nothing to dig/.test(e.message)) return; throw e }
+      if (falls) await api.wait(6);
+    }
+  };
   const walkTo = async (x, z) => {
     for (let i = 0; i < 30; i++) {
       const s = api.self();
@@ -41,20 +49,21 @@ export const behavior = (name: string, description: string, body: string, timeou
   kind: 'behavior', name, description, code: `async (api, t) => {${HELPERS}\n${body}\n}`, channels: ['legs', 'aim', 'hands'], targets: 'block', timeout_s
 })
 
-// Walks to a block with the route-finder; done if it ends there.
-export const NAVIGATE = behavior('navigate_to', 'walk to a block with the route-finder', String.raw`
+// A seeker method: walks to a block with the route-finder; done if it ends there.
+export const NAVIGATE_BODY = String.raw`
   try { await api.goto(t.to[0], t.to[1], t.to[2], 0) } catch (e) { if (vetoed(e)) throw e; return 'stuck' }
-  return flat(pos(), [t.to[0] + 0.5, 0, t.to[2] + 0.5]) <= 1 && Math.abs(pos()[1] - t.to[1]) < 1 ? 'done' : 'stuck';`).code
+  return flat(pos(), [t.to[0] + 0.5, 0, t.to[2] + 0.5]) <= 1 && Math.abs(pos()[1] - t.to[1]) < 1 ? 'done' : 'stuck';`
 
-// A feature-seeking action (brain/tasks/world-model-data.md, #17): one of the features find() returns, and a method
-// among those that fit it. Its code walks to where the feature starts (near) unless it's there already, then runs
-// the method's code (another action's, inlined) on a target made from the feature, as if it started there.
-export type Method<F> = { code: string, fits?: (x: F, f: Features) => boolean, target: (x: F, f: Features) => unknown }
+// A feature-seeking action (row 17 of the actions table in brain/tasks/world-model-data.md): one of the features
+// find() returns, and a method among those that fit it. Its code walks to where the feature starts (near) unless
+// it's there already or the method says stay (it makes its own run-up), then runs the method on a target made from
+// the feature. A method is another action's body (HELPERS are inlined once, for all of them) or whole code (2B's).
+export type Method<F> = ({ body: string } | { code: string }) & { stay?: true, fits?: (x: F, f: Features) => boolean, target: (x: F, f: Features) => unknown }
 export function seeker<F extends { dist: number, near: Xyz }> (name: string, description: string, find: (f: Features) => F[], methods: Record<string, Method<F>>): Authored {
-  const code = `async (api, t) => {
-  const methods = {${Object.entries(methods).map(([k, m]) => `\n${k}: ${m.code}`).join(',')}
+  const code = `async (api, t) => {${HELPERS}
+  const methods = {${Object.entries(methods).map(([k, m]) => `\n${k}: ${'body' in m ? `async (api, t) => {${m.body}\n}` : m.code}`).join(',')}
   };
-  if (t.near) try { await api.goto(t.near[0], t.near[1], t.near[2], 0) } catch (e) { if (/^vetoed/.test(String(e && e.message))) throw e; return 'stuck' }
+  if (t.near) try { await api.goto(t.near[0], t.near[1], t.near[2], 0) } catch (e) { if (vetoed(e)) throw e; return 'stuck' }
   return methods[t.method](api, t.target);
 }`
   return {
@@ -63,7 +72,7 @@ export function seeker<F extends { dist: number, near: Xyz }> (name: string, des
     target: (_bot, f) => {
       const x = pick(find(f))
       const [method, m] = pick(Object.entries(methods).filter(([, m]) => m.fits?.(x, f) ?? true))
-      return { params: { method, ...x }, target: { method, near: x.dist > 1 ? x.near : null, target: m.target(x, f) } }
+      return { params: { method, ...x }, target: { method, near: !m.stay && x.dist > 1 ? x.near : null, target: m.target(x, f) } }
     }
   }
 }

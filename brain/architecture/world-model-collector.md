@@ -56,7 +56,7 @@ What [[world-model-data]] phases 1 and 2 built in `collect/`, and what the first
 
 ## Hand-written actions (phase 2)
 - **One file each in `collect/actions/`,** each exporting an `Authored`: its source, `fits` (from the features) and `target` (its random parameters). The code is a string run in the behavior sandbox, on all three channels (the only layout with legs and aim together).
-  - **Shared helpers** (`collect/actions/common.ts`: passable blocks, `walkTo` a column's centre on raw controls, a stall check, the best tool) are **inlined as source into each action**, so each stays self-contained and could go into Jeeve's library unchanged.
+  - **Shared helpers** (`collect/actions/common.ts`: passable blocks, `walkTo` a column's centre on raw controls, a stall check, the best tool) are **inlined as source into each action** (once per seeker, however many methods it has), so each stays self-contained and could go into Jeeve's library unchanged.
   - `collect/check.ts` compiles every one as an authored behavior.
 - **The actions** (outcomes `done`/`stuck`/`none_found` from the code, `vetoed` when a veto goes uncaught, `timeout` at 20 s):
 
@@ -71,19 +71,19 @@ What [[world-model-data]] phases 1 and 2 built in `collect/`, and what the first
 | `tunnel` | 3–15 blocks, cardinal direction | always | every block dug and walked |
 | `jump_gap` | a gap: direction, distance, width 1–3 | `gaps` | landed past it, at most a block lower |
 | `flee` | a mob, distance 8–20 | mobs | that far from it, or it's gone |
-| `cross_water` | a method: `jump_gap` (≤ 3 wide), `navigate` | `waters` | that method's done |
+| `cross_water` | a method: `jump_gap` (≤ 3 wide and ≤ 3 away, run-up from where it stands, far bank ≤ 1 up), `navigate` | `waters` | that method's done |
 | `get_down_cliff` | a method: `navigate`, `climb_down_safely` | `drops` | that method's done |
 | `reach_ledge` | a method: `navigate`, `pillar_up` (then a step onto it) | `ledges` | that method's done |
 
 - **How they move:**
   - **Raw-control actions press their keys again each tick on the ground,** as a player holds them, so the noise's key releases get corrected.
-  - **Every press is checked by the guards,** so these actions are vetoed where Jeeve would be: a step down of 4, a gap deeper than 3 (vetoed at its edge), sprinting off a cliff.
+  - **Every movement-key press is checked by the guards** (0.8 blocks ahead, at the press), so these actions are vetoed where Jeeve would be: a step down of 4, a gap deeper than 3 (vetoed at its edge). Jump and sprint aren't checked, and keys held in the air aren't pressed again, so a sprint-jump can still clear an edge mid-air.
   - **`climb_down_safely`:** the route-finder first, then digging straight down. The guards allow a dig under the feet only while there's a floor within 3 below it. A veto of the route-finder at the edge counts as "no route", not as the outcome.
-- **Feature-seeking actions** (`seeker` in `common.ts`) pick a feature and a method that fits it. Their code walks to the block before the feature (`near`), then runs the method's code (another action's source, inlined) on a target made from the feature.
+- **Feature-seeking actions** (`seeker` in `common.ts`) pick a feature and a method that fits it. Their code walks to the block before the feature (`near`), unless the method makes its own run-up, then runs the method's code (another action's source, inlined) on a target made from the feature.
   - Not `step_down` for cliffs: walking off 4+ is always vetoed.
   - **2B's bridge and swim across join `cross_water`'s method list** once they're in `collect/actions/` (the slot is marked in `cross_water.ts`).
 - **The terrain queries** (`terrain()` in `collect/actions.ts`) run once per action choice on the recorder's view (`rec.at`, a block's class).
-  - **The walk:** up to 12 blocks out in each of 8 directions. Each column's ground is the first block that isn't open, from 4 above the feet down to 16 below. A walk stops at its first feature, at a wall (a rise of 5+), at lava or at an unloaded chunk. That's ≤ 2,000 lookups.
+  - **The walk:** up to 12 blocks out in each of 8 directions, from the bot's own ground (so mid-jump doesn't read as a step down). Each column's ground is read at the walk's current level: below the feet if the feet and head blocks there are open (a canopy overhead isn't a ledge), else the first block up to 4 higher with two open blocks above it. A walk stops at its first feature, at a wall (a rise of 5+), at lava, at an unloaded chunk, or at a diagonal step between two blocked corners. Water more than a block down is a drop, not a crossing. That's ≤ 2,000 lookups.
   - **What it reports:**
     - `edges`: a step down of 1–4 within 4 blocks, on level ground;
     - `drops`: 4+ down, to a floor within 16;
@@ -100,7 +100,7 @@ What [[world-model-data]] phases 1 and 2 built in `collect/`, and what the first
     - jump_gap 1–3 wide: done; a deep gap: vetoed.
     - climb_down_safely: dug down to the floor.
     - reach_ledge: pillar done; route-finder vetoed (it tried to place a block in the bot).
-    - cross_water: route-finder done; jumping 3 with no run-up stuck.
+    - cross_water: route-finder done; jumping 3 with no run-up stuck. With a run-up from where the bot stands (after the review fixes), done.
   - **A 16-minute natural run, 2 bots:** 9.2k steps at 5.0 steps/s. Every action fit at least once except jump_gap: natural gaps on level ground are rare.
   - **Fixed bug:** tunnel and dig_stairs_down sometimes ended in `error` ("nothing to dig at": a passable block that the helpers' `open` list doesn't name). They now dig through the helpers' `clear`, which treats "nothing to dig" as open.
 
