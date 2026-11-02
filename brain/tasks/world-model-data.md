@@ -145,7 +145,19 @@ Vetoes, failures and deaths are kept on purpose: they're the "this won't work he
   - Total ≈ **$20–30**, worst case ~$35 (the 8-hour cap plus a costly authoring round).
 
 ## Phases
-*Phase 1's code and a local run are done ([[world-model-collector]]): measured numbers there; the GCP smoke run still needs Joshua's yes. `climb_down_safely` turned out not to be in the library, so action 6 is phase-2 work.*
+*Phase 1 is done ([[world-model-collector]]). `climb_down_safely` turned out not to be in the library, so action 6 is phase-2 work.*
+
+**Smoke run (2026-11-02, `jeeve-collect-smoke`, one server, one seed, 4 then 8 bots, ~95 min):**
+- **Rate:** 5.01 steps/s per bot in both phases (target ≥ 4.5); 0 crashes, 0 throttled logins; 571 episodes, 107,515 steps.
+- **CPU:** the collector ~13–15% of a core per bot. Per server at 8 bots: collector 104%, Paper 117% on average (peaks ~250% while Chunky or new chunks load). So 8 bots ≈ 2.2 cores.
+- **Memory:** Paper ~3.75 GB per server; the collector ~200 MB per bot, flat over time.
+- **Size:** 0.6 KB a step gzipped, so 5M steps ≈ 3 GB.
+- **Read back:** an episode loads in `collect/read_episode.py`.
+- **It took three fixes to get here:** `collect/` missing from the image (#21), logins throttled and chunk-load timeouts (#22), and a stop inside the route-finder's tick that crashed it (#23; live Jeeve had it too).
+- **What it means for the big run:**
+  - ~60 bots finish 5M steps in ~4.6 h, on 8 servers using ~18 cores on average. A c2d-standard-32 (~$7) fits the current 32-CPU quota, so the c2d-standard-56 and the quota request below may be unneeded.
+  - Run one collector per server: 60 bots in one Node process would need ~12 GB, past Node's default heap.
+  - One seed gave 39% savanna and 6 river episodes; variety has to come from phase 2's seeds and scenes.
 
 0. **Prerequisite:** land the water-drop fix (`moves.infiniteLiquidDropdownDistance = false` in `guardedMovements`), so the route-finder never plans a drop the guards veto. Otherwise every water label would teach the bug.
 1. **Recorder, format and the reused actions:** written and unit-tested in the repo. Then the smoke run: one server, 4 then 8 bots, ~1 hour. It measures:
