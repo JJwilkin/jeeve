@@ -6,16 +6,19 @@ export type Start = { kind: string, x: number, z: number, biome: string }
 
 // The biome quotas: each kind (and underground, below y 50 under any of them) gets an equal share of natural
 // episodes. Ids or tags, as /locate biome takes them.
-export const KINDS: Record<string, string> = {
+const KINDS: Record<string, string> = {
   plains: 'minecraft:plains', forest: '#minecraft:is_forest', river: '#minecraft:is_river', ocean_shore: '#minecraft:is_beach',
   mountains: '#minecraft:is_mountain', desert: 'minecraft:desert', swamp: 'minecraft:swamp', snowy: 'minecraft:snowy_plains',
   jungle: '#minecraft:is_jungle', badlands: '#minecraft:is_badlands'
 }
 // /locate finds the nearest one, so it's asked from a few points ~2000 blocks apart for more than one start per kind.
 const PROBES = [[0, 0], [2000, 0], [-1000, 1730], [-1000, -1730]]
-export const PREGEN_RADIUS = 128 // view distance (96) plus how far an episode wanders from its start
+// View distance (96) plus how far an episode wanders from its start. Scene spots, 64 out, see past it: the edge of
+// their view generates as they arrive.
+const PREGEN_RADIUS = 128
 
 export async function locateStarts (r: Rcon, log: (...a: unknown[]) => void): Promise<Start[]> {
+  const t0 = Date.now()
   const starts: Start[] = []
   for (const [kind, biome] of Object.entries(KINDS)) {
     for (const [px, pz] of PROBES) {
@@ -27,6 +30,7 @@ export async function locateStarts (r: Rcon, log: (...a: unknown[]) => void): Pr
       if (!starts.some(s => s.kind === kind && Math.hypot(s.x - x, s.z - z) < 64)) starts.push({ kind, x, z, biome: reply.match(/\((minecraft:\w+)\)/)?.[1] ?? biome })
     }
   }
+  log(`${starts.length} starts located in ${((Date.now() - t0) / 1000).toFixed(0)} s: ${[...new Set(starts.map(s => s.kind))].join(', ')}`)
   return starts
 }
 
@@ -42,7 +46,7 @@ export async function pregenerate (r: Rcon, starts: Start[], log: (...a: unknown
   for (const [i, s] of starts.entries()) {
     await r.command(`chunky center ${s.x} ${s.z}`)
     await r.command(`chunky radius ${PREGEN_RADIUS}`)
-    if (/already started/.test(await r.command('chunky start'))) await r.command('chunky confirm')
+    if (/To start a new task/.test(await r.command('chunky start'))) await r.command('chunky confirm')
     await idle()
     log(`chunky: ${i + 1}/${starts.length} starts generated in ${((Date.now() - t0) / 1000).toFixed(0)} s`)
   }

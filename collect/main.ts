@@ -22,26 +22,28 @@ const log = (...a: unknown[]) => console.log(`[collect] ${HOST} ${SEED}`, ...a)
 
 mkdirSync(DIR, { recursive: true })
 const prior = existsSync(`${DIR}/coverage.json`) ? JSON.parse(readFileSync(`${DIR}/coverage.json`, 'utf8')) : { steps: 0, counts: {} }
-if (prior.done) { log(`done already (${prior.steps} steps)`); process.exit(0) }
+if (prior.steps >= TARGET) { log(`done already (${prior.steps} steps)`); process.exit(0) }
 let total: number = prior.steps
 let stopping = false
 const children = new Map<ChildProcess, string>()
-const counts = new Map<string, Record<string, number>>([['prior', prior.counts]]) // per bot: its biome|action|outcome counts
+// Per bot: its biome|action|outcome counts. Per seed, so the scheduler balances each seed on its own.
+const counts = new Map<string, Record<string, number>>([['prior', prior.counts]])
 
 function merged () {
   const all: Record<string, number> = {}
   for (const c of counts.values()) for (const [k, n] of Object.entries(c)) all[k] = (all[k] ?? 0) + n
   return all
 }
-const save = () => writeFileSync(`${DIR}/coverage.json`, JSON.stringify({ steps: total, done: total >= TARGET, counts: merged() }, null, 1))
+const save = () => writeFileSync(`${DIR}/coverage.json`, JSON.stringify({ steps: total, counts: merged() }, null, 1))
 
 // Paper refuses a second login from one address within 4 s (bukkit.yml connection-throttle): bots that connected
 // together kicked each other in a loop (smoke run, 2026-11-02). So logins go one at a time, at least 5 s apart.
 let nextLogin = 0
 const loginIn = (min = 0) => { const t = Math.max(Date.now() + min, nextLogin); nextLogin = t + 5000; return t - Date.now() }
 
-function startBot (name: string) {
-  const child = fork('collect/bot.ts', [], { env: { ...env, COLLECT_NAME: name, COLLECT_SPLIT: SPLIT } })
+function startBot (index: number) {
+  const name = `C_${index}`
+  const child = fork('collect/bot.ts', [], { env: { ...env, COLLECT_NAME: name, COLLECT_INDEX: String(index), COLLECT_SPLIT: SPLIT } })
   children.set(child, name)
   child.on('message', (m: { steps: number, wall_ms: number, cpu_ms: number, bytes: number, capture_ms: number, counts: Record<string, number>, biome: string, scene: string, episode: number }) => {
     total += m.steps
@@ -54,7 +56,7 @@ function startBot (name: string) {
   })
   child.on('exit', code => {
     children.delete(child)
-    if (!stopping) { const ms = loginIn(5000); console.log(`[collect] ${name} exited (${code}); restarting in ${(ms / 1000).toFixed(0)} s`); setTimeout(() => startBot(name), ms) }
+    if (!stopping) { const ms = loginIn(5000); console.log(`[collect] ${name} exited (${code}); restarting in ${(ms / 1000).toFixed(0)} s`); setTimeout(() => startBot(index), ms) }
   })
 }
 
@@ -86,11 +88,8 @@ await rotate()
 setInterval(() => void rotate().catch(() => {}), ROTATE_MS)
 
 // The starts are found once per seed; a kept world (or a re-run of the same seed) reuses them.
-if (!existsSync(`${DIR}/starts.json`)) {
-  const t0 = Date.now()
-  const starts = await locateStarts(r, log)
-  writeFileSync(`${DIR}/starts.json`, JSON.stringify({ seed: SEED, starts }, null, 1))
-  log(`${starts.length} starts located in ${((Date.now() - t0) / 1000).toFixed(0)} s: ${[...new Set(starts.map(s => s.kind))].join(', ')}`)
-}
-await pregenerate(r, JSON.parse(readFileSync(`${DIR}/starts.json`, 'utf8')).starts, log)
-for (let b = 1; b <= BOTS; b++) setTimeout(() => startBot(`C_${b}`), loginIn())
+const startsFile = `${DIR}/starts.json`
+const starts = existsSync(startsFile) ? JSON.parse(readFileSync(startsFile, 'utf8')).starts : await locateStarts(r, log)
+writeFileSync(startsFile, JSON.stringify({ seed: SEED, starts }, null, 1))
+await pregenerate(r, starts, log)
+for (let b = 1; b <= BOTS; b++) setTimeout(() => startBot(b), loginIn())

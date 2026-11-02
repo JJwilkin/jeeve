@@ -129,32 +129,28 @@ const KIT = () => [
   Math.random() < 0.3 && ['torch', int(1, 16)]
 ].filter(Boolean).sort(() => Math.random() - 0.5) as Array<[string, number]>
 
-// spreadplayers lands on the surface (or, with under, the highest floor below that y), never in a liquid; where it
-// finds no spot, try another.
-async function teleport (at: () => [number, number], range: number, under = '') {
-  for (let tries = 1; ; tries++) {
-    const [x, z] = at()
-    const reply = await r.command(`spreadplayers ${Math.round(x)} ${Math.round(z)} 0 ${range} ${under}false ${NAME}`)
-    if (/^Spread/.test(reply)) return
-    if (tries >= 10) return log('teleport failed 10 times; starting where it stands:', reply)
-  }
-}
-
 // Each kind of start has an equal share, underground (below y 50 under any start) included. A scene goes into a
 // surface start's pre-generated area, on a ring that gives each of the server's bots its own spot.
-const KINDS = [...new Set(STARTS.map(s => s.kind)), ...(STARTS.length ? ['underground'] : [])]
-const RING = Number(NAME.split('_').at(-1)) * Math.PI / 4
-async function place (scene: boolean) {
-  if (!STARTS.length) return teleport(() => [int(-RADIUS, RADIUS), int(-RADIUS, RADIUS)], 24).then(() => 'random')
-  if (scene) {
-    let s = pick(STARTS)
-    await teleport(() => { s = pick(STARTS); return [s.x + Math.cos(RING) * 64, s.z + Math.sin(RING) * 64] }, 8) // all water there: another start
-    return s.kind
-  }
-  const kind = pick(KINDS)
+const QUOTA = [...new Set(STARTS.map(s => s.kind)), ...(STARTS.length ? ['underground'] : [])]
+const RING = Number(env.COLLECT_INDEX ?? 1) / Number(env.COLLECT_BOTS ?? 8) * 2 * Math.PI
+function drawStart (scene: boolean) {
+  if (!STARTS.length) return { kind: 'random', x: int(-RADIUS, RADIUS), z: int(-RADIUS, RADIUS), range: 24, under: '' }
+  if (scene) { const s = pick(STARTS); return { kind: s.kind, x: s.x + Math.cos(RING) * 64, z: s.z + Math.sin(RING) * 64, range: 8, under: '' } }
+  const kind = pick(QUOTA)
   const s = pick(kind === 'underground' ? STARTS : STARTS.filter(s => s.kind === kind))
-  await teleport(() => [s.x, s.z], 24, kind === 'underground' ? 'under 50 ' : '')
-  return kind
+  return { kind, x: s.x, z: s.z, range: 24, under: kind === 'underground' ? 'under 50 ' : '' }
+}
+
+// spreadplayers lands on the surface (or, with under, the highest floor below that y), never in a liquid; where it
+// finds no spot, another start. Returns the start's kind, or 'stayed' when ten tries found none.
+async function place (scene: boolean) {
+  for (let tries = 1; tries <= 10; tries++) {
+    const s = drawStart(scene)
+    const reply = await r.command(`spreadplayers ${Math.round(s.x)} ${Math.round(s.z)} 0 ${s.range} ${s.under}false ${NAME}`)
+    if (/^Spread/.test(reply)) return s.kind
+    if (tries === 10) log('teleport failed 10 times; starting where it stands:', reply)
+  }
+  return 'stayed'
 }
 
 // The ground under the bot: the top solid block, below any tree it landed on.
@@ -170,13 +166,13 @@ function ground () {
 async function start () {
   const scene = Math.random() < SCENE_SHARE ? drawScene() : null
   const kind = await place(!!scene)
-  // Each wait gives up after 10 s, and fresh terrain can take longer while Chunky keeps the server busy: wait up to a
-  // minute rather than crash the bot (smoke run, 2026-11-02), then start anyway.
+  // Each wait gives up after 10 s, and terrain generated as the bot arrives can take longer on a busy server: wait up
+  // to a minute rather than crash the bot (smoke run, 2026-11-02), then start anyway.
   const chunks = async () => { for (let i = 0; i < 6; i++) { try { await bot.waitForChunksToLoad(); break } catch {} } }
   await chunks()
   if (scene) {
     const g = ground()
-    const { fills, stand } = sceneFills(scene, g.x, g.y, g.z)
+    const { fills, stand } = sceneFills(scene, g.x, g.y, g.z, bot.blockAt(g)?.name ?? 'grass_block')
     for (const cmd of fills) { const reply = await r.command(cmd); if (!/^Successfully|^No blocks/.test(reply)) log(cmd, '→', reply) }
     await r.command(`tp ${NAME} ${stand[0] + 0.5} ${stand[1]} ${stand[2] + 0.5} -90 0`) // facing +x, toward the obstacle
   }

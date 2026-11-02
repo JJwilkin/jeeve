@@ -38,18 +38,17 @@ const paper = (host: string, seed: string) => ({
   logging
 })
 
-const n = seeds.map((_, i) => i + 1)
 const compose = {
   name: 'jeeve-collect',
-  services: Object.fromEntries(n.flatMap(i => [
-    [`paper-${i}`, paper(`paper-${i}`, seeds[i - 1])],
-    [`collector-${i}`, {
+  services: Object.fromEntries(seeds.flatMap((seed, i) => [
+    [`paper-${i + 1}`, paper(`paper-${i + 1}`, seed)],
+    [`collector-${i + 1}`, {
       build: '.',
       image: 'jeeve',
       command: ['node', 'collect/main.ts'],
       environment: {
-        COLLECT_HOST: `paper-${i}`,
-        COLLECT_SEED: seeds[i - 1],
+        COLLECT_HOST: `paper-${i + 1}`,
+        COLLECT_SEED: seed,
         COLLECT_BOTS: bots,
         COLLECT_RCON_PASSWORD: password,
         COLLECT_OUT: '/app/episodes',
@@ -58,11 +57,11 @@ const compose = {
       },
       // The host's ./episodes must be writable by uid 1000 (the image's node user); deploy/collect/run.sh sets it up.
       volumes: ['./episodes:/app/episodes', './modules:/app/modules:ro'],
-      depends_on: { [`paper-${i}`]: { condition: 'service_healthy' } },
+      depends_on: { [`paper-${i + 1}`]: { condition: 'service_healthy' } },
       restart: 'no', // it exits when its seed has its steps
       logging
     }]
   ])),
-  volumes: Object.fromEntries(n.map(i => [`paper-${i}`, {}]))
+  volumes: Object.fromEntries(seeds.map((_, i) => [`paper-${i + 1}`, {}]))
 }
 console.log(JSON.stringify(compose, null, 2))
