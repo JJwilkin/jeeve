@@ -58,7 +58,7 @@ assert.deepEqual(ep.far(0, 'height').slice(0, 3), [-48, -47, -46])
 console.log(`format ok: ${STEP.size} B a step, ${FAR.size} B a far view, ${t.names.length} classes`)
 
 // ---- the actions: each hand-written one compiles as an authored behavior ----
-for (const a of WRITTEN) compileBehavior(a.source)
+for (const a of WRITTEN) for (const s of [a.source, ...a.variants ?? []]) compileBehavior(s)
 
 // ---- the terrain queries, on a scene: stone up to y 63 and the feet at 0 64 0. East: a step down of 2 from x 3.
 // West: a pit 2 wide (x -2, -3) down to y 49. South (+z): a ledge 3 up from z 4. North: water 3 wide (z -3…-5).
@@ -92,7 +92,7 @@ assert.deepEqual(toward(hill.drops, 1, 0), [{ dir: [1, 0], dist: 7, depth: 10, n
 assert.deepEqual([toward(hill.ledges, -1, 0), toward(hill.edges, -1, 0)], [[], []])
 assert.deepEqual([toward(hill.waters, 0, 1), toward(hill.drops, 0, 1)], [[], [{ dir: [0, 1], dist: 3, depth: 9, near: [0, 64, 2], floor: [0, 55, 3] }]])
 assert.deepEqual(terrain({ classes: t, at: (x: number, y: number) => y <= 63 ? stone : 0 } as any, [0, 65, 0]).edges, [])
-console.log(`actions ok: ${WRITTEN.length} hand-written compile; terrain queries find the scenes' steps, gaps, drops, ledges and water`)
+console.log(`actions ok: ${WRITTEN.length} written actions (every variant) compile; terrain queries find the scenes' steps, gaps, drops, ledges and water`)
 
 // ---- the Python reader, on this file or a recorded one ----
 const file = process.argv[2] ?? join(mkdtempSync(join(tmpdir(), 'episode-')), 'check.ep.gz')

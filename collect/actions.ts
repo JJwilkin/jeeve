@@ -12,6 +12,7 @@ import { CLIMB_DOWN_SAFELY } from './actions/climb_down_safely.ts'
 import { CROSS_WATER } from './actions/cross_water.ts'
 import { DIG_STAIRS_DOWN } from './actions/dig_stairs_down.ts'
 import { FLEE } from './actions/flee.ts'
+import { BRIDGE, SHELTER, SWIM_ACROSS } from './actions/from_2b.ts'
 import { GET_DOWN_CLIFF } from './actions/get_down_cliff.ts'
 import { JUMP_GAP } from './actions/jump_gap.ts'
 import { PILLAR_UP } from './actions/pillar_up.ts'
@@ -175,15 +176,20 @@ export const SEED_ACTIONS: Action[] = [
 
 // ---- authored actions: `async (api, target) => 'done' | 'stuck' | 'none_found'`, run by authoredSpec ----
 // fits/target say when the action applies and what it's aimed at; the code is a library module or hand-written.
-export type Authored = { source: ModuleSource, fits: (f: Features) => boolean, target: (bot: Bot, f: Features) => { params: Record<string, unknown>, target: unknown } }
+// variants: other sources it may run (a seeker's per-method ones); target picks one by returning its source.
+export type Authored = {
+  source: ModuleSource, variants?: ModuleSource[], fits: (f: Features) => boolean
+  target: (bot: Bot, f: Features) => { params: Record<string, unknown>, target: unknown, source?: ModuleSource }
+}
 const HOST: ApiHost = { blockAt, scan, reachable, allowed: [] }
 const authored = (a: Authored): Action => ({
   name: a.source.name,
   fits: a.fits,
   draw: (bot, f) => {
     const t = a.target(bot, f)
-    const spec = authoredSpec({ ...a.source, version: 1 }, HOST)
-    return { params: t.params, runs: [{ behavior: a.source.name, target: t.target, spec }], limit_s: Math.min(20, a.source.timeout_s ?? 20) }
+    const source = t.source ?? a.source
+    const spec = authoredSpec({ ...source, version: 1 }, HOST)
+    return { params: t.params, runs: [{ behavior: source.name, target: t.target, spec }], limit_s: Math.min(20, source.timeout_s ?? 20) }
   }
 })
 
@@ -199,10 +205,11 @@ export function libraryActions (file: string): Action[] {
   })
 }
 
-// Hand-written (collect/actions/, one file each; brain/tasks/world-model-data.md → "Scripted actions"). 2B's bridge,
-// swim across and shelter go here too, and bridge and swim join cross_water's methods (collect/actions/cross_water.ts).
+// Hand-written, and 2B's bridge, swim across and shelter (collect/actions/, one file each; brain/tasks/world-model-data.md
+// → "Scripted actions"). bridge and swim also join cross_water's methods.
 export const WRITTEN: Authored[] = [
-  SPRINT_JUMP, WALK_RAW, STEP_DOWN, CLIMB_DOWN_SAFELY, PILLAR_UP, DIG_STAIRS_DOWN, TUNNEL, JUMP_GAP, FLEE, CROSS_WATER, GET_DOWN_CLIFF, REACH_LEDGE
+  SPRINT_JUMP, WALK_RAW, STEP_DOWN, CLIMB_DOWN_SAFELY, PILLAR_UP, DIG_STAIRS_DOWN, TUNNEL, JUMP_GAP, FLEE, CROSS_WATER, GET_DOWN_CLIFF, REACH_LEDGE,
+  BRIDGE, SWIM_ACROSS, SHELTER
 ]
 export const HAND_WRITTEN: Action[] = WRITTEN.map(authored)
 
