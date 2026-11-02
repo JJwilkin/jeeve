@@ -8,5 +8,5 @@
     "erasableSyntaxOnly": true,
     "skipLibCheck": true
   },
-  "include": ["src", "scripts", "web"]
+  "include": ["src", "scripts", "web", "collect"]
 }
