@@ -15,7 +15,8 @@
     "curate": "node --env-file=../judgment/.env.jeeve scripts/curate.ts",
     "typecheck": "tsc",
     "collect": "node collect/main.ts",
-    "collect:check": "node collect/check.ts"
+    "collect:check": "node collect/check.ts",
+    "author": "node collect/author.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.78",

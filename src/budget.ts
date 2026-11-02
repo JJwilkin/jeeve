@@ -3,6 +3,8 @@
 // ponytail: spend lives in memory, so a restart forgets it; a restarted Jeeve starts asleep (JEEVE_START_ASLEEP),
 // so it spends nothing until someone wakes it.
 
+import type { LanguageModelUsage } from 'ai'
+
 const HOUR_MS = 3_600_000
 const DAY_MS = 24 * HOUR_MS
 
@@ -18,6 +20,9 @@ export type Tokens = { non_cached_input_tokens?: number, output_tokens?: number,
 
 export const usd = (price: typeof PRICES.anthropic, t: Tokens) => ((t.non_cached_input_tokens ?? 0) * price.input + (t.output_tokens ?? 0) * price.output +
   (t.cache_read_input_tokens ?? 0) * price.cache_read + (t.cache_creation_input_tokens ?? 0) * price.cache_write) / 1e6
+
+// One builder (2B) step's cost, from the AI SDK's usage.
+export const builderUsd = (u: LanguageModelUsage) => usd(PRICES.anthropic, { non_cached_input_tokens: u.inputTokenDetails.noCacheTokens, output_tokens: u.outputTokens, cache_read_input_tokens: u.inputTokenDetails.cacheReadTokens, cache_creation_input_tokens: u.inputTokenDetails.cacheWriteTokens })
 
 export class Budget {
   caps: { hour: number, day: number }

@@ -10,7 +10,7 @@ import collectblock from 'mineflayer-collectblock'
 import { Judgeval } from 'judgeval'
 import type { Span } from '@opentelemetry/api'
 import { authoredSpec, BEHAVIORS, CHANNELS, Channels, LOOK_AROUND, PEER_MS, pairLimiter, whisperKind, type ApiHost, type Spec } from './behaviors.ts'
-import { Budget, PRICES, usd, type Tokens } from './budget.ts'
+import { Budget, builderUsd, PRICES, usd, type Tokens } from './budget.ts'
 import { build, BUILDER_MODEL, type BehaviorDraft, type BuildResult, type CapabilityRequest, type TrialReport, type TrialTarget } from './builder.ts'
 import { coalescing, makeDecider, optionTarget, type Ask } from './decide.ts'
 import { attacking, checkSnapshot, describeEntity, describeMemory, foods, handleFor, inventoryCounts, newHandles, rawSnapshot, type Attackers, type Directive } from './encoder.ts'
@@ -686,7 +686,7 @@ export async function startAgent (opts: AgentOptions) {
     }
     console.log(`[builder] ${req.id} started: ${req.need}`)
     build(req, brief, { trial: (d, _r, signal) => trialPort(d, req, signal, span), perceive: (tool, input) => perceive(tool, input, span), log: row => recorder.jsonl({ request: req.id, ...row }),
-      usage: u => budget.spend(usd(PRICES.anthropic, { non_cached_input_tokens: u.inputTokenDetails.noCacheTokens, output_tokens: u.outputTokens, cache_read_input_tokens: u.inputTokenDetails.cacheReadTokens, cache_creation_input_tokens: u.inputTokenDetails.cacheWriteTokens }))
+      usage: u => budget.spend(builderUsd(u))
     }, req.abort.signal, span, session)
       .catch((err): BuildResult => ({ request: req.id, status: 'failed', reason: req.abort.signal.aborted ? `cancelled: ${req.abort.signal.reason}` : String(err), attempts: [] }))
       .then(result => {
