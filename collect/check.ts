@@ -77,7 +77,22 @@ assert.deepEqual(toward(ter.drops, -1, 0), [{ dir: [-1, 0], dist: 2, depth: 14, 
 assert.deepEqual(toward(ter.ledges, 0, 1), [{ dir: [0, 1], dist: 4, height: 3, near: [0, 64, 3], top: [0, 67, 4] }])
 assert.deepEqual(toward(ter.waters, 0, -1), [{ dir: [0, -1], dist: 3, width: 3, near: [0, 64, -2], far: [0, 64, -6] }])
 assert.deepEqual(terrain({ classes: t, at: () => UNLOADED } as any, [0, 64, 0]), { edges: [], drops: [], ledges: [], gaps: [], waters: [] })
-console.log(`actions ok: ${WRITTEN.length} hand-written compile; terrain queries find the scene's step, gap, drop, ledge and water`)
+// East: a hill rising 1 a block to y 69, then a cliff to y 59. West: leaves at y 66 over flat ground (walkable under).
+// South: a lake 9 down from z 3. And the same flat ground seen mid-jump, feet a block up.
+const leaves = t.names.indexOf('leaves')
+const hills = (x: number, y: number, z: number) => {
+  const lane = Math.abs(z) <= 1
+  if (lane && x <= -2 && x >= -4 && y === 66) return leaves
+  if (Math.abs(x) <= 1 && z >= 3) return y <= 53 ? stone : y === 54 ? water : 0
+  const top = lane && x >= 1 ? (x <= 6 ? 63 + x : 59) : 63
+  return y <= top ? stone : 0
+}
+const hill = terrain({ classes: t, at: hills } as any, [0, 64, 0])
+assert.deepEqual(toward(hill.drops, 1, 0), [{ dir: [1, 0], dist: 7, depth: 10, near: [6, 70, 0], floor: [7, 60, 0] }])
+assert.deepEqual([toward(hill.ledges, -1, 0), toward(hill.edges, -1, 0)], [[], []])
+assert.deepEqual([toward(hill.waters, 0, 1), toward(hill.drops, 0, 1)], [[], [{ dir: [0, 1], dist: 3, depth: 9, near: [0, 64, 2], floor: [0, 55, 3] }]])
+assert.deepEqual(terrain({ classes: t, at: (x: number, y: number) => y <= 63 ? stone : 0 } as any, [0, 65, 0]).edges, [])
+console.log(`actions ok: ${WRITTEN.length} hand-written compile; terrain queries find the scenes' steps, gaps, drops, ledges and water`)
 
 // ---- the Python reader, on this file or a recorded one ----
 const file = process.argv[2] ?? join(mkdtempSync(join(tmpdir(), 'episode-')), 'check.ep.gz')
