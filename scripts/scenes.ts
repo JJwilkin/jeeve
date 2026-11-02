@@ -33,7 +33,10 @@ const between = (r: () => number, lo: number, hi: number) => lo + Math.floor(r()
 
 // canopy: leaves above reach (a 3×3×3 crown on top of the trunk); otherwise one low layer of leaves.
 export type Tree = { x: number, z: number, wood: 'oak' | 'birch', trunk: number, canopy: boolean }
-export type Scene = { trees: Tree[], chest: Xyz | null, jeeve: Xyz, josh: Xyz, instructions: string[], waves: number, item?: string }
+export type Scene = {
+  trees: Tree[], chest: Xyz | null, jeeve: Xyz, josh: Xyz, instructions: string[], waves: number, item?: string,
+  fills?: string[], kit?: string[], goal?: Xyz, crossing?: Crossing // crossing scenes: terrain, Jeeve's kit, the block to reach
+}
 
 function placeTrees (r: () => number, n: number, o: { canopy: boolean, trunk: [number, number], near?: Xyz, within?: number }): Tree[] {
   const trees: Tree[] = []
@@ -91,12 +94,78 @@ export function forageScene (seed: number): Scene {
   return { trees, chest: null, waves: 0, jeeve: [0, -60, 0], josh: [2, -60, 2], instructions: ['get me 16 logs'] }
 }
 
+// Crossing: a river, a ravine or a ledge between Jeeve and a gold block set in the far side's surface; "go to" it.
+// Terrain is built up from the superflat (never dug into it, so other scenes on the same world find it flat), and
+// barrier walls on AREA's edge keep the crossing inside. way: there's a way round (a dry strip past one end of the
+// river, stairs down and up the ravine, stairs up the ledge); without one, Jeeve gets blocks to bridge or pillar.
+export type Crossing = {
+  kind: 'river' | 'ravine' | 'ledge', way: boolean, size: string, kit: string[],
+  width?: number, depth?: number, bank?: number, drop?: number, height?: number
+}
+const [X0, Z0, X1, Z1] = [AREA.min[0] + 1, AREA.min[2] + 1, AREA.max[0] - 1, AREA.max[2] - 1] // inside the walls
+const surface = (h: number) => -61 + h // y of the top block, with land h above the superflat
+const walls = () => {
+  const [x0, , z0] = AREA.min, [x1, y1, z1] = AREA.max
+  return [`${x0} -60 ${z0} ${x1} ${y1} ${z0}`, `${x0} -60 ${z1} ${x1} ${y1} ${z1}`, `${x0} -60 ${z0} ${x0} ${y1} ${z1}`, `${x1} -60 ${z0} ${x1} ${y1} ${z1}`].map(b => `fill ${b} barrier`)
+}
+
+export function crossingScene (kind: Crossing['kind'], way: boolean, seed: number): Scene {
+  const r = rng(seed)
+  const edge = between(r, 28, 32) // x where the obstacle starts; Jeeve is west of it, the goal east
+  const [jx, jz] = [edge - between(r, 3, 5), between(r, -18, -6)]
+  const fills = walls()
+  const stairs = (steps: number) => between(r, Z0, Z1 - steps + 1) // z of a staircase's first step, running +z
+  let near: number, far: number, beyond: number, crossing: Omit<Crossing, 'kind' | 'way' | 'kit'>
+  if (kind === 'river') {
+    const width = between(r, 1, 8), depth = between(r, 1, 6), bank = between(r, 0, 5)
+    near = far = depth + bank
+    beyond = edge + width
+    // The channel runs wall to wall, or stops 2 short of one wall: the way round.
+    const [z0, z1] = !way ? [Z0, Z1] : r() < 0.5 ? [Z0 + 2, Z1] : [Z0, Z1 - 2]
+    fills.push(`fill ${X0} -60 ${Z0} ${X1} ${surface(near)} ${Z1} stone`, `fill ${edge} -60 ${z0} ${beyond - 1} ${surface(near)} ${z1} air`,
+      `fill ${edge} -60 ${z0} ${beyond - 1} ${surface(depth)} ${z1} water`)
+    crossing = { size: width <= 3 ? 'narrow' : 'wide', width, depth, bank }
+  } else if (kind === 'ravine') {
+    const width = between(r, 2, 6), drop = between(r, 4, 12)
+    near = far = drop
+    beyond = edge + width
+    fills.push(`fill ${X0} -60 ${Z0} ${edge - 1} ${surface(drop)} ${Z1} stone`, `fill ${beyond} -60 ${Z0} ${X1} ${surface(drop)} ${Z1} stone`)
+    // The gentle way: stairs cut into both walls, down the near one and up the far one, meeting at the floor.
+    if (way) {
+      const z = stairs(drop)
+      for (let i = 0; i < drop; i++) for (const x of [edge - 1, beyond]) fills.push(`fill ${x} ${surface(drop - i)} ${z + i} ${x} ${surface(drop)} ${z + i} air`)
+    }
+    crossing = { size: drop <= 7 ? 'shallow' : 'deep', width, drop }
+  } else {
+    const height = between(r, 2, 6)
+    near = 0
+    far = height
+    beyond = edge
+    fills.push(`fill ${edge} -60 ${Z0} ${X1} ${surface(height)} ${Z1} stone`)
+    if (way) {
+      const z = stairs(height)
+      for (let i = 0; i < height; i++) fills.push(`fill ${edge - 1} -60 ${z + i} ${edge - 1} ${surface(i + 1)} ${z + i} stone`)
+    }
+    crossing = { size: height <= 3 ? 'low' : 'high', height }
+  }
+  const goal: Xyz = [beyond + between(r, 3, 6), surface(far), jz + between(r, -3, 3)]
+  fills.push(`setblock ${goal.join(' ')} gold_block`)
+  const across = kind === 'ledge' ? 'on top of the ledge' : `across the ${kind}`
+  return {
+    trees: [], chest: null, waves: 0, fills, goal,
+    jeeve: [jx, -60 + near, jz], josh: [jx - 2, -60 + near, jz + 3],
+    instructions: [`go to the gold block ${across}`],
+    crossing: { kind, way, kit: way ? [] : ['cobblestone 32'], ...crossing }
+  }
+}
+
 // Build a scene: clear the area, plant the trees, place the chest, put the players in place. A fill holds at most
 // 32768 blocks, so a wide area is cleared in strips.
 export function build (command: Command, scene: Scene, instructor = 'Josh', area: { min: Xyz, max: Xyz } = AREA) {
   const h = area.max[1] + 61, depth = area.max[2] - area.min[2] + 1
   const step = Math.max(1, Math.floor(32768 / (h * depth)))
   for (let x = area.min[0]; x <= area.max[0]; x += step) command(`fill ${x} -60 ${area.min[2]} ${Math.min(area.max[0], x + step - 1)} ${area.max[1]} ${area.max[2]} air`)
+  for (const c of scene.fills ?? []) command(c)
   for (const t of scene.trees) {
     const top = -60 + t.trunk - 1
     command(`fill ${t.x} -60 ${t.z} ${t.x} ${top} ${t.z} ${t.wood}_log`)
@@ -106,11 +175,12 @@ export function build (command: Command, scene: Scene, instructor = 'Josh', area
   if (scene.chest) command(`setblock ${scene.chest.join(' ')} chest`)
   command(`tp Jeeve ${scene.jeeve.join(' ')}`)
   command(`tp ${instructor} ${scene.josh.join(' ')}`)
+  for (const k of scene.crossing?.kit ?? []) command(`give Jeeve ${k}`)
 }
 
 // A camera south of the scene, far enough back to take in all of it.
 export function cameraFor (scene: Scene): { at: Xyz, facing: Xyz } {
-  const pts = [...scene.trees.map(t => [t.x, t.z]), [scene.jeeve[0], scene.jeeve[2]], ...(scene.chest ? [[scene.chest[0], scene.chest[2]]] : [])]
+  const pts = [...scene.trees.map(t => [t.x, t.z]), [scene.jeeve[0], scene.jeeve[2]], ...[scene.chest, scene.goal].filter(p => p).map(p => [p![0], p![2]])]
   const xs = pts.map(p => p[0]), zs = pts.map(p => p[1])
   const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2
   const span = Math.max(12, Math.max(...xs) - Math.min(...xs), (Math.max(...zs) - Math.min(...zs)) * 1.6)
