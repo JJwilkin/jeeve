@@ -7,6 +7,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import mcData from 'minecraft-data'
+import { compileBehavior } from '../src/modules.ts'
+import { WRITTEN, terrain } from './actions.ts'
 import { FAR, RecordWriter, STEP, UNLOADED, classTable, decodeEpisode, encodeEpisode } from './format.ts'
 
 // ---- the class table ----
@@ -54,6 +56,28 @@ assert.ok(ep.step(2, 'near').every(v => v === 3))
 assert.equal(ep.step(0, 'mid_flags')[4095], 5)
 assert.deepEqual(ep.far(0, 'height').slice(0, 3), [-48, -47, -46])
 console.log(`format ok: ${STEP.size} B a step, ${FAR.size} B a far view, ${t.names.length} classes`)
+
+// ---- the actions: each hand-written one compiles as an authored behavior ----
+for (const a of WRITTEN) compileBehavior(a.source)
+
+// ---- the terrain queries, on a scene: stone up to y 63 and the feet at 0 64 0. East: a step down of 2 from x 3.
+// West: a pit 2 wide (x -2, -3) down to y 49. South (+z): a ledge 3 up from z 4. North: water 3 wide (z -3…-5).
+const [stone, water] = ['stone', 'water'].map(n => t.names.indexOf(n))
+const scene = (x: number, y: number, z: number) => {
+  const lane = Math.abs(z) <= 1
+  if (Math.abs(x) <= 1 && z >= -5 && z <= -3) return y <= 61 ? stone : y <= 63 ? water : 0
+  const top = lane && x >= 3 ? 61 : lane && (x === -2 || x === -3) ? 49 : Math.abs(x) <= 1 && z >= 4 ? 66 : 63
+  return y <= top ? stone : 0
+}
+const ter = terrain({ classes: t, at: scene } as any, [0, 64, 0])
+const toward = <T extends { dir: number[] }>(xs: T[], dx: number, dz: number) => xs.filter(x => x.dir[0] === dx && x.dir[1] === dz)
+assert.deepEqual(toward(ter.edges, 1, 0), [{ dir: [1, 0], dist: 3, depth: 2 }])
+assert.deepEqual(toward(ter.gaps, -1, 0), [{ dir: [-1, 0], dist: 2, width: 2, depth: 14 }])
+assert.deepEqual(toward(ter.drops, -1, 0), [{ dir: [-1, 0], dist: 2, depth: 14, near: [-1, 64, 0], floor: [-2, 50, 0] }])
+assert.deepEqual(toward(ter.ledges, 0, 1), [{ dir: [0, 1], dist: 4, height: 3, near: [0, 64, 3], top: [0, 67, 4] }])
+assert.deepEqual(toward(ter.waters, 0, -1), [{ dir: [0, -1], dist: 3, width: 3, near: [0, 64, -2], far: [0, 64, -6] }])
+assert.deepEqual(terrain({ classes: t, at: () => UNLOADED } as any, [0, 64, 0]), { edges: [], drops: [], ledges: [], gaps: [], waters: [] })
+console.log(`actions ok: ${WRITTEN.length} hand-written compile; terrain queries find the scene's step, gap, drop, ledge and water`)
 
 // ---- the Python reader, on this file or a recorded one ----
 const file = process.argv[2] ?? join(mkdtempSync(join(tmpdir(), 'episode-')), 'check.ep.gz')

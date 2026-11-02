@@ -70,7 +70,7 @@ Held-out seeds hold out their built scenes too.
 | 3 | sprint-jump | 2–10 jumps, direction | – | hand |
 | 4 | walk on raw controls | 1–5 s, direction, sneak or not | – | hand |
 | 5 | step down | 1–4 blocks | a ledge | hand |
-| 6 | `climb_down_safely` | – | being up high | reuse (`modules/library.json`) |
+| 6 | `climb_down_safely` | – | being up high (a drop of 4+) | hand (not in the library after all) |
 | 7 | pillar up | 2–8 blocks | blocks in kit | hand |
 | 8 | dig stairs down | 3–12 steps | – | hand |
 | 9 | tunnel | 3–15 blocks, direction | – | hand |
@@ -80,8 +80,8 @@ Held-out seeds hold out their built scenes too.
 | 13 | fell a tree (`collect`) | which tree | trees | reuse |
 | 14 | collect a resource | block type | that block | reuse |
 | 15 | **wall / small shelter** | size 3–5, template | blocks in kit | **2B** |
-| 16 | `track` / flee / `attack_when_ready` | which mob | mobs (night) | reuse; flee by hand |
-| 17 | feature-seeking: cross water, get down a cliff, reach a ledge | a method drawn from those that fit (5, 7, 10, 11, 12…) | that feature | hand (picks among the others) |
+| 16 | `track` / flee / `attack_when_ready` | which mob (flee: how far, 8–20) | mobs (night) | reuse; flee by hand |
+| 17 | feature-seeking: cross water, get down a cliff, reach a ledge | a method drawn from those that fit: water 12 or 1 (10, 11 when 2B's land), cliff 6 or 1, ledge 7 or 1 | that feature | hand (picks among the others) |
 | 18 | random input | 2–10 s | – | generated |
 
 Chests, crafting and eating are out of v1: they teach little about space, and eating happens anyway when the kit's food is used.
@@ -91,7 +91,7 @@ Chests, crafting and eating are out of v1: they teach little about space, and ea
   - **logging:** the runner for authored behaviors already logs each API call with its result and timing;
   - **the same rules:** the same guards and channel limits as Jeeve;
   - **promotion:** any that prove useful can go into Jeeve's library unchanged.
-- **Hand-written ones** live in `collect/actions/`, ~20–80 lines each.
+- **Hand-written ones** live in `collect/actions/`, ~20–40 lines each ([[world-model-collector]] → "Hand-written actions"). Step down isn't a cliff method: walking off 4+ is always vetoed by the guards.
 - **2B's three** (bridge, swim across, shelter) are written by calling `build()` (`src/builder.ts`) from a small script (`collect/author.ts`). The script hands 2B a capability request and a pass check, as 2A would, and runs the trials on built scenes.
   - **The bar:** each must pass on at least half of a validation set of 20 built scenes (rivers and gaps of varied width, depth and bank height). Below that, 2B gets the failing scenes as evidence and another round.
   - **Imperfect is fine:** a 70% bridge gives the model the failures it needs to learn when bridging won't work.

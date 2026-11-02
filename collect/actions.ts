@@ -7,15 +7,36 @@ import { authoredSpec, type ApiHost, type Spec } from '../src/behaviors.ts'
 import { IGNORED_TYPES } from '../src/encoder.ts'
 import { ModuleRegistry, type ModuleSource } from '../src/modules.ts'
 import { blockAt, reachable, scan } from '../src/world.ts'
+import { between, pick } from './actions/common.ts'
+import { CLIMB_DOWN_SAFELY } from './actions/climb_down_safely.ts'
+import { CROSS_WATER } from './actions/cross_water.ts'
+import { DIG_STAIRS_DOWN } from './actions/dig_stairs_down.ts'
+import { FLEE } from './actions/flee.ts'
+import { GET_DOWN_CLIFF } from './actions/get_down_cliff.ts'
+import { JUMP_GAP } from './actions/jump_gap.ts'
+import { PILLAR_UP } from './actions/pillar_up.ts'
+import { REACH_LEDGE } from './actions/reach_ledge.ts'
+import { SPRINT_JUMP } from './actions/sprint_jump.ts'
+import { STEP_DOWN } from './actions/step_down.ts'
+import { TUNNEL } from './actions/tunnel.ts'
+import { WALK_RAW } from './actions/walk_raw.ts'
 import type { EpisodeRecorder } from './recorder.ts'
 
-export type Features = { logs: string[], blocks: string[], mobs: Entity[], food: string[], drop: boolean }
+export type Xyz = [number, number, number]
+export type Dir = [number, number] // a step in x, z: one of 8 directions
+// Terrain features in one direction, nearest first. dist: blocks out to the feature's first column. near: where to
+// stand just before it; floor, top, far: where to stand at the bottom, on top, across.
+export type Edge = { dir: Dir, dist: number, depth: number } // a step down of 1–4, level ground before it
+export type Drop = { dir: Dir, dist: number, depth: number, near: Xyz, floor: Xyz } // a drop of 4+ (to a floor within 16)
+export type Ledge = { dir: Dir, dist: number, height: number, near: Xyz, top: Xyz } // a rise of 2–4
+export type Gap = { dir: Dir, dist: number, width: number, depth: number } // 1–3 wide and 2+ deep (16: 16 or more), level ground before it
+export type Water = { dir: Dir, dist: number, width: number, near: Xyz, far: Xyz } // water with land on both sides
+export type Terrain = { edges: Edge[], drops: Drop[], ledges: Ledge[], gaps: Gap[], waters: Water[] }
+export type Features = Terrain & { logs: string[], blocks: string[], mobs: Entity[], food: string[], placeable: string[] }
 export type Run = { behavior: string, target: unknown, spec?: Spec }
 export type Draw = { params: Record<string, unknown>, runs: Run[], limit_s: number }
 export type Action = { name: string, fits: (f: Features) => boolean, draw: (bot: Bot, f: Features) => Draw }
 
-const pick = <T>(xs: T[]) => xs[Math.floor(Math.random() * xs.length)]
-const between = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
 const gauss = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random())
 const limit = () => Math.round(between(5, 20))
 const short = (e: Entity) => ({ id: e.id, name: e.name })
@@ -27,14 +48,79 @@ export function features (bot: Bot, rec: EpisodeRecorder): Features {
   const blocks = [...new Set(bot.findBlocks({ matching: ids, maxDistance: 24, count: 64 }).map(p => bot.blockAt(p)?.name).filter(Boolean) as string[])]
   const me = bot.entity.position
   const mobs = Object.values(bot.entities).filter(e => e !== bot.entity && !IGNORED_TYPES.has(e.type) && e.type !== 'player' && e.position.distanceTo(me) <= 24)
-  const food = bot.food < 20 ? [...new Set(bot.inventory.items().filter(i => bot.registry.foodsByName[i.name]).map(i => i.name))] : []
-  // A drop of 4+ within 5 blocks in any of 8 directions.
+  const items = bot.inventory.items()
+  const food = bot.food < 20 ? [...new Set(items.filter(i => bot.registry.foodsByName[i.name]).map(i => i.name))] : []
+  const placeable = [...new Set(items.filter(i => bot.registry.blocksByName[i.name]?.boundingBox === 'block').map(i => i.name))]
   const f = me.floored()
-  const drop = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]].some(([dx, dz]) => [2, 3, 4, 5].some(d => {
-    for (let k = 1; k <= 4; k++) if (rec.at(f.x + dx * d, f.y - k, f.z + dz * d) !== 0) return false
-    return true
-  }))
-  return { logs: blocks.filter(b => b.endsWith('_log')), blocks, mobs, food, drop }
+  return { logs: blocks.filter(b => b.endsWith('_log')), blocks, mobs, food, placeable, ...terrain(rec, [f.x, f.y, f.z]) }
+}
+
+// ---- the terrain queries, on the recorder's view of the chunks (rec.at: a block's class) ----
+// Walks out up to 12 blocks in each of 8 directions, reading each column's ground: the first block that isn't open,
+// from 4 above the feet down to 16 below. Stops at the first feature, a wall (a rise of 5+), lava or an unloaded chunk.
+// About 8 × 12 × 21 class lookups at most, once per action choice.
+const OPEN_CLASSES = new Set(['air', 'plant', 'passable_other', 'crop', 'light', 'rail', 'climbable', 'snow_layer', 'cobweb', 'sugar_cane_bamboo'])
+const [OPEN, WATER, SOLID, STOP] = [0, 1, 2, 3]
+const DIRS: Dir[] = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]]
+const REACH = 12
+const kinds = new WeakMap<object, Uint8Array>()
+const kindsOf = (names: string[]) => {
+  const k = new Uint8Array(256).fill(STOP) // 255: not loaded
+  names.forEach((n, i) => { k[i] = OPEN_CLASSES.has(n) ? OPEN : n === 'water' || n === 'water_plant' ? WATER : n === 'lava' || n === 'fire' ? STOP : SOLID })
+  return k
+}
+export function terrain (rec: Pick<EpisodeRecorder, 'at' | 'classes'>, [fx, fy, fz]: Xyz): Terrain {
+  let kind = kinds.get(rec.classes)
+  if (!kind) kinds.set(rec.classes, kind = kindsOf(rec.classes.names))
+  const out: Terrain = { edges: [], drops: [], ledges: [], gaps: [], waters: [] }
+  // A column's ground height relative to the block under the feet (0: level), or null where the walk must stop.
+  const ground = (x: number, z: number) => {
+    for (let y = fy + 4; y >= fy - 16; y--) {
+      const k = kind[rec.at(x, y, z)]
+      if (k !== OPEN) return k === STOP ? null : { rel: y - fy + 1, water: k === WATER, deep: false }
+    }
+    return { rel: -16, water: false, deep: true }
+  }
+  for (const dir of DIRS) {
+    const [dx, dz] = dir
+    const col = (d: number) => ground(fx + dx * d, fz + dz * d)
+    const stand = (d: number, rel: number): Xyz => [fx + dx * d, fy + rel, fz + dz * d]
+    let prev = 0
+    let level = true
+    for (let d = 1; d <= REACH; d++) {
+      const c = col(d)
+      if (!c) break
+      const step = c.rel - prev
+      if (c.water) {
+        for (let e = d + 1; e <= REACH; e++) {
+          const b = col(e)
+          if (b?.water) continue
+          if (b && !b.deep && b.rel >= c.rel && b.rel <= c.rel + 3) out.waters.push({ dir, dist: d, width: e - d, near: stand(d - 1, prev), far: stand(e, b.rel) })
+          break
+        }
+        break
+      }
+      if (level && d <= 4 && step <= -1 && step >= -4) out.edges.push({ dir, dist: d, depth: -step })
+      if (step <= -4 && !c.deep) out.drops.push({ dir, dist: d, depth: -step, near: stand(d - 1, prev), floor: stand(d, c.rel) })
+      if (step <= -2) {
+        for (let w = 1; level && d <= 3 && w <= 3; w++) {
+          const b = col(d + w)
+          if (!b || b.water) break
+          if (b.rel - prev <= -2) continue
+          if (b.rel - prev <= 1) out.gaps.push({ dir, dist: d, width: w, depth: -step })
+          break
+        }
+        break
+      }
+      if (step >= 2) {
+        if (step <= 4) out.ledges.push({ dir, dist: d, height: step, near: stand(d - 1, prev), top: stand(d, c.rel) })
+        break
+      }
+      if (step) level = false
+      prev = c.rel
+    }
+  }
+  return out
 }
 
 export const SEED_ACTIONS: Action[] = [
@@ -80,7 +166,7 @@ export const SEED_ACTIONS: Action[] = [
 
 // ---- authored actions: `async (api, target) => 'done' | 'stuck' | 'none_found'`, run by authoredSpec ----
 // fits/target say when the action applies and what it's aimed at; the code is a library module or hand-written.
-type Authored = { source: ModuleSource, fits: (f: Features) => boolean, target: (bot: Bot, f: Features) => { params: Record<string, unknown>, target: unknown } }
+export type Authored = { source: ModuleSource, fits: (f: Features) => boolean, target: (bot: Bot, f: Features) => { params: Record<string, unknown>, target: unknown } }
 const HOST: ApiHost = { blockAt, scan, reachable, allowed: [] }
 const authored = (a: Authored): Action => ({
   name: a.source.name,
@@ -92,10 +178,9 @@ const authored = (a: Authored): Action => ({
   }
 })
 
-// Reused from Jeeve's library (modules/library.json), when it's there.
-const FROM_LIBRARY: Record<string, Omit<Authored, 'source'>> = {
-  climb_down_safely: { fits: f => f.drop, target: () => ({ params: {}, target: null }) }
-}
+// Reused from Jeeve's library (modules/library.json), when it's there. None yet: climb_down_safely turned out not to
+// be in it, so it's hand-written below.
+const FROM_LIBRARY: Record<string, Omit<Authored, 'source'>> = {}
 export function libraryActions (file: string): Action[] {
   const lib = new ModuleRegistry(undefined, file)
   lib.load()
@@ -105,10 +190,12 @@ export function libraryActions (file: string): Action[] {
   })
 }
 
-// Phase 2 (brain/tasks/world-model-data.md): the hand-written actions (sprint-jump, raw-control walks, step down,
-// pillar, dig stairs, tunnel, jump a gap, flee, feature-seeking) and 2B's (bridge, swim across, shelter) go in
-// collect/actions/, one file each exporting an `Authored`, and are listed here.
-export const HAND_WRITTEN: Action[] = ([] as Authored[]).map(authored)
+// Hand-written (collect/actions/, one file each; brain/tasks/world-model-data.md → "Scripted actions"). 2B's bridge,
+// swim across and shelter go here too, and bridge and swim join cross_water's methods (collect/actions/cross_water.ts).
+export const WRITTEN: Authored[] = [
+  SPRINT_JUMP, WALK_RAW, STEP_DOWN, CLIMB_DOWN_SAFELY, PILLAR_UP, DIG_STAIRS_DOWN, TUNNEL, JUMP_GAP, FLEE, CROSS_WATER, GET_DOWN_CLIFF, REACH_LEDGE
+]
+export const HAND_WRITTEN: Action[] = WRITTEN.map(authored)
 
 // ---- random input: correlated look drift and random key holds ----
 const KEYS: Array<[string, number]> = [['forward', 0.6], ['back', 0.15], ['left', 0.25], ['right', 0.25], ['jump', 0.3], ['sprint', 0.3], ['sneak', 0.1]]
