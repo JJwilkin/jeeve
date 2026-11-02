@@ -85,7 +85,7 @@ What [[world-model-data]] phases 1 and 2 built in `collect/`, and what the first
     - reach_ledge: pillar done; route-finder vetoed (it tried to place a block in the bot).
     - cross_water: route-finder done; jumping 3 with no run-up stuck.
   - **A 16-minute natural run, 2 bots:** 9.2k steps at 5.0 steps/s. Every action fit at least once except jump_gap: natural gaps on level ground are rare.
-  - **Known bug:** tunnel and dig_stairs_down sometimes end in `error`. The cause is "nothing to dig at": a passable block that the helpers' `open` list doesn't name.
+  - **Fixed bug:** tunnel and dig_stairs_down sometimes ended in `error` ("nothing to dig at": a passable block that the helpers' `open` list doesn't name). They now dig through the helpers' `clear`, which treats "nothing to dig" as open.
 
 ## Measured (local, 2026-11-02, Apple-silicon Mac; one Paper 26.1.2 server, normal terrain, no Chunky)
 Two bots for 8 episodes, then one bot for 2 (2 × 4 min + 2 min):

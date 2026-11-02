@@ -13,6 +13,7 @@ export const CARDINAL: Array<[number, number]> = [[1, 0], [0, 1], [-1, 0], [0, -
 // walkTo steers to a column's centre with raw controls until standing there (at the boundary the hitbox still
 // rests on the column before, so a step down wouldn't drop yet). stalled: under half a block in a second.
 // A vetoed call rejects with "vetoed: …"; code that catches errors rethrows those, so the outcome says vetoed.
+// clear: digs a block until it's open (retried while gravel or sand falls in); "nothing to dig" means passable too.
 const HELPERS = String.raw`
   const OPEN = /^((cave_|void_)?air|water|lava|short_grass|tall_grass|fern|large_fern|dead_bush|snow|vine|seagrass|tall_seagrass|torch|wall_torch|dandelion|poppy|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley)$|_(flower|tulip|sapling|mushroom|roots|sprouts|petals|bush)$/;
   const open = (x, y, z) => { const n = api.blockAt(x, y, z); return n !== null && OPEN.test(n) };
@@ -23,6 +24,7 @@ const HELPERS = String.raw`
   const vetoed = e => /^vetoed/.test(String(e && e.message));
   const stalled = (() => { let n = 0, mark = null; return () => { if (++n % 20) return false; const p = pos(), was = mark; mark = p; return !!was && flat(p, was) < 0.5 } })();
   const tool = async () => { const t = Object.keys(api.inventory()).find(n => /_pickaxe$/.test(n)) || Object.keys(api.inventory()).find(n => /_shovel$/.test(n)); if (t) await api.equip(t) };
+  const clear = async (x, y, z) => { for (let k = 0; k < 4 && !open(x, y, z); k++) { try { await api.dig(x, y, z) } catch (e) { if (/^nothing to dig/.test(e.message)) return; throw e } } };
   const walkTo = async (x, z) => {
     for (let i = 0; i < 30; i++) {
       const s = api.self();

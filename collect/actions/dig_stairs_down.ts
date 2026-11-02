@@ -8,7 +8,7 @@ export const DIG_STAIRS_DOWN: Authored = {
   await tool();
   for (let n = 0; n < t.steps; n++) {
     const [x, y, z] = feet(), nx = x + t.dir[0], nz = z + t.dir[1];
-    for (const dy of [1, 0, -1]) for (let k = 0; k < 4 && !open(nx, y + dy, nz); k++) await api.dig(nx, y + dy, nz);
+    for (const dy of [1, 0, -1]) await clear(nx, y + dy, nz);
     if (!(await walkTo(nx, nz))) return 'stuck';
     for (let k = 0; k < 10 && (feet()[1] >= y || !api.self().on_ground); k++) await api.wait(1); // land first: digging in the air is 5× slower
   }

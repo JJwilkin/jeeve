@@ -8,7 +8,7 @@ export const TUNNEL: Authored = {
   await tool();
   for (let n = 0; n < t.n; n++) {
     const [x, y, z] = feet(), nx = x + t.dir[0], nz = z + t.dir[1];
-    for (const dy of [0, 1]) for (let k = 0; k < 4 && !open(nx, y + dy, nz); k++) await api.dig(nx, y + dy, nz);
+    for (const dy of [0, 1]) await clear(nx, y + dy, nz);
     if (!(await walkTo(nx, nz))) return 'stuck';
   }
   return 'done';`),
