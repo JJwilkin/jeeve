@@ -84,7 +84,8 @@ export function makeDecider (ctx: DecideCtx) {
     for (const [id, q] of Object.entries(ctx.program.questions)) {
       if (q.type === 'noul') { questions[id] = { type: 'noul', instructions: q.instructions }; continue }
       options[id] = optionsFor(q.claims, ctx.program.allowed_behaviors, enc, running(ctx, q), ctx.remaining, ctx.wanted(), foods(ctx.bot))
-      const busy = !!ctx.directive()
+      // Idle behaviors sit out a directive, unless 2A allowed only idle ones here (else Jev could only stand still).
+      const busy = !!ctx.directive() && Object.values(options[id]).some(o => o.behavior && !BEHAVIORS[o.behavior]?.idle)
       for (const [k, o] of Object.entries(options[id])) if (ctx.cooling?.(optionTarget(k)) || (busy && o.behavior && BEHAVIORS[o.behavior]?.idle)) delete options[id][k]
       // Shuffled per call and traced: Jev leans toward early options on close calls.
       optionOrder[id] = shuffled(Object.keys(options[id])).slice(0, LIMITS.options)

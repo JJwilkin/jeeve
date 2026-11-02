@@ -129,7 +129,7 @@ const march = (blockAt: (p: Vec3) => { name: string } | null) => (from: Vec3, di
 }
 
 // One decision end to end with a fake bot and a fake Jev.
-async function decideWith (answers: Record<string, any>, place: [number, number, number] | null = null, cooling?: (option: string) => boolean, slots: Record<string, unknown> = {}, threatened = false) {
+async function decideWith (answers: Record<string, any>, place: [number, number, number] | null = null, cooling?: (option: string) => boolean, slots: Record<string, unknown> = {}, threatened = false, program = DEFAULT_PROGRAM) {
   const me = { id: 1, position: new Vec3(0, 0, 0), velocity: new Vec3(0, 0, 0), yaw: 0, type: 'player', username: 'Jeeve' }
   const josh = { id: 2, position: new Vec3(0, 0, -5), velocity: new Vec3(0, 0, 0), type: 'player', username: 'Josh', height: 1.8 }
   const bot: any = {
@@ -151,7 +151,7 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   const escalations: string[] = []
   let seen: any
   const decide = makeDecider({
-    bot, program: DEFAULT_PROGRAM, handles: newHandles(), channels,
+    bot, program, handles: newHandles(), channels,
     record: r => { traces.push(r); return 'span-1' },
     escalate: reason => escalations.push(reason),
     directive: () => ({ text: 'collect 10 logs', from: 'Josh', at: 0, inventory: {}, place }), events: () => [],
@@ -199,6 +199,11 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   // ...unless the bot is under threat: then a channel's answer (fight back) wins.
   const hit = await decideWith({ body: { choice: 'keep_current', confidence: 0.9 }, legs: { choice: 'navigate:E0', confidence: 0.9 }, escalate: { noul: 0.1 } }, null, undefined, { legs: tree, aim: tree, hands: tree }, true)
   assert.notEqual(hit.trace.output.applied.legs, 'held')
+  // Idle behaviors sit out a directive, unless 2A allowed only idle ones for the channel: then they're kept, not
+  // just keep_current (Jeeve stood at a river for 10 minutes on "allow only wander", 2026-11-02).
+  assert.ok(!('wander' in r.seen.questions.legs.criteria))
+  const idleOnly = await decideWith({ escalate: { noul: 0.1 } }, null, undefined, {}, false, { ...DEFAULT_PROGRAM, allowed_behaviors: ['wander'] })
+  assert.deepEqual(keys(idleOnly.seen.questions.legs.criteria).sort(), ['keep_current', 'wander'])
 }
 {
   // A whole-body start wins its channels for this call; per-channel answers are overridden.
@@ -268,6 +273,10 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   assert.deepEqual([ch.slots.legs?.status, ended], ['running', []])
   ch.stopStalePlace(null)
   assert.deepEqual([ch.slots.legs, ended], [null, ['place_changed']])
+  // A terminal event stops the run: a vetoed walk drops its goal instead of pushing on into the drop (river, 2026-11-02).
+  ch.set('navigate:place', 'navigate', { place: [10, 5, -3] })
+  ch.veto('legs', 'forward: drop of more than 3')
+  assert.deepEqual([goal, ch.slots.legs?.status, ended[1]], [null, 'vetoed (forward: drop of more than 3)', 'vetoed'])
 }
 
 // Goal tree: instructions replace the root, checks complete goals, escalate_if waits for for_ms,
@@ -483,6 +492,10 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   set(-10, 12, 0, 'oak_log') // on top of a stone pillar: no placing, and stone can't be broken
   for (let z = -12; z <= 12; z++) for (let y = 0; y < 3; y++) set(12, y, z, 'stone')
   set(14, 0, 0, 'oak_log') // behind a wall: the path goes round its end
+  set(3, -1, 3, 'air') // a shaft down to water 11 below: no route, though the pathfinder would drop into water from any height
+  set(3, -12, 3, 'water')
+  set(3, -13, 3, 'stone')
+  set(4, -12, 3, 'oak_log')
   const bot: any = Object.assign(new EventEmitter(), {
     registry, world, game: { minY: -64 }, entities: {}, inventory: { items: () => [], slots: [] },
     entity: { position: new Vec3(0.5, 0, 0.5), onGround: true, effects: {}, height: 1.8 },
@@ -491,7 +504,7 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   pf.pathfinder(bot)
   bot.pathfinder.setMovements(guardedMovements(bot))
   const status = async (p: [number, number, number]) => (await reachable(bot, p)).status
-  assert.deepEqual([await status([6, 0, 0]), await status([-10, 12, 0]), await status([14, 0, 0])], ['success', 'noPath', 'success'])
+  assert.deepEqual([await status([6, 0, 0]), await status([-10, 12, 0]), await status([14, 0, 0]), await status([4, -12, 3])], ['success', 'noPath', 'success', 'noPath'])
 }
 
 // Behaviors System 2 writes: async code in a fresh realm per run, talking to the host only through strings.

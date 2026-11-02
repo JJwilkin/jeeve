@@ -245,7 +245,7 @@ System 1's standing objective is the bot's needs, not a distant root goal. Decid
   - `wander` (legs): short walks near where it started, re-anchored after a teleport;
   - `glance` (aim): looks at what's near, and yields to the legs while they walk.
 
-  Both are **idle-only** (`Spec.idle`): they're offered only with no instruction, and an instruction stops them.
+  Both are **idle-only** (`Spec.idle`): they're offered only with no instruction, and an instruction stops them. Exception: when 2A's program leaves a question no non-idle behavior (it allowed only `wander`, say), the idle ones stay offered. Otherwise Jev's only option was `keep_current`, and it stood still at a river through 31 2A calls (2026-11-02).
 - **The default guidance** says:
   - eat when hungry and there's food;
   - escalate a need the offered behaviors can't meet (starving, no food: that's a plan, so it's 2A's);

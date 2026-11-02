@@ -41,6 +41,7 @@ export function controlVector (control: string, yaw: number): [number, number] |
 export function guardedMovements (bot: Bot) {
   const moves = new pf.Movements(bot)
   moves.maxDropDown = MAX_DROP
+  moves.infiniteLiquidDropdownDistance = false // else it plans drops of any height into water, which unsafeAt vetoes
   moves.allowParkour = false
   moves.allow1by1towers = false
   moves.canDig = true
