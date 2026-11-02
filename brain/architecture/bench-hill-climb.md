@@ -100,6 +100,22 @@ Also: e2e expectations updated for the new design: the built-in `cleared` check 
 29. **A regression from #20, caught by the e2e.** Collect holds the whole body, so while a zombie hit Jeeve, the hands' answer "attack it" was held, and Jeeve kept collecting until it died. **Fix:** the hold doesn't apply while the bot is under threat (damage in the last 5 s, or a hostile within 8 blocks).
 30. **Jeeve's own digging left stale memory.** Collect broke a log inside a canopy. Its empty spot was hidden by leaves, so the memory never saw it gone, and "break this tree" couldn't close: 2A eventually gave up on a finished tree. **Fix:** blocks the bot digs itself are forgotten at once (`noteDug`, on `diggingCompleted`), as placed ones are remembered.
 
+## Crossing scenes (2026-11-02)
+Added after Jeeve_1 spent 10 minutes and 31 2A calls ($3.44) failing to cross a river. They measure whether Jeeve gets across terrain, and at what cost, before and after the river fixes and the region graph.
+- **Six scenarios:** `river`, `ravine`, `ledge`, and a `-noway` variant of each (`crossingScene`, `scripts/scenes.ts`). Each is seeded like the other bench scenes. Terrain is built up from the superflat with `/fill` inside the bench area; nothing is dug, so other scenes on the same world still find flat ground. Barrier walls on the area's edge keep the crossing inside.
+  - **river:** width 1–8, water depth 1–6, bank 0–5 above the water.
+  - **ravine:** drop 4–12, width 2–6. With a way: stairs cut into both walls, down the near one and up the far one.
+  - **ledge:** +2 to +6 up. With a way: a staircase somewhere along the cliff.
+  - **The river's way round** is a dry strip past one end of the channel.
+  - **`-noway`:** the obstacle runs wall to wall, and Jeeve gets a kit (`cobblestone 32`) to bridge or pillar with. The kit is recorded in the row.
+- **The instruction:** "go to the gold block across the river / across the ravine / on top of the ledge". The gold block is set in the far side's surface, 3–6 blocks past the obstacle.
+- **Pass:** Jeeve comes within 3 blocks of the block's top within 4 minutes. The referee's distance check ends the run, whatever the goal's status.
+- **Every results row now also has** Jev's decisions (`jev`), guard vetoes (`vetoes`) and the run's model spend (`usd`, from the agent's `/status`). Crossing rows add `crossing`: the kind, the way, the size band, the dimensions and the kit.
+- `node scripts/bench-report.ts` ends with a crossing table: pass rate, median 2A calls and Jev decisions, vetoes, deaths, median time and spend, by scenario and size band. The bands are river narrow (width ≤3) or wide, ravine shallow (drop ≤7) or deep, and ledge low (≤3) or high.
+- **Run:** `npm run bench -- <rounds> river river-noway ravine ravine-noway ledge ledge-noway`. A per-run spend cap is `JEEVE_BUDGET_USD_HOUR`; past it the agent sleeps.
+- **The ledge's goal is out of sight from below** (set into the top surface), so the ledge also tests climbing up to look. In the first check round (commit before the river fixes, seeds 5100–5102), `river-noway` (5 wide) and `ravine` (9 deep, with stairs) passed in 32–34 s with 2 2A calls each. `ledge-noway` (3 up) failed: after `scan(32)` and a survey, 2A gave up ("the ledge top is hidden") and asked the player, holding 32 cobblestone. The round spent $0.58.
+- **The baseline round** comes after the river fixes merge. The later outcome model has to beat the code-only version on held-out seeds of these scenes.
+
 ## Open
 - **Trials still consume materials** ([[orchestrator-and-builder]] → Open questions). Workshop round 1 burned its wood on failed trials.
 - **Idle time** is still large while the builder works or 2A thinks. Jev could do the parts of a plan it can already do meanwhile.

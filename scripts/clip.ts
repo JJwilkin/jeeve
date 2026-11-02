@@ -15,7 +15,7 @@ import { Vec3 } from 'vec3'
 import { startAgent } from '../src/main.ts'
 import { MODEL } from '../src/system2.ts'
 import { beats, parse, type Beat, type Row } from '../viz/src/timeline.ts'
-import { AREA, build, cameraFor, canopy, CANOPY, FORAGE_AREA, forageScene, guardScene, orchardScene, rng, workshopScene, type Scene } from './scenes.ts'
+import { AREA, build, cameraFor, canopy, CANOPY, crossingScene, FORAGE_AREA, forageScene, guardScene, orchardScene, rng, workshopScene, type Scene } from './scenes.ts'
 import { PORT, startServer } from './server.ts'
 
 type Xyz = [number, number, number]
@@ -23,21 +23,31 @@ type Bot = ReturnType<typeof mineflayer.createBot>
 type Ctx = { josh: Bot, agent: Awaited<ReturnType<typeof startAgent>>, command: (c: string) => void, done: () => boolean }
 // instructions: given in turn, each once the previous one's goal closes; timeoutMs per instruction (an open-ended
 // goal runs until then). during: what the scene does meanwhile (waves, Josh moving). verify: the outcome, judged
-// from the world by Josh, never from the agent's own claims. view: the box the world recorder keeps (the camera).
+// from the world by Josh, never from the agent's own claims. reached: the referee's own end, checked while it waits.
+// view: the box the world recorder keeps (the camera). crossing: the scene's terrain, for the results row.
 type Scenario = {
   setup: (command: (c: string) => void) => void, camera: { at: Xyz, facing: Xyz, follow?: boolean }, view: { min: Xyz, max: Xyz },
-  instructions: string[], timeoutMs: number, during?: (ctx: Ctx) => Promise<void>, verify: (ctx: Ctx) => Promise<{ pass: boolean, detail: string }>
+  instructions: string[], timeoutMs: number, during?: (ctx: Ctx) => Promise<void>, verify: (ctx: Ctx) => Promise<{ pass: boolean, detail: string }>,
+  reached?: (ctx: Ctx) => boolean, crossing?: Scene['crossing']
 }
 const SEED = Number(process.env.JEEVE_SEED ?? Date.now() % 1_000_000)
 const GUARD_WAVE_MS = 25_000
 // A scenario from a generated scene: setup builds it, the camera and the recorded box frame it.
-function fromScene (scene: Scene, o: Pick<Scenario, 'timeoutMs' | 'verify' | 'during'> & { setup?: (command: (c: string) => void) => void, area?: { min: Xyz, max: Xyz }, camera?: Scenario['camera'] }): Scenario {
+function fromScene (scene: Scene, o: Pick<Scenario, 'timeoutMs' | 'verify' | 'during' | 'reached'> & { setup?: (command: (c: string) => void) => void, area?: { min: Xyz, max: Xyz }, camera?: Scenario['camera'] }): Scenario {
   const area = o.area ?? AREA
   return {
     setup: command => { build(command, scene, 'Josh', area); o.setup?.(command) },
     camera: o.camera ?? cameraFor(scene), view: { min: area.min, max: area.max },
-    instructions: scene.instructions, timeoutMs: o.timeoutMs, during: o.during, verify: o.verify
+    instructions: scene.instructions, timeoutMs: o.timeoutMs, during: o.during, verify: o.verify, reached: o.reached, crossing: scene.crossing
   }
+}
+// Crossing: pass if Jeeve came within 3 blocks of the gold block's top within the budget. The run ends when it does.
+const CROSSING_MS = 4 * 60_000
+function crossing (scene: Scene) {
+  const goal = new Vec3(...scene.goal!).offset(0.5, 1, 0.5)
+  let closest = Infinity
+  const reached = ({ agent }: Ctx) => (closest = Math.min(closest, agent.bot.entity.position.distanceTo(goal))) <= 3
+  return fromScene(scene, { timeoutMs: CROSSING_MS, reached, verify: async ctx => { reached(ctx); return { pass: closest <= 3, detail: `came within ${closest.toFixed(1)} blocks of the goal` } } })
 }
 // Blocks matching re in a box, counted by Josh (who sees everything: he's the referee, not the agent).
 const countIn = (josh: Bot, re: RegExp, min: readonly number[], max: readonly number[]) => {
@@ -106,7 +116,9 @@ const SCENARIOS: Record<string, Scenario> = {
       const ok = zombies === 0 && josh.health > 0 && agent.bot.health > 0 && !joshDied && !jeeveDied
       return { pass: ok, detail: `${zombies} zombies left, Josh ${josh.health.toFixed(0)} HP (lost ${joshLost.toFixed(0)}), Jeeve ${agent.bot.health.toFixed(0)} HP${joshDied ? ', Josh died' : ''}${jeeveDied ? ', Jeeve died' : ''}` }
     }
-  })
+  }),
+  // Crossing (scripts/scenes.ts): a river, a ravine or a ledge between Jeeve and the goal; -noway: no way round, a kit.
+  ...Object.fromEntries((['river', 'ravine', 'ledge'] as const).flatMap(k => [[k, crossing(crossingScene(k, true, SEED))], [`${k}-noway`, crossing(crossingScene(k, false, SEED))]]))
 }
 let joshDied = false
 let jeeveDied = false
@@ -294,7 +306,7 @@ for (const text of scenario.instructions) {
   const t0 = Date.now()
   josh.whisper('Jeeve', text)
   const goal = () => agent.goals.nodes.find(g => g.text === text && !g.parent)
-  while (!['completed', 'failed'].includes(goal()?.status ?? '') && Date.now() - t0 < scenario.timeoutMs && !jeeveDied) await sleep(500)
+  while (!['completed', 'failed'].includes(goal()?.status ?? '') && Date.now() - t0 < scenario.timeoutMs && !jeeveDied && !scenario.reached?.(ctx)) await sleep(500)
   const status = goal()?.status ?? 'missing'
   outcomes.push(status)
   console.log(`[clip] "${text}": goal ${status} after ${((Date.now() - t0) / 1000).toFixed(0)} s`)
@@ -323,6 +335,8 @@ if (camera) {
   else console.warn(`[clip] couldn't remux ${outputPath}; rendering without footage`)
 }
 const traceFile = agent.traceFile
+// What the run spent on Jev, 2A and the builder: the agent's own spend tracking (src/budget.ts), fresh each run.
+const spent = await fetch(`http://127.0.0.1:${API}/status`).then(r => r.json()).then(s => s.spent_usd.day as number).catch(() => null)
 await agent.stop()
 josh.quit()
 await server.stop()
@@ -336,6 +350,10 @@ const of = (k: string) => rows.filter(r => r.kind === k)
 const result = {
   t: new Date().toISOString(), scenario: name, pass: verdict.pass, detail: verdict.detail, outcomes,
   s: Math.round((end - TAIL_MS - asked) / 1000),
+  jev: of('decide').length, // Jev's decisions
+  vetoes: rows.filter(r => r.kind === 'event' && r.name === 'vetoed').length, // guard vetoes
+  usd: spent === null ? null : Math.round(spent * 100) / 100,
+  crossing: scenario.crossing,
   system2: { calls: of('system2').length, s: Math.round(of('system2').reduce((n, r) => n + (r.attrs?.['jeeve.system2.latency_ms'] ?? 0), 0) / 1000) },
   builder: of('builder').map(r => ({ status: r.status, behavior: r.behavior, trials: r.attrs?.['jeeve.builder.trials'], s: Math.round((r.attrs?.['jeeve.builder.latency_ms'] ?? 0) / 1000) })),
   library: learned, // what the run started with: skills and checks from earlier runs

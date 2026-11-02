@@ -17,3 +17,16 @@ for (const c of commits) {
 }
 const pass = rows.filter(r => r.pass).length
 console.log(`total: ${pass}/${rows.length} passed`)
+
+// Crossing scenes (rivers, ravines, ledges): success and 2A calls per crossing, by scene and size.
+const crossings = rows.filter(r => r.crossing)
+if (crossings.length) {
+  console.log('\nscene | size | runs | crossed | 2A calls (median) | Jev decisions (median) | vetoes | deaths | median s | spend')
+  const key = (r: any) => `${r.scenario} | ${r.crossing.size}`
+  for (const k of [...new Set(crossings.map(key))].sort()) {
+    const xs = crossings.filter(r => key(r) === k)
+    const sum = (f: (r: any) => number) => xs.reduce((n: number, r: any) => n + (f(r) ?? 0), 0)
+    console.log([k, xs.length, `${xs.filter(r => r.pass).length}/${xs.length}`, median(xs.map(r => r.system2.calls)), median(xs.map(r => r.jev)),
+      sum(r => r.vetoes), sum(r => r.deaths), median(xs.map(r => r.s)), `$${sum(r => r.usd).toFixed(2)}`].join(' | '))
+  }
+}
