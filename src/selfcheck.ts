@@ -277,6 +277,7 @@ async function decideWith (answers: Record<string, any>, place: [number, number,
   // A terminal event stops the run: a vetoed walk drops its goal instead of pushing on into the drop (river, 2026-11-02).
   ch.set('navigate:place', 'navigate', { place: [10, 5, -3] })
   ch.veto('legs', 'forward: drop of more than 3')
+  await new Promise(resolve => setImmediate(resolve)) // the stop waits until the pathfinder's tick is over
   assert.deepEqual([goal, ch.slots.legs?.status, ended[1]], [null, 'vetoed (forward: drop of more than 3)', 'vetoed'])
 }
 

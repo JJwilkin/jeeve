@@ -32,7 +32,7 @@ These are physics checks (position relative to the edge, the block type below), 
 
 - **On by default; System 2 can lift one on purpose:** "drop into the water below", "pearl across the gap".
 - **A veto is an event.** Jev learns its choice was blocked instead of watching it silently do nothing.
-- **A terminal event (`vetoed`, `stuck`, `done`…) also stops the run.** A vetoed `navigate` used to keep its pathfinder goal and push into the same drop ~20 times a second; Jeeve_1 stood at a river for 10 minutes that way (2026-11-02). Authored runs keep their non-terminal veto path (`onVeto`) and can still recover.
+- **A terminal event (`vetoed`, `stuck`, `done`…) also stops the run.** A vetoed `navigate` used to keep its pathfinder goal and push into the same drop ~20 times a second; Jeeve_1 stood at a river for 10 minutes that way (2026-11-02). Authored runs keep their non-terminal veto path (`onVeto`) and can still recover. The stop waits until the current tick is over: a veto arrives inside the pathfinder's own tick, and clearing its path there crashed it (GCP smoke run, same day).
 - **The pathfinder plans no drop the guard would veto.** Mineflayer-pathfinder plans drops of any height into water by default (`infiniteLiquidDropdownDistance`); the guard only accepts water within `MAX_DROP + 1`, so that's turned off in `guardedMovements`, and `reachable()` stops promising those routes too (same river).
 
 ## Runtime-authored behaviors
