@@ -1,0 +1,15 @@
+[project]
+name = "jeeve-train"
+version = "0.1.0"
+description = "Tier 1 world-model training (brain/architecture/world-model-training.md)"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2", "torch>=2.5", "scikit-learn>=1.5", "onnx>=1.17", "onnxruntime>=1.20", "onnxscript>=0.2"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
