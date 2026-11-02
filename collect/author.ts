@@ -14,7 +14,7 @@ import pf from 'mineflayer-pathfinder'
 import { Vec3 } from 'vec3'
 import { authoredSpec, CHANNELS, Channels, type ApiHost } from '../src/behaviors.ts'
 import { build, BUILDER_LIMITS, BUILDER_MODEL, type BehaviorDraft, type BuildResult, type CapabilityRequest, type TrialReport } from '../src/builder.ts'
-import { PRICES, usd } from '../src/budget.ts'
+import { builderUsd } from '../src/budget.ts'
 import { rawSnapshot } from '../src/encoder.ts'
 import { guardedMovements, installGuards } from '../src/guards.ts'
 import { compileBehavior } from '../src/modules.ts'
@@ -27,6 +27,7 @@ import { rconWhenUp } from './rcon.ts'
 const env = process.env
 const args = process.argv.slice(2)
 const STUB = args.includes('--stub')
+const OUT = STUB ? 'authoring/actions' : 'collect/actions' // stub drafts never land where the collector reads
 const ROUNDS = Number(env.AUTHOR_ROUNDS ?? 3)
 const MAX_USD = Number(env.AUTHOR_MAX_USD ?? 25)
 const BAR = 0.5
@@ -99,7 +100,7 @@ const TASKS: Task[] = [
     need: 'build a wall or a small shelter out of blocks from the inventory, where the bot stands',
     constraints: [
       'target: { name: the block to build with (in the inventory), size: 3-5, template: "wall" or "hut" }',
-      'wall: a straight wall size long and 2 high, within 4 blocks of where the bot starts',
+      'wall: a straight wall size long and 2 high, along a line within 4 blocks of where the bot starts',
       'hut: walls 2 high and a roof that close the bot in, no further than size blocks from where it ends',
       `timeout_s at most ${LIMIT_S}`
     ],
@@ -115,7 +116,7 @@ const TASKS: Task[] = [
       const scene: Scene = { trees, chest: null, waves: 0, jeeve, josh: [jeeve[0] - 8, -60, jeeve[2]], instructions: [] }
       return { seed, scene, about: { seed, template, size, name, trees: trees.length }, give: [`${name} 64`], target: { name, size, template } }
     },
-    passWhen: 'wall: some straight run of size columns (along x or z, within 4 blocks of the start), each with the target block at the start\'s feet and head height. hut: the bot is on the ground and closed in: walking 4 ways from its feet (2-high gaps), it can\'t get further than size blocks, and every cell it can reach has a block 2 or 3 above the feet.',
+    passWhen: 'wall: some straight run of size columns (along x or z, on a line within 4 blocks of the start), each with the target block at the start\'s feet and head height. hut: the bot is on the ground and closed in: walking 4 ways from its feet (2-high gaps), it can\'t get further than size blocks or reach a block it could jump onto (clear 2 above it), and every cell it can reach has a block 2 above the feet.',
     pass: (w, c) => {
       const t = c.target as { name: string, size: number, template: string }
       if (t.template === 'wall') {
@@ -124,7 +125,10 @@ const TASKS: Task[] = [
         let best = 0
         for (let a = -4; a <= 4; a++) for (const along of [true, false]) {
           let run = 0
-          for (let b = -8; b <= 8; b++) best = Math.max(best, run = (along ? col(sx + b, sz + a) : col(sx + a, sz + b)) ? run + 1 : 0)
+          for (let b = -8; b <= 8; b++) {
+            run = (along ? col(sx + b, sz + a) : col(sx + a, sz + b)) ? run + 1 : 0
+            best = Math.max(best, run)
+          }
         }
         return best >= t.size
       }
@@ -135,10 +139,12 @@ const TASKS: Task[] = [
       while (todo.length) {
         const [cx, cz] = todo.pop()!
         if (Math.max(Math.abs(cx - x), Math.abs(cz - z)) > t.size) return false
-        if (!w.solid(cx, y + 2, cz) && !w.solid(cx, y + 3, cz)) return false
+        if (!w.solid(cx, y + 2, cz)) return false
         for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const k = `${cx + dx},${cz + dz}`
-          if (!seen.has(k) && open(cx + dx, cz + dz)) { seen.add(k); todo.push([cx + dx, cz + dz]) }
+          const [nx, nz] = [cx + dx, cz + dz]
+          if (w.solid(nx, y, nz) && !w.solid(nx, y + 1, nz) && !w.solid(nx, y + 2, nz)) return false // a step it can jump onto and out
+          const k = `${nx},${nz}`
+          if (!seen.has(k) && open(nx, nz)) { seen.add(k); todo.push([nx, nz]) }
         }
       }
       return w.self.on_ground
@@ -215,7 +221,7 @@ let spent = 0
 const ask = (task: Task, n: number) => STUB ? stubModel(task.name, n) : undefined // undefined: build()'s default, Opus
 
 type Scored = Outcome & { scene: Record<string, unknown> }
-type Round = { round: number, build: BuildResult['status'], reason?: string, trials: string[], draft: BehaviorDraft | null, validation?: Scored[], rate: number }
+type Round = { round: number, build: BuildResult['status'], reason?: string, trials: Array<Pick<TrialReport, 'end' | 'error' | 'self' | 'actions'>>, draft: BehaviorDraft | null, validation?: Scored[], rate: number }
 const trim = (o: Scored) => ({ scene: o.scene, end: o.end, error: o.error, self: o.self, actions: o.actions?.slice(-15) })
 
 async function round (task: Task, n: number, prev: Round | null): Promise<Round> {
@@ -255,12 +261,12 @@ async function round (task: Task, n: number, prev: Round | null): Promise<Round>
     perceive: async (tool, input) => tool === 'scan' ? scan(bot, input as { match: string }) : reachable(bot, input.position as Xyz),
     log: row => rec.jsonl({ request: req.id, ...row }),
     usage: u => {
-      spent += usd(PRICES.anthropic, { non_cached_input_tokens: u.inputTokenDetails.noCacheTokens, output_tokens: u.outputTokens, cache_read_input_tokens: u.inputTokenDetails.cacheReadTokens, cache_creation_input_tokens: u.inputTokenDetails.cacheWriteTokens })
+      spent += builderUsd(u)
       if (spent >= MAX_USD) cap.abort(`dollar cap: $${spent.toFixed(2)} of $${MAX_USD}`)
     }
   }, cap.signal, span, session, ask(task, n)).catch((err): BuildResult => ({ request: req.id, status: 'failed', reason: String(err), attempts: [] }))
   rec.finish(span, 'builder', { attrs: { 'jeeve.builder.status': result.status, 'jeeve.builder.trials': result.attempts.length }, input: brief, output: result })
-  const out: Round = { round: n, build: result.status, reason: result.status === 'failed' ? result.reason : undefined, trials: result.attempts.map(a => a.end), draft: accepted ?? last, rate: 0 }
+  const out: Round = { round: n, build: result.status, reason: result.status === 'failed' ? result.reason : undefined, trials: result.attempts.map(a => ({ end: a.end, error: a.error, self: a.self, actions: a.actions?.slice(-15) })), draft: accepted ?? last, rate: 0 }
   console.log(`[author] ${req.id} build ${result.status} after ${result.attempts.length} trials${out.reason ? `: ${out.reason}` : ''} ($${spent.toFixed(2)} spent)`)
   if (!accepted) return out
   out.validation = []
@@ -278,7 +284,7 @@ function write (task: Task, d: BehaviorDraft, rounds: Round[]) {
   const last = rounds.at(-1)!
   const passed = last.validation!.filter(o => o.passed).length
   const source = { kind: 'behavior', name: task.name, description: d.description, code: d.code, channels: d.channels, targets: d.targets, timeout_s: d.timeout_s, usage: d.usage }
-  writeFileSync(`collect/actions/${task.name}.ts`, `// Written by 2B (collect/author.ts, ${STUB ? 'stubbed builder' : BUILDER_MODEL}) on ${new Date().toISOString().slice(0, 10)}, round ${last.round} of ${ROUNDS}:
+  writeFileSync(`${OUT}/${task.name}.ts`, `// Written by 2B (collect/author.ts, ${STUB ? 'stubbed builder' : BUILDER_MODEL}) on ${new Date().toISOString().slice(0, 10)}, round ${last.round} of ${ROUNDS}:
 // passed ${passed} of ${VALIDATION.length} validation scenes (${(last.rate * 100).toFixed(0)}%). Report: authoring/${session}.json.
 // ${task.constraints[0]}
 import type { ModuleSource } from '../../src/modules.ts'
@@ -288,11 +294,13 @@ export const source: ModuleSource = ${JSON.stringify(source, null, 2)}
 }
 
 const names = args.find(a => !a.startsWith('--'))?.split(',') ?? TASKS.map(t => t.name)
-const tasks = names.map(n => TASKS.find(t => t.name === n) ?? (() => { throw new Error(`no action ${n}`) })())
+const unknown = names.filter(n => !TASKS.some(t => t.name === n))
+if (unknown.length) throw new Error(`no action ${unknown.join(', ')}; there are ${TASKS.map(t => t.name).join(', ')}`)
+const tasks = TASKS.filter(t => names.includes(t.name))
 console.log(`[author] ${names.join(', ')}: up to ${ROUNDS} rounds each, bar ${BAR * 100}% of ${VALIDATION.length} scenes, ${BUILDER_LIMITS.trials} trials a round; ` +
   (STUB ? 'stubbed builder, no model calls' : `${BUILDER_MODEL}, dollar cap $${MAX_USD}`))
 mkdirSync('authoring', { recursive: true })
-mkdirSync('collect/actions', { recursive: true })
+mkdirSync(OUT, { recursive: true })
 const report: Array<{ action: string, accepted: boolean, rate: number, rounds: Array<Omit<Round, 'draft'> & { code?: string }> }> = []
 const save = () => writeFileSync(`authoring/${session}.json`, JSON.stringify({ session, stub: STUB, model: STUB ? 'stub' : BUILDER_MODEL, usd: +spent.toFixed(2), bar: BAR, report }, null, 2))
 for (const task of tasks) {
@@ -301,15 +309,15 @@ for (const task of tasks) {
     rounds.push(await round(task, n, rounds.at(-1) ?? null))
     if (rounds.at(-1)!.rate >= BAR) break
   }
-  const best = rounds.at(-1)
-  const accepted = !!best && best.rate >= BAR
-  if (accepted) write(task, best.draft!, rounds)
-  report.push({ action: task.name, accepted, rate: best?.rate ?? 0, rounds: rounds.map(({ draft, validation, ...o }) => ({ ...o, code: draft?.code, validation: validation?.map(v => ({ ...v, actions: v.passed ? undefined : v.actions?.slice(-15) })) })) })
+  const last = rounds.at(-1)
+  const accepted = !!last && last.rate >= BAR
+  if (accepted) write(task, last.draft!, rounds)
+  report.push({ action: task.name, accepted, rate: last?.rate ?? 0, rounds: rounds.map(({ draft, validation, ...o }) => ({ ...o, code: draft?.code, validation: validation?.map(v => v.passed ? { ...v, actions: undefined } : { ...v, ...trim(v) }) })) })
   save()
-  console.log(`[author] ${task.name}: ${accepted ? `accepted at ${(best!.rate * 100).toFixed(0)}% → collect/actions/${task.name}.ts` : `not accepted (best round ${((best?.rate ?? 0) * 100).toFixed(0)}%)`} after ${rounds.length} rounds`)
+  console.log(`[author] ${task.name}: ${accepted ? `accepted at ${(last!.rate * 100).toFixed(0)}% → ${OUT}/${task.name}.ts` : `not accepted (last round ${((last?.rate ?? 0) * 100).toFixed(0)}%)`} after ${rounds.length} rounds`)
 }
 console.log(`[author] done: ${report.map(a => `${a.action} ${a.accepted ? 'accepted' : 'not accepted'} ${(a.rate * 100).toFixed(0)}%`).join(', ')}; $${spent.toFixed(2)} spent; report authoring/${session}.json`)
-for (const a of report) for (const n of a.rounds) console.log(`  ${a.action} round ${n.round}: build ${n.build}, trials [${n.trials.join(', ')}]${n.validation ? `, validation ${n.validation.map(v => v.passed ? '✓' : '✗').join('')}` : ''}`)
+for (const a of report) for (const n of a.rounds) console.log(`  ${a.action} round ${n.round}: build ${n.build}, trials [${n.trials.map(t => t.end).join(', ')}]${n.validation ? `, validation ${n.validation.map(v => v.passed ? '✓' : '✗').join('')}` : ''}`)
 await rec.shutdown('author_end')
 r.close()
 bot.quit()
