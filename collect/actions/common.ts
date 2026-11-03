@@ -7,6 +7,10 @@ import type { Authored, Features, Xyz } from '../actions.ts'
 export const between = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
 export const int = (lo: number, hi: number) => Math.floor(between(lo, hi + 1))
 export const pick = <T>(xs: T[]) => xs[Math.floor(Math.random() * xs.length)]
+export const weighted = <T>(xs: T[], w: (x: T) => number) => {
+  let r = Math.random() * xs.reduce((s, x) => s + w(x), 0)
+  return xs.find(x => (r -= w(x)) <= 0) ?? xs[0]
+}
 export const CARDINAL: Array<[number, number]> = [[1, 0], [0, 1], [-1, 0], [0, -1]]
 
 // open: blocks a player walks through (water and lava too: the guards, not the action, keep it out of lava).
@@ -61,6 +65,8 @@ export const NAVIGATE_BODY = String.raw`
 // feature. A method is another action's body (on HELPERS) or whole code (2B's, which brings its own helpers).
 export type Method<F> = ({ body: string } | { code: string }) & { stay?: true, fits?: (x: F, f: Features) => boolean, target: (x: F, f: Features) => unknown }
 const APPROACH = "if (t.near) try { await api.goto(t.near[0], t.near[1], t.near[2], 0) } catch (e) { if (/^vetoed/.test(String(e && e.message))) throw e; return 'stuck' }"
+// Whole code (2B's) behind the same walk: its target is { near, target }.
+export const approaching = (code: string) => `async (api, t) => {\n  ${APPROACH}\n  return (${code})(api, t.target);\n}`
 // Every method that fits feature x: its parameters (as recorded), its behavior's target and source. Jeeve offers the
 // one the world model ranks first (src/wm.ts); the collector draws one at random.
 export type Seeker<F> = Authored & { find: (f: Features) => F[], methods: (x: F, f: Features) => Array<{ method: string, params: Record<string, unknown>, target: unknown, source: ModuleSource }> }
@@ -69,7 +75,7 @@ export function seeker<F extends { dist: number, near: Xyz }> (name: string, des
     kind: 'behavior', name, description: `${description}, by ${k}`, channels: ['legs', 'aim', 'hands'], targets: 'block', timeout_s: 20,
     code: 'body' in m
       ? `async (api, t) => {${HELPERS}\n  ${APPROACH}\n  return (async (api, t) => {${m.body}\n  })(api, t.target);\n}`
-      : `async (api, t) => {\n  ${APPROACH}\n  return (${m.code})(api, t.target);\n}`
+      : approaching(m.code)
   }]))
   const [first, ...variants] = Object.values(sources)
   const fitting = (x: F, f: Features) => Object.entries(methods).filter(([, m]) => m.fits?.(x, f) ?? true)
