@@ -53,7 +53,8 @@ const compose = {
         COLLECT_RCON_PASSWORD: password,
         COLLECT_OUT: '/app/episodes',
         COLLECT_SEED_STEPS: '${COLLECT_SEED_STEPS:-83000}',
-        COLLECT_HELDOUT: '${COLLECT_HELDOUT:-}'
+        COLLECT_HELDOUT: '${COLLECT_HELDOUT:-}',
+        JEEVE_SANDBOX_MS: '250' // the authored-behavior call limit (src/modules.ts), on a VM kept near full
       },
       // The host's ./episodes must be writable by uid 1000 (the image's node user); deploy/collect/run.sh sets it up.
       volumes: ['./episodes:/app/episodes', './modules:/app/modules:ro'],
