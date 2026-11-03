@@ -102,7 +102,7 @@ Decided with Joshua after the orchard clip ([[brain-monitor]]): 2A steered "brea
 
 **How System 2 is called:**
 - **One call in flight,** with escalations that arrive during a call merged into the next one, as in `decide()`.
-- **No repeats:** an escalation with the same reason under the same program version is traced but not sent again, until the program changes or 30 s pass. Otherwise a low-confidence Jev means a Claude call per heartbeat.
+- **No repeats:** an escalation with the same reason under the same program version is traced but not sent again, until the program changes or 30 s pass. Otherwise a low-confidence Jev means a Claude call per heartbeat. Jev's doubts (`jev_escalate`, `low_confidence`) are one reason here, per goal and across program versions: otherwise each guidance rewrite reopens the window ([[architecture/stateful-system-1|stateful-system-1]] → One doubt gate).
 - **The bot never waits.** The current program keeps running. If System 2 is down, the current program keeps running; the pinned fallback is only for programs that fail their check or trip the watchdog ([[system-1]]).
 
 **What System 2 gets:**

@@ -318,6 +318,13 @@ Pieces 0 and 1 were built (commit `5bac02c`): the moot-answer filter (`escalate_
   That's the next experiment, and the counterfactual harness (`scripts/replay-memory.ts`) can score a new gate on old traces first.
 - **n = 3 pairs per scene.** The time differences are within run-to-run noise. Pass rate, deaths and reaction are the guardrails, and none moved.
 
+## One doubt gate (2026-11-02)
+Live on the VM, asked to enlarge a house, 2A spent most of 8 minutes answering Jev's doubt: 60–67% of decides escalated, ~30–45% of 2A calls were `jev_escalate`, mostly answered "carry on / hold while c-1 builds", and the program went through 17 versions. The escalate Noul was over 0.5 on 77 of 133 decides, mostly while the goal waited on a 2B request (the directive really can't be met with the behaviors offered yet).
+- **Why the gate leaked:** the no-repeat key was reason + goal + program version, and the backoff was per reason. 2A's answer to doubt was usually a small guidance rewrite ("waiting is expected, don't escalate"). That counts as acting, so it reset the backoff, and the new version reopened the window. The next decide escalated again, under the other reason or the new version: a 2A call every ~7–10 s.
+- **Change:** `jev_escalate` and `low_confidence` are one kind (`doubt`) for the gate. One no-repeat window per goal, not per program version, and one backoff per goal. Other reasons keep their per-version key.
+- **Replay** (the gate re-run over each session's `decide` spans with `escalate=true`, 2A's answer taken from its nearest real answer to doubt): doubt-driven 2A calls 40 → 24 in `jeeve-2026-11-02T07-19-58-193Z-Jeeve_1` (actual 37) and 54 → 33 in `jeeve-2026-11-03T01-34-25-836Z-Jeeve_1` (actual 40; the model doesn't see trials, which hold doubt). About −40% in both. Sharing the key but keeping the version gave −8% and −15%; dropping the version alone gave −20% and −22%.
+- **Not done:** dropping `jev_escalate` while the goal waits on its own capability request. It would cut more, but in the first session the bot was off on sub-goals under an open request, and its doubts were about a real problem (a navigate vetoed at a drop).
+
 ## Open questions for Joshua
 1. ~~**Order:** memory → persistent doubt → stages~~ After the replay: moot filter → memory (`plan` + `doing`) → bench A/B. Persistent doubt is dropped. Stages wait until the bench shows doubt about sub-steps. Agree?
 2. **Should Jev write any state beyond its applied choices in v1?** Proposed: no. The stage pick comes in piece 3, and beliefs later.

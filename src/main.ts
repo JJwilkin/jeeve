@@ -453,14 +453,16 @@ export async function startAgent (opts: AgentOptions) {
   type Trigger = { reason: string, detail: unknown, goal: string }
   let pending: Trigger[] = []
   const lastSent = new Map<string, number>()
+  // Jev's two doubts (its escalate Noul, a close call) share one gate per goal, across program versions. Per reason
+  // and version, every guidance rewrite reopened it, so 2A answered "carry on" every ~7 s (jeeve-2026-11-02T07-19-58-193Z).
+  const gateKind = (reason: string) => reason === 'low_confidence' || reason === 'jev_escalate' ? 'doubt' : reason
   // Learning from 2A's answers: an escalation it answered with no change backs off for that goal, doubling each time
   // (30 s to 4 min); one it acted on resets. About half of 2A's calls were Jev's doubts answered "carry on" (bench).
   const quiet = new Map<string, { until: number, ms: number }>()
   const changedNothing = (d: Decision) => !d.goal && !d.program && !d.push_child && d.goal_action === 'none' && !d.new_modules?.length && !d.requests?.length && !d.plan?.length && !d.message
   function learnFrom (d: Decision, triggers: Trigger[]) {
-    for (const t of triggers) {
-      if (t.reason === 'instruction' || t.reason === 'capability_result') continue
-      const k = `${t.reason}|${t.goal}`
+    const keys = new Set(triggers.filter(t => t.reason !== 'instruction' && t.reason !== 'capability_result').map(t => `${gateKind(t.reason)}|${t.goal}`))
+    for (const k of keys) {
       if (!changedNothing(d)) { quiet.delete(k); continue }
       const ms = Math.min(240_000, (quiet.get(k)?.ms ?? NO_REPEAT_MS / 2) * 2)
       quiet.set(k, { until: Date.now() + ms, ms })
@@ -468,19 +470,20 @@ export async function startAgent (opts: AgentOptions) {
   }
 
   // During a trial Jev can't act on the pinned channels, so its doubts are expected; the trial's result is what counts.
-  const jevDoubtDuringTrial = (reason: string) => !!trial && (reason === 'low_confidence' || reason === 'jev_escalate')
+  const jevDoubtDuringTrial = (reason: string) => !!trial && gateKind(reason) === 'doubt'
 
   function escalate (reason: string, detail: unknown, goal: Goal) {
     if (budget.asleep) return
     note(`escalation: ${reason}`)
     recorder.stats.escalations.push(reason)
-    const key = `${reason}|${goal.id}|${version(program)}`
+    const kind = gateKind(reason)
+    const key = kind === 'doubt' ? `doubt|${goal.id}` : `${reason}|${goal.id}|${version(program)}`
     // A fast health drop bypasses the window: in run jeeve-2026-10-11T16-36-51-167Z it suppressed every jev_escalate
     // while slimes took health from 11 to 1.
     // Peer messages have their own limit (PEER_MS).
     const bypass = reason === 'instruction' || reason === 'capability_result' || reason === 'owner_hurt' || reason === 'peer_message' || fallingFast()
     // 2A answered this kind of escalation for this goal with "no change" lately: it's quiet for a while (see below).
-    const hushed = (quiet.get(`${reason}|${goal.id}`)?.until ?? 0) > Date.now()
+    const hushed = (quiet.get(`${kind}|${goal.id}`)?.until ?? 0) > Date.now()
     if (jevDoubtDuringTrial(reason) || (!bypass && (hushed || Date.now() - (lastSent.get(key) ?? 0) < NO_REPEAT_MS))) {
       recorder.jsonl({ kind: 'escalation_suppressed', reason, goal: goal.id })
       return
