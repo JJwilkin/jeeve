@@ -122,9 +122,21 @@ export class EpisodeRecorder {
 
   capture () {
     const t0 = performance.now()
+    const feet = this.fill(this.step)
+    if (this.steps.length % FAR_EVERY === 0) {
+      this.farRec.set('step', this.steps.length)
+      this.farView(this.farRec, feet)
+      this.far.push(this.farRec.take())
+    }
+    this.steps.push(this.step.take())
+    this.stepMs += performance.now() - t0
+  }
+
+  // One step's record: self, entities, the near and mid views, and what the step did. Also Jeeve's live view for the
+  // world model (src/wm.ts), so training and live read the world with the same code. Returns the feet block.
+  fill (s: RecordWriter) {
     const bot = this.bot
     const e = bot.entity
-    const s = this.step
     this.cols.clear()
     const feet = e.position.floored()
     s.set('t_ms', Date.now() - this.started)
@@ -165,13 +177,7 @@ export class EpisodeRecorder {
 
     this.nearView(s.bytes('near'), feet)
     this.midView(s.bytes('mid'), s.bytes('mid_flags'), feet)
-    if (this.steps.length % FAR_EVERY === 0) {
-      this.farRec.set('step', this.steps.length)
-      this.farView(this.farRec, feet)
-      this.far.push(this.farRec.take())
-    }
-    this.steps.push(s.take())
-    this.stepMs += performance.now() - t0
+    return feet
   }
 
   nearView (out: Uint8Array, f: { x: number, y: number, z: number }) {

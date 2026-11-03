@@ -25,6 +25,13 @@ history or log; then connect to `jeeve.<tailnet>.ts.net:25565`:
 { read -rs 'k?tskey: '; printf 'TS_AUTHKEY=%s\n' "$k"; cat deploy/setup.sh; } | g compute ssh jeeve --tunnel-through-iap --command 'sudo bash -s'
 ```
 
+## The world model
+
+`setup.sh` copies the Tier 1 model from `gs://jeeve-worlddata/models/2m-v3/` into `wm/` before building
+(brain/architecture/world-model-live.md). Another export: `{ echo WM_MODEL=<name>; cat deploy/setup.sh; } | g compute ssh …`.
+Off: `JEEVE_WM=0` in `/opt/jeeve/.env`, then `sudo docker compose up -d`. `docker compose logs jeeve-1 | grep '\[wm\]'`
+shows what it predicted for each decision.
+
 ## Secrets
 
 `/opt/jeeve/.env` (mode 600) is both the Jeeves' `env_file` and compose's variables. Collect it in shell memory and

@@ -95,4 +95,4 @@ Entity types and held items are crc32-hashed into 256 buckets, so a new name nee
 ## Not done yet
 - Running it: shards, baseline, three sizes and export on the VM.
 - The river scene against the code-only baseline.
-- Wiring the ONNX graphs into Jeeve: the frame and hashing in TypeScript, the recorder's view code on the live bot.
+- ~~Wiring the ONNX graphs into Jeeve~~: done, see [[world-model-live]].

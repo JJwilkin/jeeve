@@ -5,7 +5,7 @@
 export type Row = { t: number, kind: string, [k: string]: any }
 export type Node = 'player' | 's2' | 'builder' | 's1'
 export type Message = { t: number, from: Node, to: Node, label: string }
-export type Answer = { q: string, choice: string, confidence: number, top: Array<[string, number]> }
+export type Answer = { q: string, choice: string, confidence: number, top: Array<[string, number]>, wm?: { success: number, blocked?: boolean } } // the world model on the choice
 export type BuilderStatus = 'idle' | 'queued' | 'thinking' | 'waiting' | 'trialling' | 'registered' | 'failed' | 'cancelled'
 
 export type Panels = {
@@ -18,7 +18,7 @@ export type Panels = {
     trial: number, maxTrials: number, step?: string, result?: string
   }
   code?: { name: string, code: string, live: boolean, running?: { line?: number, call: string }, marks: Record<number, boolean> }
-  system1: { at?: number, latencyMs?: number, trigger?: string, answers: Answer[], escalate?: number, channels: Record<string, string | null> }
+  system1: { at?: number, latencyMs?: number, trigger?: string, answers: Answer[], escalate?: number, channels: Record<string, string | null>, wm?: string[] } // wm: the model's best options
   messages: Message[] // sent in the last MESSAGE_MS
   log: Message[] // the last few, for a running log
   veto?: { reason: string, t: number }
@@ -37,7 +37,7 @@ export function slim (r: Row): Row {
     case 'decide': {
       const raw = json(r.attrs?.['jeeve.decide.raw_state'])
       const { 'jeeve.decide.raw_state': _, ...attrs } = r.attrs ?? {}
-      return { t, kind, attrs, self: raw?.self, answers: r.output?.answers, applied: r.output?.applied }
+      return { t, kind, attrs, self: raw?.self, answers: r.output?.answers, applied: r.output?.applied, wm: r.output?.wm }
     }
     case 'system2': {
       const d = r.output?.decision
@@ -160,9 +160,12 @@ export function stateAt (all: Row[], t: number): Panels {
       ...p.system1, at: d.t, latencyMs: d.attrs?.['jeeve.decide.latency_ms'], trigger: d.attrs?.['jeeve.decide.trigger'],
       escalate: d.answers?.escalate?.noul,
       answers: Object.entries(d.answers ?? {}).filter(([, a]: [string, any]) => a?.type === 'choice').map(([q, a]: [string, any]) => ({
-        q, choice: a.choice, confidence: a.confidence,
+        q, choice: a.choice, confidence: a.confidence, wm: d.wm?.options?.[q]?.[a.choice],
         top: Object.entries(a.probabilities ?? {}).sort((x, y) => (y[1] as number) - (x[1] as number)).slice(0, 3) as Array<[string, number]>
-      }))
+      })),
+      // The world model's best options across questions (src/wm.ts): crossings by their best method, ✗ = marked likely to fail.
+      wm: d.wm && Object.values(d.wm.options ?? {}).flatMap((rows: any) => Object.entries(rows)).sort((x: any, y: any) => y[1].success - x[1].success).slice(0, 4)
+        .map(([k, r]: [string, any]) => `${k} ${Math.round(r.success * 100)}%${r.blocked ? '✗' : ''}`)
     }
   }
   const veto = last(r => r.kind === 'event' && r.name === 'vetoed')

@@ -108,7 +108,7 @@ def episode_rows(ep):
         'pos': pos[steps], 'vel': s['vel'][steps], 'look': look,
         'flags': np.stack([(flags >> b) & 1 for b in range(3)], -1).astype(np.uint8),  # on ground, in water, in lava
         'health': hp[steps], 'food': s['food'][steps], 'held': item_lut[s['held'][steps]],
-        'act': act.astype(np.int32), 'elapsed': elapsed.astype(np.float32),
+        'step': steps, 'act': act.astype(np.int32), 'elapsed': elapsed.astype(np.float32),
         'is_start': np.arange(len(steps)) < len(starts),
         'disp1': ahead(H1).astype(np.float32), 'disp3': ahead(H3).astype(np.float32), 'm1': m1, 'm3': m3,
         'veto1': veto1, 'damage3': damage3.astype(np.float32),

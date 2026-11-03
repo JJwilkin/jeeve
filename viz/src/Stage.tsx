@@ -116,11 +116,15 @@ function System1 ({ p, style, active }: { p: Panels, style: CSSProperties, activ
         {s.answers.map(a => (
           <div key={a.q} style={{ display: 'contents' }}>
             <span style={{ color: C.dim }}>{a.q}</span>
-            <span style={{ fontFamily: MONO, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: a.choice === 'keep_current' ? C.dim : C.text }}>{a.choice}</span>
+            <span style={{ fontFamily: MONO, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: a.choice === 'keep_current' ? C.dim : C.text }}>{a.choice}{a.wm && <span style={{ color: a.wm.blocked ? C.bad : C.ok }}> · wm {Math.round(a.wm.success * 100)}%</span>}</span>
             <span style={{ height: 8, background: C.fill, borderRadius: 2, overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: `${a.confidence * 100}%`, background: a.choice === 'keep_current' ? C.faint : C.accent }} /></span>
             <span style={{ fontFamily: MONO, color: C.dim }}>{a.confidence.toFixed(2)}</span>
           </div>
         ))}
+        {!!s.wm?.length && <div style={{ display: 'contents' }}>
+          <span style={{ color: C.dim }}>world model</span>
+          <span style={{ gridColumn: 'span 3', fontFamily: MONO, color: C.dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.wm.join(' · ')}</span>
+        </div>}
         {s.escalate != null && <div style={{ display: 'contents' }}>
           <span style={{ color: C.dim }}>escalate?</span><span />
           <span style={{ height: 8, background: C.fill, borderRadius: 2, overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: `${s.escalate * 100}%`, background: C.faint }} /></span>
