@@ -248,7 +248,9 @@ export async function startAgent (opts: AgentOptions) {
     },
     end: (slot, reason) => {
       recorder.endBehavior(slot.runId, reason, slot.run.detail?.())
-      if ((reason === 'none_found' || reason === 'stuck') && !slot.pinned) failedAt.set(optionTarget(slot.key), Date.now())
+      // A world-model crossing (not a registered behavior) cools on any failure, so the next method gets its turn.
+      const crossing = !BEHAVIORS[slot.behavior] && ['vetoed', 'timeout', 'error'].includes(reason)
+      if ((reason === 'none_found' || reason === 'stuck' || crossing) && !slot.pinned) failedAt.set(optionTarget(slot.key), Date.now())
       if (slot.key === 'look_around:confirm') return endConfirm()
       if (slot.key === 'look_around:survey') return surveyed?.()
       if (slot.pinned) return finishTrial(reason, slot.run.detail?.() as RunDetail | undefined) // only trials are pinned

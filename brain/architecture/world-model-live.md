@@ -26,7 +26,7 @@ How the Tier 1 outcome model ([[world-model-training]]) runs inside Jeeve: plug-
 - **Crossings.** The collector's three seekers become whole-body options when `terrain()` finds their feature within 12 blocks: `cross_water`, `get_down_cliff` and `reach_ledge`.
   - The nearest feature of each kind is offered as one option, e.g. `reach_ledge:east:pillar_up`.
   - The method is the model's top pick among those that fit. For crossings success means done within 20 s.
-  - A method that just got stuck there cools down, as any option does, so the next method gets its turn.
+  - A method that just failed there (stuck, vetoed, timed out or errored) cools down for 10 s, so the next method gets its turn. While a crossing runs, no other method of it is offered.
   - They run through `authoredSpec` under the same guards as any behavior.
   - This puts hand-written behaviors on Jev's menu, which [[bitter-lesson]] would question. It was Joshua's call (2026-11-03), so the model's method choice changes what Jeeve does. 2A and 2B still own crossings that these can't do.
 

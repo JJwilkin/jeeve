@@ -5,13 +5,14 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { crc32 } from 'node:zlib'
 import type { Bot } from 'mineflayer'
-import { placeable, terrain, type Dir } from '../collect/actions.ts'
+import { placeable, terrain, type Dir, type Features, type Xyz } from '../collect/actions.ts'
+import type { Seeker } from '../collect/actions/common.ts'
 import { CROSS_WATER } from '../collect/actions/cross_water.ts'
 import { GET_DOWN_CLIFF } from '../collect/actions/get_down_cliff.ts'
 import { REACH_LEDGE } from '../collect/actions/reach_ledge.ts'
 import { FAR, RecordWriter, STEP, classTable, type Layout } from '../collect/format.ts'
 import { EpisodeRecorder } from '../collect/recorder.ts'
-import { authoredSpec, type ApiHost, type Channel } from './behaviors.ts'
+import { authoredSpec, type ApiHost, type Channel, type Spec } from './behaviors.ts'
 import type { Handles } from './encoder.ts'
 import type { Option } from './program.ts'
 
@@ -40,15 +41,13 @@ function field<T> (rec: Buffer, l: Layout, name: string, Arr: { new (b: ArrayBuf
   return new Arr(rec.buffer.slice(rec.byteOffset + f.offset, rec.byteOffset + f.offset + size * f.count) as ArrayBuffer)
 }
 
-// A step record (+ the latest far record, if any) → the view; items and entity types name the record's indices.
-export function viewOf (step: Buffer, far: Buffer | null, items: unknown[], entityTypes: unknown[]): View {
+// A step record and the latest far record → the view; items and entity types name the record's indices.
+export function viewOf (step: Buffer, far: Buffer, items: unknown[], entityTypes: unknown[]): View {
   const ent = field(step, STEP, 'ent_type', Int16Array)
   const held = field(step, STEP, 'held', Int16Array)[0]
   return {
     near: field(step, STEP, 'near', Uint8Array), mid: field(step, STEP, 'mid', Uint8Array), midFlags: field(step, STEP, 'mid_flags', Uint8Array),
-    farHeight: far ? field(far, FAR, 'height', Int8Array) : new Int8Array(F * F).fill(-128),
-    farTop: far ? field(far, FAR, 'top', Uint8Array) : new Uint8Array(F * F).fill(255),
-    farDepth: far ? field(far, FAR, 'depth', Uint8Array) : new Uint8Array(F * F),
+    farHeight: field(far, FAR, 'height', Int8Array), farTop: field(far, FAR, 'top', Uint8Array), farDepth: field(far, FAR, 'depth', Uint8Array),
     entType: Uint8Array.from(ent, i => i >= 0 ? bucket(String(entityTypes[i]), 256) : 0),
     entPos: field(step, STEP, 'ent_pos', Float32Array), entVel: field(step, STEP, 'ent_vel', Float32Array),
     pos: field(step, STEP, 'pos', Float64Array), vel: field(step, STEP, 'vel', Float32Array), look: field(step, STEP, 'look', Float32Array),
@@ -176,6 +175,12 @@ function stateIn (g: G, v: View): State {
 // One action (or none) from this view → its frame and the model's inputs (data.sample, without augmentation).
 // elapsed: seconds the action has been running (0 for an option not started yet).
 export function sample (v: View, act: { name: string, params: Params } | null, actions: string[], elapsed = 0): Sample {
+  const o = optionOf(v, act, actions, elapsed)
+  return { ...o, state: stateIn(ROTATIONS[o.frame], v) }
+}
+
+// The inputs that depend on the action: its frame (which state encoding it needs), action, parameters and target.
+function optionOf (v: View, act: { name: string, params: Params } | null, actions: string[], elapsed = 0): Omit<Sample, 'state'> {
   const { rel, d } = act ? targetOf(act.params, v.pos) : { rel: null, d: null }
   const frame = ROTATIONS.indexOf(canonical(d ?? facing(v.look[0])))
   const g = ROTATIONS[frame]
@@ -183,7 +188,7 @@ export function sample (v: View, act: { name: string, params: Params } | null, a
   if (rel) { target.set(applyVec3(g, rel[0], rel[1], rel[2]).map(x => x / 16)); target[3] = 1 }
   if (d) { target.set(applyVec(g, ...d), 4); target[6] = 1 }
   target[7] = Math.fround(elapsed) / 20
-  return { frame, state: stateIn(g, v), action: act ? Math.max(0, actions.indexOf(act.name)) : 0, params: paramVector(act?.params ?? {}), target }
+  return { frame, action: act ? Math.max(0, actions.indexOf(act.name)) : 0, params: paramVector(act?.params ?? {}), target }
 }
 
 // ---- inference
@@ -196,18 +201,16 @@ const STATE_SHAPES: Record<keyof State, number[]> = {
 }
 
 export class OutcomeModel {
-  actions: string[]
-  temperature: number
+  actions: string[] // model.json's vocabulary; the calibration temperature is inside query.onnx
   private enc: any
   private qry: any
   private ort: any
 
-  private constructor (ort: any, enc: any, qry: any, info: { actions: string[], temperature: number }) {
+  private constructor (ort: any, enc: any, qry: any, info: { actions: string[] }) {
     this.ort = ort
     this.enc = enc
     this.qry = qry
     this.actions = info.actions
-    this.temperature = info.temperature
   }
 
   // The exported model in dir (encoder.onnx, query.onnx, model.json), or null if it isn't there.
@@ -223,11 +226,11 @@ export class OutcomeModel {
   // Every option, in one encoding per frame they need (at most 4) and one query batch per frame.
   async score (v: View, options: Array<{ key: string, name: string, params: Params }>): Promise<Scored[]> {
     const { Tensor } = this.ort
-    const samples = options.map(o => sample(v, o, this.actions))
+    const samples = options.map(o => optionOf(v, o, this.actions))
     const out: Scored[] = []
     for (const frame of new Set(samples.map(s => s.frame))) {
       const idx = samples.flatMap((s, i) => s.frame === frame ? [i] : [])
-      const st = samples[idx[0]].state
+      const st = stateIn(ROTATIONS[frame], v)
       const feeds = Object.fromEntries(Object.entries(STATE_SHAPES).map(([k, shape]) => {
         const x = (st as any)[k]
         return [k, k === 'ent_type' || k === 'held'
@@ -256,12 +259,14 @@ export class OutcomeModel {
 // success: a crossing must end done within its 20 s, as in the collector; a live behavior has no such limit, so for it
 // "timeout" (still going at the collector's 20 s) isn't a failure: success is anything but stuck, vetoed or died.
 export const BLOCKED_BELOW = Number(process.env.JEEVE_WM_BLOCKED_BELOW ?? 0.2)
-const SEEKERS = [CROSS_WATER, GET_DOWN_CLIFF, REACH_LEDGE]
+type Feature = { dir: Dir, dist: number, near: Xyz }
+const SEEKERS = [CROSS_WATER, GET_DOWN_CLIFF, REACH_LEDGE] as unknown as Array<Seeker<Feature>> // each takes its own feature kind
 const WHOLE_BODY: Channel[] = ['legs', 'aim', 'hands'] // the seekers' channels
 const COMPASS: Record<string, string> = { '1,0': 'east', '1,1': 'southeast', '0,1': 'south', '-1,1': 'southwest', '-1,0': 'west', '-1,-1': 'northwest', '0,-1': 'north', '1,-1': 'northeast' }
 const FAILS: Record<string, string> = { stuck: 'get stuck', vetoed: 'be vetoed by a guard', died: 'die' }
 
-type Asked = { q: string, key: string, name: string, params: Params, run?: { desc: string, behavior: string, spec: ReturnType<typeof authoredSpec>, target: unknown } }
+// run: a crossing's behavior; feature: which crossing (its question, kind and direction), shared by its methods
+type Asked = { q: string, key: string, name: string, params: Params, run?: { desc: string, behavior: string, spec: Spec, target: unknown }, feature?: string }
 export type WmRow = { action: string, success: number, p: number[], duration_s: number, dhealth: number, method?: string, methods?: Record<string, number>, blocked?: boolean }
 export type WmTrace = { ms: number, options: Record<string, Record<string, WmRow>>, error?: string }
 
@@ -286,8 +291,31 @@ function asAction (o: Option, bot: Bot, handles: Handles): { name: string, param
 const pct = (x: number) => `${Math.round(x * 100)}%`
 const sameSet = (a: Channel[], b: Channel[]) => a.length === b.length && a.every(c => b.includes(c))
 
-// Scores every option it can, adds the nearest crossing of each kind (water, drop, ledge) to the whole-body question
-// by the method the model ranks first, and marks options it expects to fail. Mutates `options`; returns the trace.
+// The nearest crossing of each kind (water, drop, ledge) for a whole-body question, once per method that fits it.
+function crossingsFor (q: string, f: Features, host: ApiHost): Asked[] {
+  return SEEKERS.flatMap(s => {
+    const x = s.find(f).toSorted((a, b) => a.dist - b.dist)[0]
+    if (!x) return []
+    const toward = COMPASS[x.dir.join(',')]
+    return s.methods(x, f).map(m => ({
+      q, key: `${s.source.name}:${toward}:${m.method}`, name: s.source.name, params: m.params, feature: `${q} ${s.source.name}:${toward}`,
+      run: { desc: `${m.source.description} (${toward}, ${x.dist} blocks away)`, behavior: s.source.name, spec: authoredSpec({ ...m.source, version: 1 }, host), target: m.target }
+    }))
+  })
+}
+
+const rowOf = (name: string, pred: Prediction, success: number): WmRow =>
+  ({ action: name, success: +success.toFixed(3), p: pred.p.map(x => +x.toFixed(3)), duration_s: +pred.duration_s.toFixed(1), dhealth: +pred.dhealth.toFixed(1) })
+
+// An option the model expects to fail says so, with its most likely failure.
+function markLikelyFailure (o: Option, row: WmRow): Option {
+  row.blocked = true
+  const worst = ['stuck', 'vetoed', 'died'].reduce((a, b) => row.p[OUTCOMES.indexOf(b)] > row.p[OUTCOMES.indexOf(a)] ? b : a)
+  return { ...o, desc: `${o.desc} (likely to ${FAILS[worst]}: world model gives ${pct(row.success)} success)` }
+}
+
+// Scores every option it can, adds each crossing by the method the model ranks first, and marks options it expects to
+// fail. Mutates `options`; returns the trace.
 export function jevOptions (bot: Bot, model: OutcomeModel, host: ApiHost, handles: Handles) {
   let viewer: ReturnType<typeof liveViewer> | undefined
   return async (options: Record<string, Record<string, Option>>, claims: Record<string, Channel[]>, cooling = (_key: string) => false): Promise<WmTrace> => {
@@ -295,48 +323,30 @@ export function jevOptions (bot: Bot, model: OutcomeModel, host: ApiHost, handle
     viewer ??= liveViewer(bot) // the registry exists only once the bot has logged in
     const view = viewer.view()
     const feet = bot.entity.position.floored()
-    const f = { ...terrain(viewer.rec, [feet.x, feet.y, feet.z]), placeable: placeable(bot), logs: [], blocks: [], mobs: [], food: [] }
-    const asked: Asked[] = []
-    for (const [q, opts] of Object.entries(options)) {
-      for (const [key, o] of Object.entries(opts)) { const a = asAction(o, bot, handles); if (a) asked.push({ q, key, ...a }) }
-      if (!sameSet(claims[q], WHOLE_BODY)) continue
-      for (const s of SEEKERS) {
-        const x = (s.find(f) as Array<{ dir: Dir, dist: number }>).toSorted((a, b) => a.dist - b.dist)[0]
-        if (!x) continue
-        const where = `${COMPASS[x.dir.join(',')]}, ${x.dist} blocks away`
-        for (const m of s.methods(x as any, f)) {
-          asked.push({ q, key: `${s.source.name}:${COMPASS[x.dir.join(',')]}:${m.method}`, name: s.source.name, params: m.params, run: { desc: `${m.source.description} (${where})`, behavior: s.source.name, spec: authoredSpec({ ...m.source, version: 1 }, host), target: m.target } })
-        }
-      }
-    }
+    const f: Features = { ...terrain(viewer.rec, [feet.x, feet.y, feet.z]), placeable: placeable(bot), logs: [], blocks: [], mobs: [], food: [] }
+    const asked: Asked[] = Object.entries(options).flatMap(([q, opts]) => [
+      ...Object.entries(opts).flatMap(([key, o]) => { const a = asAction(o, bot, handles); return a ? [{ q, key, ...a }] : [] }),
+      ...(sameSet(claims[q], WHOLE_BODY) ? crossingsFor(q, f, host) : [])
+    ])
     const scored = asked.length ? await model.score(view, asked) : []
     const out: WmTrace['options'] = {}
-    const features = new Map<string, Array<{ i: number, row: WmRow }>>() // a crossing's methods, by question and feature
-    scored.forEach(({ key, name, params, pred }, i) => {
-      const { q, run } = asked[i]
-      const success = run ? pred.success : pred.p[0] + pred.p[4]
-      const row: WmRow = { action: name, success: +success.toFixed(3), p: pred.p.map(x => +x.toFixed(3)), duration_s: +pred.duration_s.toFixed(1), dhealth: +pred.dhealth.toFixed(1) }
-      if (run) {
-        row.method = String(params.method)
-        const feature = `${q} ${key.slice(0, -row.method.length - 1)}`
-        features.set(feature, [...features.get(feature) ?? [], { i, row }])
+    const methods = new Map<string, Array<{ a: Asked, row: WmRow }>>() // each crossing's methods
+    scored.forEach(({ name, pred }, i) => {
+      const a = asked[i]
+      if (a.feature) {
+        methods.set(a.feature, [...methods.get(a.feature) ?? [], { a, row: { ...rowOf(name, pred, pred.success), method: String(a.params.method) } }])
         return
       }
-      ;(out[q] ??= {})[key] = row
-      if (row.success < BLOCKED_BELOW) {
-        const worst = ['stuck', 'vetoed', 'died'].reduce((a, b) => row.p[OUTCOMES.indexOf(b)] > row.p[OUTCOMES.indexOf(a)] ? b : a)
-        row.blocked = true
-        options[q][key] = { ...options[q][key], desc: `${options[q][key].desc} (likely to ${FAILS[worst]}: world model gives ${pct(row.success)} success)` }
-      }
+      const row = (out[a.q] ??= {})[a.key] = rowOf(name, pred, pred.p[0] + pred.p[4])
+      if (row.success < BLOCKED_BELOW) options[a.q][a.key] = markLikelyFailure(options[a.q][a.key], row)
     })
-    // A crossing is one option, by its best method that isn't cooling (one that just got stuck there sits out, so the
-    // next gets its turn); every method's odds go in the trace.
-    for (const ms of features.values()) {
-      const methods = Object.fromEntries(ms.map(m => [m.row.method, m.row.success]))
-      const best = ms.filter(m => !cooling(asked[m.i].key)).toSorted((a, b) => b.row.success - a.row.success)[0]
+    // A crossing is one option, by its best method that isn't cooling (one that just failed there sits out, so the next
+    // gets its turn); every method's odds go in the trace.
+    for (const ms of methods.values()) {
+      const best = ms.filter(m => !cooling(m.a.key)).toSorted((x, y) => y.row.success - x.row.success)[0]
       if (!best) continue
-      const { q, key, run } = asked[best.i]
-      ;(out[q] ??= {})[key] = { ...best.row, methods }
+      const { q, key, run } = best.a
+      ;(out[q] ??= {})[key] = { ...best.row, methods: Object.fromEntries(ms.map(m => [m.row.method, m.row.success])) }
       options[q][key] = { desc: `${run!.desc} — world model: ${pct(best.row.success)} success, ~${Math.round(best.row.duration_s)} s`, behavior: run!.behavior, run: { spec: run!.spec, target: run!.target } }
     }
     return { ms: Math.round(performance.now() - t0), options: out }

@@ -94,7 +94,7 @@ if (process.argv[2] === 'episodes') {
   for (const q of JSON.parse(readFileSync(process.argv[3], 'utf8')) as Request[]) {
     const e = open(q.file)
     const step = e.buf.subarray(e.steps + q.step * STEP.size, e.steps + (q.step + 1) * STEP.size)
-    const far = q.far >= 0 ? e.buf.subarray(e.far + q.far * FAR.size, e.far + (q.far + 1) * FAR.size) : null
+    const far = e.buf.subarray(e.far + q.far * FAR.size, e.far + (q.far + 1) * FAR.size) // data.py's far record: one is taken at step 0
     const x = sample(viewOf(step, far, e.header.items, e.header.entity_types), q.act, q.actions, q.elapsed)
     const arr = (a: ArrayLike<number>) => Array.from(a)
     console.log(JSON.stringify({

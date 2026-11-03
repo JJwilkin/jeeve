@@ -91,10 +91,13 @@ export function makeDecider (ctx: DecideCtx) {
     for (const [id, q] of Object.entries(ctx.program.questions)) {
       if (q.type === 'noul') { questions[id] = { type: 'noul', instructions: q.instructions }; continue }
       // Idle behaviors sit out a directive, unless 2A allowed only idle ones here (else Jev could only stand still).
-      const busy = !!ctx.directive() && Object.values(options[id]).some(o => o.behavior && !BEHAVIORS[o.behavior]?.idle)
-      // The running option is keep_current only: the world model's crossings come back each call (src/wm.ts).
+      // The world model's crossings don't count: 2A didn't offer them.
+      const busy = !!ctx.directive() && Object.values(options[id]).some(o => o.behavior && !o.run && !BEHAVIORS[o.behavior]?.idle)
+      // A crossing that's running is keep_current only, in any method: they come back each call (src/wm.ts), and a
+      // switch of method would restart it.
       const now = running(ctx, q)
-      for (const [k, o] of Object.entries(options[id])) if (ctx.cooling?.(optionTarget(k)) || (busy && o.behavior && BEHAVIORS[o.behavior]?.idle) || (o.run && k === now)) delete options[id][k]
+      const sitsOut = (k: string, o: Option) => ctx.cooling?.(optionTarget(k)) || (busy && o.behavior && BEHAVIORS[o.behavior]?.idle) || (o.run && now?.startsWith(`${o.behavior}:`))
+      for (const [k, o] of Object.entries(options[id])) if (sitsOut(k, o)) delete options[id][k]
       // Shuffled per call and traced: Jev leans toward early options on close calls.
       optionOrder[id] = shuffled(Object.keys(options[id])).slice(0, LIMITS.options)
       questions[id] = { type: 'choice', instructions: q.instructions, criteria: Object.fromEntries(optionOrder[id].map(k => [k, options[id][k].desc])) }

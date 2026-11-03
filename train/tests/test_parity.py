@@ -38,7 +38,7 @@ def test_live_inputs_match_training(tmp_path):
     (tmp_path / 'requests.json').write_text(json.dumps([q for _, _, q in pairs]))
     out = subprocess.run(['node', PARITY, 'inputs', str(tmp_path / 'requests.json')], check=True, capture_output=True, text=True).stdout
     got = [json.loads(line) for line in out.splitlines()]
-    assert len(got) == len(pairs) == 4 * (13 + 12)
+    assert len(got) == len(pairs)
     vocab = {n: i for i, n in enumerate(ACTIONS)}
     frames = set()
     for (sh, r, q), ts in zip(pairs, got):

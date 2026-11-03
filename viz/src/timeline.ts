@@ -5,7 +5,7 @@
 export type Row = { t: number, kind: string, [k: string]: any }
 export type Node = 'player' | 's2' | 'builder' | 's1'
 export type Message = { t: number, from: Node, to: Node, label: string }
-export type Answer = { q: string, choice: string, confidence: number, top: Array<[string, number]>, wm?: number } // wm: the world model's success odds for the choice
+export type Answer = { q: string, choice: string, confidence: number, top: Array<[string, number]>, wm?: { success: number, blocked?: boolean } } // the world model on the choice
 export type BuilderStatus = 'idle' | 'queued' | 'thinking' | 'waiting' | 'trialling' | 'registered' | 'failed' | 'cancelled'
 
 export type Panels = {
@@ -160,7 +160,7 @@ export function stateAt (all: Row[], t: number): Panels {
       ...p.system1, at: d.t, latencyMs: d.attrs?.['jeeve.decide.latency_ms'], trigger: d.attrs?.['jeeve.decide.trigger'],
       escalate: d.answers?.escalate?.noul,
       answers: Object.entries(d.answers ?? {}).filter(([, a]: [string, any]) => a?.type === 'choice').map(([q, a]: [string, any]) => ({
-        q, choice: a.choice, confidence: a.confidence, wm: d.wm?.options?.[q]?.[a.choice]?.success,
+        q, choice: a.choice, confidence: a.confidence, wm: d.wm?.options?.[q]?.[a.choice],
         top: Object.entries(a.probabilities ?? {}).sort((x, y) => (y[1] as number) - (x[1] as number)).slice(0, 3) as Array<[string, number]>
       })),
       // The world model's best options across questions (src/wm.ts): crossings by their best method, ✗ = marked likely to fail.
