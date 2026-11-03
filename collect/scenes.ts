@@ -1,6 +1,7 @@
 // Built stress scenes (brain/tasks/world-model-data.md → "Built stress scenes"): an obstacle cut into a level pad of
 // the local ground, with the bot facing it along +x. A fresh scene with fresh parameters is built for each scene
 // episode, where the bot landed, so the last episode's digging and placing never carries over.
+import { weighted } from './actions/common.ts'
 export type Scene = { name: string, [param: string]: string | number | boolean }
 
 const int = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo + 1))
@@ -67,9 +68,11 @@ const SCENES = {
 }
 type Name = keyof typeof SCENES
 
+// River, ravine and ledge are drawn most (v4, 2026-11-02): they hold the crossings and climbs the first Tier 1
+// model was weakest on.
+const SHARE: Record<Name, number> = { river: 3, ravine: 3, ledge: 2, lava_pool: 1, canopy: 1, cave_mouth: 1 }
 export const drawScene = (): Scene => {
-  const names = Object.keys(SCENES) as Name[]
-  const name = names[int(0, names.length - 1)]
+  const name = weighted(Object.keys(SHARE) as Name[], n => SHARE[n])
   return { name, ...SCENES[name].draw() }
 }
 
