@@ -33,6 +33,7 @@ The architecture is settled for the first milestone and a first runtime slice ex
 - [[tasks/stateful-system-1|stateful-system-1 task]] (doing → [[architecture/stateful-system-1|stateful-system-1]], proposal): System 1 keeps a working memory (commitment, intent, outcomes) and takes on commitments, local recovery and when to escalate; replay done (moot-answer filter + plan/doing memory; persistent doubt rejected; needs defaults and objects replayed), build and bench A/B next
 
 - [[world-model-data]] (doing → [[world-model-collector]]): collect game-state data for a small world model (Tier 1): a 64-block layered view, 18 scripted actions (3 written by 2B), 60 natural seeds plus built stress scenes, on a separate GCP VM; how the model would plug into Jeeve, cost (~$20–30), phases
+- [[combat-data]] (todo): combat data for the world model: sword, bow and shield, several opponents; the record fields combat needs first, ~20 melee/defence/ranged/loadout actions, mob packs and bot-vs-bot arenas, phases and decisions
 
 ### Architecture
 - [[overview]]: what we build vs. what the agent discovers, the discovery loop, fast and slow thinking, goals and time as one hierarchy, open questions
