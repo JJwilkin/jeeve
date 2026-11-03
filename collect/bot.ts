@@ -8,6 +8,7 @@ import { Vec3 } from 'vec3'
 import collectblock from 'mineflayer-collectblock'
 import { CHANNELS, Channels } from '../src/behaviors.ts'
 import { guardedMovements, installGuards } from '../src/guards.ts'
+import { weighted } from './actions/common.ts'
 import { HAND_WRITTEN, SEED_ACTIONS, features, libraryActions, randomInput, startNoise, type Action, type Draw } from './actions.ts'
 import { CONTROLS, FAR_EVERY, MID_FLAGS, NOISE, STATE_FLAGS, STEPS_PER_S, VIEWS, classTable } from './format.ts'
 import { rconWhenUp } from './rcon.ts'
@@ -92,8 +93,7 @@ function choose (biome: string): { name: string, draw: Draw } {
   if (Math.random() < RANDOM_SHARE) return { name: 'random_input', draw: randomInput() }
   const f = features(bot, rec)
   const fit = ACTIONS.filter(a => a.fits(f)).map(a => ({ a, w: weight(biome, a.name) * (FOCUS[a.name] ?? 1) }))
-  let x = Math.random() * fit.reduce((s, c) => s + c.w, 0)
-  const a = fit.find(c => (x -= c.w) <= 0)?.a ?? fit[0].a
+  const { a } = weighted(fit, c => c.w)
   return { name: a.name, draw: a.draw(bot, f) }
 }
 
@@ -106,7 +106,6 @@ process.on('SIGTERM', () => { stopping = true; running?.end('stopped'); endEpiso
 async function runAction (biome: string, until: number) {
   const { name, draw } = choose(biome)
   const i = rec.startAction(name, draw.params)
-  const t0 = Date.now()
   const stopNoise = name === 'random_input' ? () => {} : startNoise(bot, rec)
   const { outcome, error } = await new Promise<{ outcome: string, error?: string }>(resolve => {
     const timers = [
@@ -120,7 +119,7 @@ async function runAction (biome: string, until: number) {
   stopNoise()
   channels.stop(CHANNELS, 'action_end')
   bot.clearControlStates()
-  rec.endAction(i, outcome, Date.now() - t0, error?.slice(0, 500))
+  rec.endAction(i, outcome, error?.slice(0, 500))
   const k = `${biome}|${name}|${outcome.split(' ')[0]}`
   counts.set(k, (counts.get(k) ?? 0) + 1)
 }

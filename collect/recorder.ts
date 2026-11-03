@@ -90,15 +90,15 @@ export class EpisodeRecorder {
     return this.current
   }
 
-  endAction (i: number, outcome: string, ms: number, error?: string) {
-    Object.assign(this.actions[i], { end_step: this.steps.length, outcome, ms, error })
+  endAction (i: number, outcome: string, error?: string) {
+    Object.assign(this.actions[i], { end_step: this.steps.length, outcome, ms: Date.now() - this.actionStarted, error })
     if (this.current === i) this.current = -1
   }
 
   // Ends the episode: the gzipped file, ready to write.
   finish (header: Record<string, unknown>) {
     this.recording = false
-    if (this.current >= 0) this.endAction(this.current, header.end as string, Date.now() - this.actionStarted)
+    if (this.current >= 0) this.endAction(this.current, header.end as string)
     const meta = {
       ...header,
       items: this.items.list,

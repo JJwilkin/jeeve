@@ -7,6 +7,10 @@ import type { Authored, Features, Xyz } from '../actions.ts'
 export const between = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
 export const int = (lo: number, hi: number) => Math.floor(between(lo, hi + 1))
 export const pick = <T>(xs: T[]) => xs[Math.floor(Math.random() * xs.length)]
+export const weighted = <T>(xs: T[], w: (x: T) => number) => {
+  let r = Math.random() * xs.reduce((s, x) => s + w(x), 0)
+  return xs.find(x => (r -= w(x)) <= 0) ?? xs[0]
+}
 export const CARDINAL: Array<[number, number]> = [[1, 0], [0, 1], [-1, 0], [0, -1]]
 
 // open: blocks a player walks through (water and lava too: the guards, not the action, keep it out of lava).

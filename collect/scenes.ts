@@ -1,6 +1,7 @@
 // Built stress scenes (brain/tasks/world-model-data.md → "Built stress scenes"): an obstacle cut into a level pad of
 // the local ground, with the bot facing it along +x. A fresh scene with fresh parameters is built for each scene
 // episode, where the bot landed, so the last episode's digging and placing never carries over.
+import { weighted } from './actions/common.ts'
 export type Scene = { name: string, [param: string]: string | number | boolean }
 
 const int = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo + 1))
@@ -71,8 +72,7 @@ type Name = keyof typeof SCENES
 // model was weakest on.
 const SHARE: Record<Name, number> = { river: 3, ravine: 3, ledge: 2, lava_pool: 1, canopy: 1, cave_mouth: 1 }
 export const drawScene = (): Scene => {
-  let x = Math.random() * Object.values(SHARE).reduce((a, b) => a + b)
-  const name = (Object.keys(SHARE) as Name[]).find(n => (x -= SHARE[n]) <= 0) ?? 'river'
+  const name = weighted(Object.keys(SHARE) as Name[], n => SHARE[n])
   return { name, ...SCENES[name].draw() }
 }
 
