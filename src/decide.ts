@@ -5,6 +5,7 @@ import { BEHAVIORS } from './behaviors.ts'
 import { foods, rawSnapshot, type Attackers, type Directive, type Handles, type Memory } from './encoder.ts'
 import { PRICES, usd } from './budget.ts'
 import { ENCODERS, LIMITS, optionsFor, optionTarget, shuffled, version, type Choice, type Option, type Program, type Thing } from './program.ts'
+import { wmLine, type WmTrace } from './wm.ts'
 
 const MODEL = 'jev-1.13.0' // pinned: thresholds are tuned against a version, aliases move
 
@@ -62,6 +63,8 @@ export type DecideCtx = {
   memory?: () => Memory // where the plan is and what's running (rendered only if the encoder's memory param is on)
   urgent?: () => boolean // a need that can't wait (starving, with food): it may override a whole-body behavior too
   ask?: Ask
+  // The world model (src/wm.ts jevOptions): scores the options, adds crossings, marks likely failures. Off: unset.
+  wm?: (options: Record<string, Record<string, Option>>, claims: Record<string, Channel[]>, cooling?: (key: string) => boolean) => Promise<WmTrace>
 }
 
 export { optionTarget }
@@ -81,12 +84,17 @@ export function makeDecider (ctx: DecideCtx) {
     const questions: Record<string, unknown> = {}
     const options: Record<string, Record<string, Option>> = {}
     const optionOrder: Record<string, string[]> = {}
+    const asked = Object.entries(ctx.program.questions).filter((e): e is [string, Choice] => e[1].type === 'choice')
+    for (const [id, q] of asked) options[id] = optionsFor(q.claims, ctx.program.allowed_behaviors, enc, running(ctx, q), ctx.remaining, ctx.wanted(), foods(ctx.bot))
+    let wm: WmTrace | undefined
+    if (ctx.wm) wm = await ctx.wm(options, Object.fromEntries(asked.map(([id, q]) => [id, q.claims])), ctx.cooling).catch(err => ({ ms: 0, options: {}, error: String(err) }))
     for (const [id, q] of Object.entries(ctx.program.questions)) {
       if (q.type === 'noul') { questions[id] = { type: 'noul', instructions: q.instructions }; continue }
-      options[id] = optionsFor(q.claims, ctx.program.allowed_behaviors, enc, running(ctx, q), ctx.remaining, ctx.wanted(), foods(ctx.bot))
       // Idle behaviors sit out a directive, unless 2A allowed only idle ones here (else Jev could only stand still).
       const busy = !!ctx.directive() && Object.values(options[id]).some(o => o.behavior && !BEHAVIORS[o.behavior]?.idle)
-      for (const [k, o] of Object.entries(options[id])) if (ctx.cooling?.(optionTarget(k)) || (busy && o.behavior && BEHAVIORS[o.behavior]?.idle)) delete options[id][k]
+      // The running option is keep_current only: the world model's crossings come back each call (src/wm.ts).
+      const now = running(ctx, q)
+      for (const [k, o] of Object.entries(options[id])) if (ctx.cooling?.(optionTarget(k)) || (busy && o.behavior && BEHAVIORS[o.behavior]?.idle) || (o.run && k === now)) delete options[id][k]
       // Shuffled per call and traced: Jev leans toward early options on close calls.
       optionOrder[id] = shuffled(Object.keys(options[id])).slice(0, LIMITS.options)
       questions[id] = { type: 'choice', instructions: q.instructions, criteria: Object.fromEntries(optionOrder[id].map(k => [k, options[id][k].desc])) }
@@ -136,13 +144,15 @@ export function makeDecider (ctx: DecideCtx) {
         'jeeve.decide.encode_ms': encodeMs,
         'jeeve.decide.deadline_missed': deadlineMissed,
         'jeeve.decide.escalate': escalate,
+        'jeeve.wm.ms': wm?.ms,
         'jeeve.decide.raw_state': JSON.stringify(raw)
       },
       input: { state, questions }, // criteria are in the order shown
-      output: { answers: res?.answers, applied, error },
+      output: { answers: res?.answers, applied, error, wm },
       llm: tokens ? { model: res.model, provider: 'typesafe', ...tokens, total_cost_usd: usd(PRICES.typesafe, tokens) } : undefined
     })
     for (const act of actions) act(spanId)
+    if (wm) console.log(`[wm] ${wmLine(wm, res?.answers)}`)
     if (escalate) ctx.escalate(jevSaysEscalate ? 'jev_escalate' : 'low_confidence', { questions: unsure, answers: res?.answers, decide_span: spanId })
   }
 }
@@ -160,6 +170,7 @@ function plan (ctx: DecideCtx, q: Choice, choice: string, opt: Option | undefine
   if (choice === 'keep_current') return ['kept']
   if (choice === 'stop') return ['stopped', () => ctx.channels.stop(q.claims, 'stopped')]
   if (!opt?.behavior) return ['unknown_option']
+  if (opt.run) return ['started', by => ctx.channels.set(choice, opt.behavior!, opt.run!.target as never, by, { spec: opt.run!.spec })]
   const holder = ctx.channels.slots[q.claims[0]]
   if (holder?.status === 'running' && holder.behavior === opt.behavior && optionTarget(holder.key) !== optionTarget(choice) && Date.now() - holder.startedAt < LIMITS.switchDwellMs) return ['dwell']
   if (opt.block) return ['started', by => ctx.channels.set(choice, opt.behavior!, opt.block!, by)]

@@ -1,7 +1,8 @@
-# Only what the agent, the web relay and the world-model collector run on: keeps .env, traces and .server out of the build context.
+# Only what the agent, the web relay and the world-model collector run on (and the world model, wm/): keeps .env, traces and .server out of the build context.
 *
 !package.json
 !package-lock.json
 !src
 !web
 !collect
+!wm

@@ -23,6 +23,7 @@ import { judgmentOrg, Recorder } from './trace.ts'
 import { worldFeed } from './worldfeed.ts'
 import { blockAt, explored, frontier, noteDug, observe, placedStanding, reachable, scan, seenMap, seenTypes, type Pos } from './world.ts'
 import { describeGraph, regionsNear, terrain } from './regions.ts'
+import { jevOptions, OutcomeModel } from './wm.ts'
 
 export type AgentOptions = {
   host?: string
@@ -72,6 +73,10 @@ export async function startAgent (opts: AgentOptions) {
   // Every await happens before the bot exists: a spawn during an await would miss its handlers, and the agent would
   // hang unspawned (e2e run 5, when discoverSchema was slow).
   const schema = judgeval ? await judgeval.discoverSchema().catch(() => undefined) : undefined
+  // The Tier 1 world model on Jev's options (src/wm.ts): on when its files are in JEEVE_WM_DIR (default wm/), off with JEEVE_WM=0.
+  const wmDir = process.env.JEEVE_WM_DIR ?? 'wm'
+  const outcomes = process.env.JEEVE_WM === '0' ? null : await OutcomeModel.load(wmDir).catch(err => { console.warn(`[wm] failed to load ${wmDir}: ${err}`); return null })
+  console.log(outcomes ? `[wm] world model on: ${wmDir}, ${outcomes.actions.length} actions` : `[wm] world model off${process.env.JEEVE_WM === '0' ? ' (JEEVE_WM=0)' : `: no model in ${wmDir}/`}`)
 
   const username = opts.username ?? 'Jeeve'
   const bot = mineflayer.createBot({ host: opts.host ?? 'localhost', port: opts.port ?? 25565, username, auth: 'offline' })
@@ -130,6 +135,7 @@ export async function startAgent (opts: AgentOptions) {
   const lookup = (name: string) => modules.get(bare(name))
   // The shared block view (src/world.ts), who code may whisper to, and each authored action as a trace row.
   const world: ApiHost = { blockAt, scan, reachable, allowed: opts.allowed, onCall: c => recorder.jsonl({ kind: 'api_call', ...c, out: short(c.out) }) }
+  const scoreOptions = outcomes ? jevOptions(bot, outcomes, world, handles) : undefined // one per bot: it holds a recorder
   // Behaviors from the library join the seed set; Jev sees them wherever System 2's program allows them.
   for (const m of modules.modules.values()) if (m.kind === 'behavior') BEHAVIORS[m.name] = { ...authoredSpec(m, world), disabled: m.disabled }
   const authoredFailures = new Map<string, number>() // behavior name → failed runs in a row
@@ -379,7 +385,8 @@ export async function startAgent (opts: AgentOptions) {
       cooling: option => Date.now() - (failedAt.get(option) ?? 0) < FAILED_COOLDOWN_MS,
       threatened: () => threatened(),
       urgent: () => bot.food < 4 && foods(bot).length > 0,
-      ask: opts.ask
+      ask: opts.ask,
+      wm: scoreOptions
     })
     // A call in flight when it fell asleep may still start behaviors: stop them.
     wake = coalescing(budget.gate(async reasons => { await decide(reasons); if (budget.asleep) channels.stop(CHANNELS, 'asleep') }), LIMITS.minIntervalMs)

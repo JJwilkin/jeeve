@@ -1,6 +1,6 @@
 // A System 1 program: a declarative manifest over registered modules (brain/architecture/system-1.md).
 import { createHash } from 'node:crypto'
-import { BEHAVIORS, STOP_DESC, type Channel } from './behaviors.ts'
+import { BEHAVIORS, STOP_DESC, type Channel, type Spec } from './behaviors.ts'
 import { makeEgocentric, type Encoded } from './encoder.ts'
 import type { Pos } from './world.ts'
 
@@ -37,7 +37,8 @@ export const NEEDS_BEHAVIORS = ['eat']
 export const behaviorsFor = (claims: Channel[], allowed: string[]) => [...new Set([...allowed, ...NEEDS_BEHAVIORS])].filter(b => BEHAVIORS[b] && !BEHAVIORS[b].disabled && sameSet(BEHAVIORS[b].channels, claims))
 
 // An entity target is a handle, resolved to a live entity when the answer arrives.
-export type Option = { desc: string, behavior?: string, handle?: string, block?: Thing, place?: Pos } // block: a block or item target
+// block: a block or item target. run: a behavior that isn't registered, with its target (a world-model crossing, src/wm.ts)
+export type Option = { desc: string, behavior?: string, handle?: string, block?: Thing, place?: Pos, run?: { spec: Spec, target: unknown } }
 export type Thing = { name: string, count: number }
 
 // Option generator `behaviors_x_targets`: behaviors whose channel set is the question's × encoded

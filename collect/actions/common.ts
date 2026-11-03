@@ -61,7 +61,10 @@ export const NAVIGATE_BODY = String.raw`
 // feature. A method is another action's body (on HELPERS) or whole code (2B's, which brings its own helpers).
 export type Method<F> = ({ body: string } | { code: string }) & { stay?: true, fits?: (x: F, f: Features) => boolean, target: (x: F, f: Features) => unknown }
 const APPROACH = "if (t.near) try { await api.goto(t.near[0], t.near[1], t.near[2], 0) } catch (e) { if (/^vetoed/.test(String(e && e.message))) throw e; return 'stuck' }"
-export function seeker<F extends { dist: number, near: Xyz }> (name: string, description: string, find: (f: Features) => F[], methods: Record<string, Method<F>>): Authored {
+// Every method that fits feature x: its parameters (as recorded), its behavior's target and source. Jeeve offers the
+// one the world model ranks first (src/wm.ts); the collector draws one at random.
+export type Seeker<F> = Authored & { find: (f: Features) => F[], methods: (x: F, f: Features) => Array<{ method: string, params: Record<string, unknown>, target: unknown, source: ModuleSource }> }
+export function seeker<F extends { dist: number, near: Xyz }> (name: string, description: string, find: (f: Features) => F[], methods: Record<string, Method<F>>): Seeker<F> {
   const sources = Object.fromEntries(Object.entries(methods).map(([k, m]): [string, ModuleSource] => [k, {
     kind: 'behavior', name, description: `${description}, by ${k}`, channels: ['legs', 'aim', 'hands'], targets: 'block', timeout_s: 20,
     code: 'body' in m
@@ -69,14 +72,14 @@ export function seeker<F extends { dist: number, near: Xyz }> (name: string, des
       : `async (api, t) => {\n  ${APPROACH}\n  return (${m.code})(api, t.target);\n}`
   }]))
   const [first, ...variants] = Object.values(sources)
+  const fitting = (x: F, f: Features) => Object.entries(methods).filter(([, m]) => m.fits?.(x, f) ?? true)
+    .map(([method, m]) => ({ method, params: { method, ...x }, target: { near: !m.stay && x.dist > 1 ? x.near : null, target: m.target(x, f) }, source: sources[method] }))
   return {
     source: first,
     variants,
+    find,
+    methods: fitting,
     fits: f => find(f).length > 0,
-    target: (_bot, f) => {
-      const x = pick(find(f))
-      const [method, m] = pick(Object.entries(methods).filter(([, m]) => m.fits?.(x, f) ?? true))
-      return { params: { method, ...x }, target: { near: !m.stay && x.dist > 1 ? x.near : null, target: m.target(x, f) }, source: sources[method] }
-    }
+    target: (_bot, f) => pick(fitting(pick(find(f)), f))
   }
 }

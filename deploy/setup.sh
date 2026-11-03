@@ -27,6 +27,10 @@ main() {
     exit 1
   fi
 
+  # The world model on Jev's options (src/wm.ts), baked into the image. The VM's service account reads the bucket.
+  # A failed fetch leaves the model off (or the last one fetched), not the deploy.
+  gcloud storage cp -q "gs://jeeve-worlddata/models/${WM_MODEL:-2m-v3}/*" "$DIR/wm/" || echo "world model ${WM_MODEL:-2m-v3} not fetched" >&2
+
   chown -R 1000:1000 "$DIR/modules" # the image's node user writes what the Jeeves learn
   echo '17 4 * * * root find /var/lib/docker/volumes/jeeve_traces/_data -type f -mtime +7 -delete' > /etc/cron.d/jeeve-traces
   cd "$DIR" && docker compose up -d --build

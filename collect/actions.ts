@@ -49,12 +49,11 @@ export function features (bot: Bot, rec: EpisodeRecorder): Features {
   const blocks = [...new Set(bot.findBlocks({ matching: ids, maxDistance: 24, count: 64 }).map(p => bot.blockAt(p)?.name).filter(Boolean) as string[])]
   const me = bot.entity.position
   const mobs = Object.values(bot.entities).filter(e => e !== bot.entity && !IGNORED_TYPES.has(e.type) && e.type !== 'player' && e.position.distanceTo(me) <= 24)
-  const items = bot.inventory.items()
-  const food = bot.food < 20 ? [...new Set(items.filter(i => bot.registry.foodsByName[i.name]).map(i => i.name))] : []
-  const placeable = [...new Set(items.filter(i => bot.registry.blocksByName[i.name]?.boundingBox === 'block').map(i => i.name))]
+  const food = bot.food < 20 ? [...new Set(bot.inventory.items().filter(i => bot.registry.foodsByName[i.name]).map(i => i.name))] : []
   const f = me.floored()
-  return { logs: blocks.filter(b => b.endsWith('_log')), blocks, mobs, food, placeable, ...terrain(rec, [f.x, f.y, f.z]) }
+  return { logs: blocks.filter(b => b.endsWith('_log')), blocks, mobs, food, placeable: placeable(bot), ...terrain(rec, [f.x, f.y, f.z]) }
 }
+export const placeable = (bot: Bot) => [...new Set(bot.inventory.items().filter(i => bot.registry.blocksByName[i.name]?.boundingBox === 'block').map(i => i.name))]
 
 // ---- the terrain queries, on the recorder's view of the chunks (rec.at: a block's class) ----
 // Walks out up to 12 blocks in each of 8 directions from the bot's own ground, reading each column's ground at the
