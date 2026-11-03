@@ -123,6 +123,25 @@ Two bots for 8 episodes, then one bot for 2 (2 × 4 min + 2 min):
 
 The bots are cheap; the servers (terrain generation) are what the VM size depends on. The GCP smoke run measures them on the real machine type, with Chunky.
 
+## The v4 run, against v3 (2026-11-03)
+`gs://jeeve-worlddata/v4`: 60 new seeds, all under `train/` (`COLLECT_HELDOUT=none`: v3's 10 held-out seeds stay the test set), 5.08M steps, 174.6k actions, 3.0 GB. It ran on a c2d-standard-16 with 6 servers × 10 bots, 01:11–07:25 UTC (6.2 h, ~$4.5 at list price). #36 (the sandbox limit, and bridge kept out of water) landed at 02:44, so 12 seeds ran entirely on #34's code and 6 more partly. Rates below are for the 42 seeds that ran wholly on the final code (3.56M steps); the v3 column is all 60 of v3's seeds.
+
+| Action | v3 runs (share) | v4 runs (share) | v3 done / error / none_found | v4, final code |
+|---|---|---|---|---|
+| reach_ledge | 6,905 (4.0%) | 14,721 (8.4%) | 51 / 1 / 0% | 51 / 0 / 0% |
+| climb_down_safely | 3,225 (1.9%) | 6,941 (4.0%) | 45 / 1 / 0% | 47 / 0 / 0% |
+| swim_across | 2,030 (1.2%) | 4,011 (2.3%) | 44 / 15 / 0% | 46 / 0 / 0% |
+| cross_water | 2,152 (1.2%) | 3,892 (2.2%) | 49 / 7 / 9% | 54 / 0 / 0% |
+| jump_gap | 1,307 (0.8%) | 3,049 (1.7%) | 28 / 0 / 0% | 31 / 0 / 0% |
+| bridge | 1,543 (0.9%) | 2,307 (1.3%) | 34 / 0 / 50% | 58 / 0 / 20% |
+
+- **The focus actions ran about 2× as often** (bridge 1.5×: it fits only near water it can span). The other actions each lost ~12% of their share; random input stayed at 15%.
+- **Errors in the focus actions went to 0** on the final code; on #34's code, the sandbox timeouts still made 17% of swims `error`.
+- **bridge `none_found` fell from 50% to 20%**, not to the 12% that round 1 after #36 showed. The rest is still unexplained.
+- **swim_across `timeout` rose to 10%** (v3: 6%): `stuck` throws now return, so swims that would have errored run to the 20 s limit.
+- **Scenes** (episodes): river 948, ravine 943, ledge 674, lava pool 332, cave mouth 305, canopy 294; that's the 3 : 3 : 2 : 1 : 1 : 1 draw. v3 had 564–643 of each. Natural episodes made up 80% in both runs.
+- **Biomes:** the same 49 biomes in both runs; each biome had more focus-action runs than in v3 except cold ocean and ice spikes (both under 35).
+
 ## Worlds (phase 2)
 - **The seed queue runs in rounds** (`deploy/collect/run.sh`): 60 seeds (or `SEEDS`), every sixth held out unless `COLLECT_HELDOUT` names them, kept in `episodes/seeds.txt`. Each round is `SERVERS` seeds (default 8 servers × 8 bots): the Compose file is regenerated with a Paper server and a collector per seed, and the run waits for every collector. A collector stops when its seed has `COLLECT_TARGET_STEPS / seeds` steps (5M / 60 ≈ 83k, ~35 min at 8 bots), so rounds end together and the total is the target.
   - **Switching worlds** restarts the Paper container with the next `SEED` and `LEVEL` (a new world dir in the same volume): no multiworld plugin to keep working on 26.1.2, and every command (`locate`, `fill`, `spreadplayers`) runs in the default world.
