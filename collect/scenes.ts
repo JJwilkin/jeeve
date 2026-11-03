@@ -67,9 +67,12 @@ const SCENES = {
 }
 type Name = keyof typeof SCENES
 
+// River, ravine and ledge are drawn most (v4, 2026-11-02): they hold the crossings and climbs the first Tier 1
+// model was weakest on.
+const SHARE: Record<Name, number> = { river: 3, ravine: 3, ledge: 2, lava_pool: 1, canopy: 1, cave_mouth: 1 }
 export const drawScene = (): Scene => {
-  const names = Object.keys(SCENES) as Name[]
-  const name = names[int(0, names.length - 1)]
+  let x = Math.random() * Object.values(SHARE).reduce((a, b) => a + b)
+  const name = (Object.keys(SHARE) as Name[]).find(n => (x -= SHARE[n]) <= 0) ?? 'river'
   return { name, ...SCENES[name].draw() }
 }
 

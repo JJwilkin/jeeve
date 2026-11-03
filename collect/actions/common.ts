@@ -61,12 +61,14 @@ export const NAVIGATE_BODY = String.raw`
 // feature. A method is another action's body (on HELPERS) or whole code (2B's, which brings its own helpers).
 export type Method<F> = ({ body: string } | { code: string }) & { stay?: true, fits?: (x: F, f: Features) => boolean, target: (x: F, f: Features) => unknown }
 const APPROACH = "if (t.near) try { await api.goto(t.near[0], t.near[1], t.near[2], 0) } catch (e) { if (/^vetoed/.test(String(e && e.message))) throw e; return 'stuck' }"
+// Whole code (2B's) behind the same walk: its target is { near, target }.
+export const approaching = (code: string) => `async (api, t) => {\n  ${APPROACH}\n  return (${code})(api, t.target);\n}`
 export function seeker<F extends { dist: number, near: Xyz }> (name: string, description: string, find: (f: Features) => F[], methods: Record<string, Method<F>>): Authored {
   const sources = Object.fromEntries(Object.entries(methods).map(([k, m]): [string, ModuleSource] => [k, {
     kind: 'behavior', name, description: `${description}, by ${k}`, channels: ['legs', 'aim', 'hands'], targets: 'block', timeout_s: 20,
     code: 'body' in m
       ? `async (api, t) => {${HELPERS}\n  ${APPROACH}\n  return (async (api, t) => {${m.body}\n  })(api, t.target);\n}`
-      : `async (api, t) => {\n  ${APPROACH}\n  return (${m.code})(api, t.target);\n}`
+      : approaching(m.code)
   }]))
   const [first, ...variants] = Object.values(sources)
   return {

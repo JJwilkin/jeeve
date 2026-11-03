@@ -54,11 +54,12 @@ rec.wrapControls()
 
 // ---- the scheduler ----
 // Only the first terminal end of an action's runs counts; stopping the others afterwards is not an outcome.
-let running: { runs: Set<string>, end: (outcome: string) => void } | null = null
+// An error's message goes in the header with it: v3 recorded only "error", so its cause couldn't be found afterwards.
+let running: { runs: Set<string>, end: (outcome: string, error?: string) => void } | null = null
 const channels = new Channels(bot, {
   event: () => {},
   start: slot => running?.runs.add(slot.runId),
-  end: (slot, reason) => { if (running?.runs.has(slot.runId)) running.end(reason) }
+  end: (slot, reason) => { if (running?.runs.has(slot.runId)) running.end(reason, reason === 'error' ? (slot.run.detail?.() as { error?: string })?.error : undefined) }
 })
 const ACTIONS: Action[] = [...SEED_ACTIONS, ...libraryActions(env.COLLECT_LIBRARY ?? 'modules/library.json'), ...HAND_WRITTEN]
 log(`actions: ${ACTIONS.map(a => a.name).join(', ')}`)
@@ -83,10 +84,14 @@ function weight (biome: string, action: string) {
   return w
 }
 
+// v4 (2026-11-02): ×3 for the crossing and height actions the first Tier 1 model was weakest or thinnest on. They
+// only fit near their feature, so this raises how often they run there, not how often they're tried elsewhere.
+const FOCUS: Record<string, number> = { bridge: 3, swim_across: 3, jump_gap: 3, cross_water: 3, climb_down_safely: 3, reach_ledge: 3 }
+
 function choose (biome: string): { name: string, draw: Draw } {
   if (Math.random() < RANDOM_SHARE) return { name: 'random_input', draw: randomInput() }
   const f = features(bot, rec)
-  const fit = ACTIONS.filter(a => a.fits(f)).map(a => ({ a, w: weight(biome, a.name) }))
+  const fit = ACTIONS.filter(a => a.fits(f)).map(a => ({ a, w: weight(biome, a.name) * (FOCUS[a.name] ?? 1) }))
   let x = Math.random() * fit.reduce((s, c) => s + c.w, 0)
   const a = fit.find(c => (x -= c.w) <= 0)?.a ?? fit[0].a
   return { name: a.name, draw: a.draw(bot, f) }
@@ -103,19 +108,19 @@ async function runAction (biome: string, until: number) {
   const i = rec.startAction(name, draw.params)
   const t0 = Date.now()
   const stopNoise = name === 'random_input' ? () => {} : startNoise(bot, rec)
-  const outcome = await new Promise<string>(resolve => {
+  const { outcome, error } = await new Promise<{ outcome: string, error?: string }>(resolve => {
     const timers = [
       setTimeout(() => end('timeout'), draw.limit_s * 1000),
       setTimeout(() => end('episode_end'), until - Date.now())
     ]
-    function end (o: string) { timers.forEach(clearTimeout); running = null; resolve(o) }
+    function end (outcome: string, error?: string) { timers.forEach(clearTimeout); running = null; resolve({ outcome, error }) }
     running = { runs: new Set(), end }
     for (const run of draw.runs) channels.set(`${name}:${run.behavior}`, run.behavior, run.target as any, 'collector', { spec: run.spec })
   })
   stopNoise()
   channels.stop(CHANNELS, 'action_end')
   bot.clearControlStates()
-  rec.endAction(i, outcome, Date.now() - t0)
+  rec.endAction(i, outcome, Date.now() - t0, error?.slice(0, 500))
   const k = `${biome}|${name}|${outcome.split(' ')[0]}`
   counts.set(k, (counts.get(k) ?? 0) + 1)
 }

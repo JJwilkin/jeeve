@@ -13,7 +13,7 @@ const indexOf = (ix: Index, key: string, value: unknown = key) => {
 }
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
-export type ActionEntry = { name: string, params: Record<string, unknown>, start_step: number, end_step?: number, outcome?: string, ms?: number }
+export type ActionEntry = { name: string, params: Record<string, unknown>, start_step: number, end_step?: number, outcome?: string, ms?: number, error?: string }
 
 export class EpisodeRecorder {
   bot: Bot
@@ -21,6 +21,7 @@ export class EpisodeRecorder {
   recording = false
   ticks = 0
   started = 0
+  actionStarted = 0
   steps: Buffer[] = []
   far: Buffer[] = []
   step = new RecordWriter(STEP)
@@ -85,18 +86,19 @@ export class EpisodeRecorder {
 
   startAction (name: string, params: Record<string, unknown>) {
     this.current = this.actions.push({ name, params, start_step: this.steps.length }) - 1
+    this.actionStarted = Date.now()
     return this.current
   }
 
-  endAction (i: number, outcome: string, ms: number) {
-    Object.assign(this.actions[i], { end_step: this.steps.length, outcome, ms })
+  endAction (i: number, outcome: string, ms: number, error?: string) {
+    Object.assign(this.actions[i], { end_step: this.steps.length, outcome, ms, error })
     if (this.current === i) this.current = -1
   }
 
   // Ends the episode: the gzipped file, ready to write.
   finish (header: Record<string, unknown>) {
     this.recording = false
-    if (this.current >= 0) this.endAction(this.current, header.end as string, Date.now() - this.started)
+    if (this.current >= 0) this.endAction(this.current, header.end as string, Date.now() - this.actionStarted)
     const meta = {
       ...header,
       items: this.items.list,
