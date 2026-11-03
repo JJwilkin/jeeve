@@ -323,7 +323,7 @@ export function jevOptions (bot: Bot, model: OutcomeModel, host: ApiHost, handle
     viewer ??= liveViewer(bot) // the registry exists only once the bot has logged in
     const view = viewer.view()
     const feet = bot.entity.position.floored()
-    const f: Features = { ...terrain(viewer.rec, [feet.x, feet.y, feet.z]), placeable: placeable(bot), logs: [], blocks: [], mobs: [], food: [] }
+    const f: Features = { ...terrain(viewer.rec, [feet.x, feet.y, feet.z]), placeable: placeable(bot), inWater: !!(bot.entity as any).isInWater, logs: [], blocks: [], mobs: [], food: [] }
     const asked: Asked[] = Object.entries(options).flatMap(([q, opts]) => [
       ...Object.entries(opts).flatMap(([key, o]) => { const a = asAction(o, bot, handles); return a ? [{ q, key, ...a }] : [] }),
       ...(sameSet(claims[q], WHOLE_BODY) ? crossingsFor(q, f, host) : [])

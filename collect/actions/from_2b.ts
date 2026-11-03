@@ -8,7 +8,7 @@ import { source as swimAcrossAsWritten } from './swim_across.ts'
 // 2B's actions (written by collect/author.ts; pass rates in each file's header), with targets in the shapes their
 // trials used. bridge goes straight along x or z, 1–8 blocks; swim_across aims at the far bank's ground block.
 const straight = (d: Dir) => d[0] === 0 || d[1] === 0
-export const bridgeable = (x: { dir: Dir, width: number }) => straight(x.dir) && x.width <= 8
+export const bridgeable = (x: { dir: Dir, width: number }, f: Features) => straight(x.dir) && x.width <= 8 && !f.inWater
 export const bridgeTarget = (x: { dir: Dir, width: number }, f: Features) => ({ name: pick(f.placeable), count: x.width, dir: x.dir })
 export const swimTarget = (w: Water) => ({ at: [w.far[0], w.far[1] - 1, w.far[2]] })
 
@@ -21,8 +21,9 @@ export const swimAcross: ModuleSource = {
 
 // bridge only finds the edge along level ground at the bot's own height, so from where it stood it ended none_found
 // for half of v3's bridges, mostly water up to 12 blocks out over uneven ground. It now starts at the block before
-// water (near), as in its trials; gaps are on level ground within 3 already.
-const spans = (f: Features) => [...f.gaps, ...f.waters].filter(bridgeable)
+// water (near), as in its trials; gaps are on level ground within 3 already. It doesn't fit in water: from there it
+// finds no bank edge, which was 104 of the first v4 round's 143 none_found.
+const spans = (f: Features) => [...f.gaps, ...f.waters].filter(x => bridgeable(x, f))
 export const BRIDGE: Authored = {
   source: { ...bridge, code: approaching(bridge.code) },
   fits: f => f.placeable.length > 0 && spans(f).length > 0,

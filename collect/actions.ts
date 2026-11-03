@@ -33,7 +33,7 @@ export type Ledge = { dir: Dir, dist: number, height: number, near: Xyz, top: Xy
 export type Gap = { dir: Dir, dist: number, width: number, depth: number } // 1–3 wide and 2+ deep (16: 16 or more), level ground before it
 export type Water = { dir: Dir, dist: number, width: number, near: Xyz, far: Xyz } // water with land on both sides
 export type Terrain = { edges: Edge[], drops: Drop[], ledges: Ledge[], gaps: Gap[], waters: Water[] }
-export type Features = Terrain & { logs: string[], blocks: string[], mobs: Entity[], food: string[], placeable: string[] }
+export type Features = Terrain & { logs: string[], blocks: string[], mobs: Entity[], food: string[], placeable: string[], inWater: boolean }
 export type Run = { behavior: string, target: unknown, spec?: Spec }
 export type Draw = { params: Record<string, unknown>, runs: Run[], limit_s: number }
 export type Action = { name: string, fits: (f: Features) => boolean, draw: (bot: Bot, f: Features) => Draw }
@@ -51,7 +51,7 @@ export function features (bot: Bot, rec: EpisodeRecorder): Features {
   const mobs = Object.values(bot.entities).filter(e => e !== bot.entity && !IGNORED_TYPES.has(e.type) && e.type !== 'player' && e.position.distanceTo(me) <= 24)
   const food = bot.food < 20 ? [...new Set(bot.inventory.items().filter(i => bot.registry.foodsByName[i.name]).map(i => i.name))] : []
   const f = me.floored()
-  return { logs: blocks.filter(b => b.endsWith('_log')), blocks, mobs, food, placeable: placeable(bot), ...terrain(rec, [f.x, f.y, f.z]) }
+  return { logs: blocks.filter(b => b.endsWith('_log')), blocks, mobs, food, placeable: placeable(bot), inWater: !!(bot.entity as any).isInWater, ...terrain(rec, [f.x, f.y, f.z]) }
 }
 export const placeable = (bot: Bot) => [...new Set(bot.inventory.items().filter(i => bot.registry.blocksByName[i.name]?.boundingBox === 'block').map(i => i.name))]
 

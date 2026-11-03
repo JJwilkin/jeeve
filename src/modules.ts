@@ -29,7 +29,9 @@ export type Trial = { states: number, trues: number, errors: number, maxMs: numb
 export type BehaviorTrial = { target: unknown, end: string, ms: number, error?: string }
 
 export const MODULE_LIMITS = {
-  timeoutMs: 20, // hard stop for one call (the vm interrupts it)
+  // Hard stop for one call (the vm interrupts it). Wall clock, so a busy CPU trips it: the collector raises it
+  // (collect/compose.ts), where it ended 5–18% of v4's first-round authored runs as error.
+  timeoutMs: Number(process.env.JEEVE_SANDBOX_MS ?? 20),
   budgetMs: 2, // a trial fails if any call takes longer
   maxErrors: 3, // a live module is disabled after this many failed calls (behaviors: failed runs in a row)
   codeChars: 4000,
@@ -236,7 +238,7 @@ function behaviorRealm (code: string, reads: string[], actions: string[], bridge
   const head = `'use strict';${PRELUDE}\n${realmPrelude(reads, actions)}\n`
   new vm.Script(`${head}globalThis.__fn = (${code});\nif (typeof __fn !== 'function') throw new TypeError('code must be a function expression');`,
     { filename: 'behavior', lineOffset: -head.split('\n').length + 1 })
-    .runInContext(ctx, { timeout: 50 })
+    .runInContext(ctx, { timeout: Math.max(50, MODULE_LIMITS.timeoutMs) })
   return ctx
 }
 

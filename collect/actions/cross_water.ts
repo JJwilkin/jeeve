@@ -11,6 +11,6 @@ import { JUMP_GAP_BODY } from './jump_gap.ts'
 export const CROSS_WATER = seeker<Water>('cross_water', 'get across water to the far bank', f => f.waters, {
   jump_gap: { body: JUMP_GAP_BODY, stay: true, fits: w => w.dist <= 3 && w.width <= 3 && w.far[1] - w.near[1] <= 1, target: w => ({ dir: w.dir, dist: w.dist, width: w.width }) },
   navigate: { body: NAVIGATE_BODY, target: w => ({ to: w.far }) },
-  bridge: { code: bridge.code, fits: (w, f) => bridgeable(w) && f.placeable.length > 0, target: bridgeTarget },
+  bridge: { code: bridge.code, fits: (w, f) => bridgeable(w, f) && f.placeable.length > 0, target: bridgeTarget },
   swim_across: { code: swimAcross.code, stay: true, target: swimTarget }
 })
